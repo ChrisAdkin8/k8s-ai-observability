@@ -51,12 +51,25 @@ FAKE_GPU_CHART="fake-gpu-operator/fake-gpu-operator"
 FAKE_GPU_CHART_VERSION="0.0.59"       # verified 2026-07
 
 # ---- LLM simulation ----------------------------------------------------------
-# The simulator mirrors this vLLM release's metric surface: names, types and
+# The simulator mirrors this vLLM engine's metric surface: names, types and
 # histogram bucket boundaries. Bucket placement determines histogram_quantile()
 # accuracy, so a dashboard tuned against the wrong version does not transfer.
-# Re-check TTFT_BUCKETS/TPOT_BUCKETS/E2E_BUCKETS in scripts/llm-sim.py if you
-# bump this.
-LLM_VLLM_VERSION="v0.6.x"
+#
+# NAMES: V1. Two series were renamed when the V1 engine landed, and this repo
+# emitted the superseded v0 spellings for its first two releases — nothing
+# failed, they simply stopped matching a real deployment, which is the one thing
+# this simulator exists to get right:
+#     vllm:gpu_cache_usage_perc          -> vllm:kv_cache_usage_perc
+#     vllm:time_per_output_token_seconds -> vllm:inter_token_latency_seconds
+# METRIC_SURFACES in scripts/llm-sim.py is the single place that mapping lives;
+# `--vllm-surface both` emits the v0 aliases too, for upgrade testing.
+#
+# ⚠️ BUCKETS: NOT re-verified against V1. TTFT_BUCKETS/TPOT_BUCKETS/E2E_BUCKETS
+# in scripts/llm-sim.py were transcribed from v0.6.x and are still on those
+# values. If V1 moved any boundary, percentile panels will read plausibly and
+# transfer WRONG — the failure mode bucket drift always has. Re-check them
+# against a live V1 /metrics dump before trusting a p95 built here.
+LLM_VLLM_VERSION="v1"
 
 # model_name is an IDENTITY, not a label: the recording rules aggregate
 # by (model_name) and verify.sh asserts the steady tenant by name. These MUST

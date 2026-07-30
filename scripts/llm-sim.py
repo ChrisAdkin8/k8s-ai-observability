@@ -18,6 +18,10 @@ Run it locally, no cluster needed:
     python3 scripts/llm-sim.py                     # serve on :9401
                                                    # (--port, or LLM_SIM_LISTEN_PORT)
 
+    python3 scripts/llm-sim.py --vllm-surface both # v1 + the superseded v0 names,
+                                                   # to see which panels an engine
+                                                   # upgrade would break
+
 In the cluster it is mounted from a ConfigMap; see manifests/llm/.
 
 HOW IT WORKS
@@ -73,6 +77,48 @@ TPOT_BUCKETS = [0.01, 0.025, 0.05, 0.075, 0.1, 0.15, 0.2, 0.3,
                 0.4, 0.5, 0.75, 1.0, 2.5]
 E2E_BUCKETS = [1.0, 2.5, 5.0, 10.0, 15.0, 20.0, 30.0, 40.0, 50.0, 60.0,
                90.0, 120.0, 180.0]
+
+# --------------------------------------------------------------------------
+# vLLM metric SURFACE.
+#
+# The V1 engine renamed two of the series this file emits. Everything else in
+# the surface below — TTFT, e2e, the token counters, request_success, the
+# running/waiting gauges — kept its v0 name and needs no mapping.
+#
+#   vllm:gpu_cache_usage_perc      -> vllm:kv_cache_usage_perc
+#       V1 dropped CPU KV-cache offload, so the "gpu_" prefix no longer
+#       distinguished anything. Confirmed against the current metrics docs and
+#       the V1 metrics design page.
+#
+#   vllm:time_per_output_token_seconds -> vllm:inter_token_latency_seconds
+#       Same measurement, and what this simulator models: seconds between
+#       successive output tokens, observed once per request weighted by token
+#       count. ⚠️ Current vLLM ALSO exposes a separate, differently-shaped
+#       vllm:request_time_per_output_token_seconds (per-request mean rather than
+#       per-token). This maps to inter_token_latency_seconds because that is the
+#       series with the same meaning; if you need the other one, it is not the
+#       same number and should not be aliased onto this histogram.
+#
+# `both` exists for the case this repo is actually good at: pointing a dashboard
+# at one endpoint and seeing which panels survive an engine upgrade. Real vLLM
+# emits ONE surface — `both` is a rig affordance, not a fidelity claim.
+V0, V1, BOTH = "v0", "v1", "both"
+METRIC_SURFACES = {
+    #  logical name       v0                                   v1
+    "kv_cache_usage": ("vllm:gpu_cache_usage_perc", "vllm:kv_cache_usage_perc"),
+    "inter_token":    ("vllm:time_per_output_token_seconds", "vllm:inter_token_latency_seconds"),
+}
+
+
+def surface_names(key, surface):
+    """Every name `key` is emitted under, for the chosen surface."""
+    v0, v1 = METRIC_SURFACES[key]
+    if surface == V0:
+        return [v0]
+    if surface == V1:
+        return [v1]
+    return [v1, v0]          # v1 first: it is what a current deployment emits
+
 
 # Memory safety. The profile is operator-editable, so the ceiling cannot depend
 # on it alone: a hand-edited max_concurrency must not be able to exhaust memory.
@@ -254,10 +300,11 @@ class Simulator:
     module docstring and `--selftest`.
     """
 
-    def __init__(self, profile, start_time, binding_device_id=None):
+    def __init__(self, profile, start_time, binding_device_id=None, surface=V1):
         self.profile = profile
         self.now = start_time
         self.binding_device_id = binding_device_id
+        self.surface = surface
         seed = profile.get("seed")
         self.rng = random.Random(seed) if seed is not None else random.Random()
 
@@ -428,8 +475,9 @@ class Simulator:
               "Number of requests currently running on GPU.")
         gauge("vllm:num_requests_waiting", len(self.queue),
               "Number of requests waiting to be processed.")
-        gauge("vllm:gpu_cache_usage_perc", self.kv_cache_usage(),
-              "GPU KV-cache usage. 1 means 100 percent usage.")
+        for name in surface_names("kv_cache_usage", self.surface):
+            gauge(name, self.kv_cache_usage(),
+                  "GPU KV-cache usage. 1 means 100 percent usage.")
 
         counter("vllm:prompt_tokens_total", self.prompt_tokens_total,
                 "Number of prefill tokens processed.")
@@ -446,8 +494,9 @@ class Simulator:
 
         out += self.h_ttft.render("vllm:time_to_first_token_seconds", model,
                                   "Histogram of time to first token in seconds.")
-        out += self.h_tpot.render("vllm:time_per_output_token_seconds", model,
-                                  "Histogram of time per output token in seconds.")
+        for name in surface_names("inter_token", self.surface):
+            out += self.h_tpot.render(name, model,
+                                      "Histogram of inter-token latency in seconds.")
         out += self.h_e2e.render("vllm:e2e_request_latency_seconds", model,
                                  "Histogram of end to end request latency in seconds.")
 
@@ -678,6 +727,43 @@ def selftest():
     leaked = [ln for ln in lines if ln.startswith("vllm:") and 'source="' in ln]
     check(not leaked, "no source label on any vllm:* series")
 
+    # --- metric surface -------------------------------------------------
+    # The default must be the CURRENT engine's names. This repo's whole claim is
+    # that what you build here transfers, and it stopped being true silently once
+    # V1 renamed these two — nothing failed, the names just quietly stopped
+    # matching a real deployment. That is exactly the class of regression a
+    # selftest has to hold, so assert the emitted names rather than trusting the
+    # mapping table to be read.
+    v0_kv, v1_kv = METRIC_SURFACES["kv_cache_usage"]
+    v0_itl, v1_itl = METRIC_SURFACES["inter_token"]
+
+    def emits(text, name):
+        return any(ln.split("{")[0].split(" ")[0] == name or
+                   ln.split("{")[0].startswith(name + "_")
+                   for ln in text.splitlines() if ln and not ln.startswith("#"))
+
+    check(emits(text, v1_kv) and emits(text, v1_itl),
+          "default surface emits the v1 names")
+    check(not emits(text, v0_kv) and not emits(text, v0_itl),
+          "default surface does NOT emit the superseded v0 names")
+
+    both = Simulator(validate_profile(dict(DEFAULT_PROFILE, seed=1)), 0.0, surface=BOTH)
+    both.advance_to(120.0)
+    bt = both.render()
+    check(all(emits(bt, n) for n in (v0_kv, v1_kv, v0_itl, v1_itl)),
+          "surface 'both' emits the v1 and v0 names together")
+
+    old = Simulator(validate_profile(dict(DEFAULT_PROFILE, seed=1)), 0.0, surface=V0)
+    old.advance_to(120.0)
+    ot = old.render()
+    check(emits(ot, v0_kv) and not emits(ot, v1_kv),
+          "surface 'v0' emits only the legacy names")
+
+    # Duplicated families under 'both' must still each carry exactly one TYPE,
+    # or Prometheus rejects the whole scrape.
+    btypes = [ln.split()[2] for ln in bt.splitlines() if ln.startswith("# TYPE ")]
+    check(len(btypes) == len(set(btypes)), "surface 'both' keeps one # TYPE per family")
+
     # Every sample line must parse as `name{labels} value`.
     parse_ok = all(len(ln.rsplit(" ", 1)) == 2 and ln.rsplit(" ", 1)[1] not in ("",)
                    for ln in lines)
@@ -715,6 +801,11 @@ def main(argv=None):
                     help="path to profile.json (polled for changes)")
     ap.add_argument("--port", type=int, default=default_port())
     ap.add_argument("--poll-seconds", type=float, default=10.0)
+    ap.add_argument("--vllm-surface", choices=(V1, V0, BOTH),
+                    default=os.environ.get("LLM_SIM_VLLM_SURFACE", V1),
+                    help="which vLLM metric names to emit (default: v1, what a "
+                         "current engine exposes). 'both' emits the v0 aliases "
+                         "alongside, for testing a dashboard across an upgrade.")
     ap.add_argument("--selftest", action="store_true",
                     help="validate exposition output and exit (no cluster needed)")
     ap.add_argument("--print", dest="print_once", action="store_true",
@@ -735,12 +826,16 @@ def main(argv=None):
         profile = validate_profile({})
 
     binding = detect_binding()
-    sim = Simulator(profile, start_time=time.monotonic(), binding_device_id=binding)
+    sim = Simulator(profile, start_time=time.monotonic(), binding_device_id=binding,
+                    surface=args.vllm_surface)
 
     print(f"llm-sim: model_name={profile['model_name']} "
           f"arrival={profile['arrival_rate_rps']}rps "
           f"capacity={capacity_rps(profile):.2f}rps "
           f"max_in_flight={profile['max_in_flight']}", flush=True)
+    print(f"llm-sim: vllm metric surface={args.vllm_surface} "
+          f"(kv cache: {', '.join(surface_names('kv_cache_usage', args.vllm_surface))})",
+          flush=True)
     if binding:
         print(f"llm-sim: bound to simulated GPU {binding}", flush=True)
     else:

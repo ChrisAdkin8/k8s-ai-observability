@@ -44,10 +44,17 @@ spec:
               (rate(vllm:time_to_first_token_seconds_bucket[5m])))
           labels: { source: simulated }
 
+        # Renamed in the V1 engine: vllm:time_per_output_token_seconds became
+        # vllm:inter_token_latency_seconds. The RULE name is unchanged — `tpot`
+        # is what everyone calls the measurement, and renaming the recorded
+        # series would break every dashboard and alert built on it for no gain.
+        # ⚠️ Do not point this at vllm:request_time_per_output_token_seconds,
+        # which current vLLM also exposes: that is a per-request mean, not a
+        # per-token histogram, and the quantile means something different.
         - record: llm:tpot:p95_5m
           expr: >-
             histogram_quantile(0.95, sum by (model_name, le)
-              (rate(vllm:time_per_output_token_seconds_bucket[5m])))
+              (rate(vllm:inter_token_latency_seconds_bucket[5m])))
           labels: { source: simulated }
 
         - record: llm:tokens:generation_rate5m
@@ -110,8 +117,13 @@ spec:
         # NOT exercised by default — the shipped profiles keep KV cache well
         # under 90%. To test it, lower kv_cache_tokens_capacity in a profile:
         #   kubectl -n llm-sim edit configmap llm-profile-steady
+        #
+        # Renamed in the V1 engine: vllm:gpu_cache_usage_perc became
+        # vllm:kv_cache_usage_perc, because V1 dropped CPU KV-cache offload and
+        # the "gpu_" prefix stopped distinguishing anything. Still a FRACTION
+        # (0-1), so `> 0.9` is correct and `> 90` can never fire.
         - alert: LLMKVCacheSaturated
-          expr: vllm:gpu_cache_usage_perc > 0.9
+          expr: vllm:kv_cache_usage_perc > 0.9
           for: 5m
           labels:
             severity: warning

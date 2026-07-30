@@ -62,13 +62,43 @@ Prometheus sees.
 |---|---|---|
 | `vllm:num_requests_running` | gauge | Requests currently being served |
 | `vllm:num_requests_waiting` | gauge | Requests queued — **this is the one to watch** |
-| `vllm:gpu_cache_usage_perc` | gauge | KV-cache utilisation, 0–1 |
+| `vllm:kv_cache_usage_perc` | gauge | KV-cache utilisation, 0–1 |
 | `vllm:prompt_tokens_total` | counter | Prefill tokens |
 | `vllm:generation_tokens_total` | counter | Decode tokens |
 | `vllm:time_to_first_token_seconds` | histogram | TTFT |
-| `vllm:time_per_output_token_seconds` | histogram | Inter-token latency |
+| `vllm:inter_token_latency_seconds` | histogram | Inter-token latency |
 | `vllm:e2e_request_latency_seconds` | histogram | Whole-request latency |
 | `vllm:request_success_total` | counter | Completions, by `finished_reason` |
+
+### Which engine's names
+
+The table above is the **V1** surface. Two of those series were spelled differently
+before V1, and this repo emitted the old spellings up to and including `0.2.0`:
+
+| v0 | V1 | Why it moved |
+|--|--|--|
+| `vllm:gpu_cache_usage_perc` | `vllm:kv_cache_usage_perc` | V1 dropped CPU KV-cache offload, so `gpu_` no longer distinguished anything |
+| `vllm:time_per_output_token_seconds` | `vllm:inter_token_latency_seconds` | Same measurement, clearer name |
+
+Nothing broke when they moved — that is the problem. A renamed metric fails
+*silently*: panels go blank and alerts stop firing against a real deployment while
+every test here stays green. So the simulator can emit either, or both:
+
+```sh
+python3 scripts/llm-sim.py --vllm-surface v1     # default — what a current engine emits
+python3 scripts/llm-sim.py --vllm-surface v0     # the superseded spellings
+python3 scripts/llm-sim.py --vllm-surface both   # both at once
+```
+
+`both` is what makes this rig useful for an **upgrade rehearsal**: point your existing
+dashboard at it and every panel still bound to a v0 name is the set of panels your
+engine upgrade will break. Real vLLM only ever emits one surface — `both` is a rig
+affordance, not a fidelity claim. Set it per pod with `LLM_SIM_VLLM_SURFACE`.
+
+> ⚠️ **The histogram bucket boundaries have not been re-verified against V1.** They
+> were transcribed from v0.6.x and are unchanged. If V1 moved a boundary, percentile
+> panels built here will read plausibly and transfer wrong — see
+> [versions.md](versions.md).
 
 > **No `source` label on `vllm:*` series.** The GPU side tags its synthesised metrics
 > `source="derived"`, but doing that here would break the transfer property: real vLLM emits

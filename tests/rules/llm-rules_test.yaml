@@ -124,13 +124,13 @@ tests:
     name: TPOT p95 interpolates across the wide 25-50ms bucket, as documented
     input_series:
       # Modelled ITL under a full batch is ~0.0225s — inside (0.01, 0.025].
-      - series: 'vllm:time_per_output_token_seconds_bucket{model_name="sim-llama-3-8b-steady", le="0.01"}'
+      - series: 'vllm:inter_token_latency_seconds_bucket{model_name="sim-llama-3-8b-steady", le="0.01"}'
         values: '0x40'
-      - series: 'vllm:time_per_output_token_seconds_bucket{model_name="sim-llama-3-8b-steady", le="0.025"}'
+      - series: 'vllm:inter_token_latency_seconds_bucket{model_name="sim-llama-3-8b-steady", le="0.025"}'
         values: '0+10x40'
-      - series: 'vllm:time_per_output_token_seconds_bucket{model_name="sim-llama-3-8b-steady", le="0.05"}'
+      - series: 'vllm:inter_token_latency_seconds_bucket{model_name="sim-llama-3-8b-steady", le="0.05"}'
         values: '0+10x40'
-      - series: 'vllm:time_per_output_token_seconds_bucket{model_name="sim-llama-3-8b-steady", le="+Inf"}'
+      - series: 'vllm:inter_token_latency_seconds_bucket{model_name="sim-llama-3-8b-steady", le="+Inf"}'
         values: '0+10x40'
 
     promql_expr_test:
@@ -160,14 +160,14 @@ tests:
       - series: 'vllm:num_requests_waiting{model_name="sim-llama-3-8b-edge"}'
         values: '50x40'
 
-      # gpu_cache_usage_perc is a FRACTION (0-1), not a percentage, which is what
+      # kv_cache_usage_perc is a FRACTION (0-1), not a percentage, which is what
       # makes `> 0.9` correct and `> 90` a rule that can never fire. 0.95 fires,
       # 0.9 does not, and the shipped profiles sit down at 0.4.
-      - series: 'vllm:gpu_cache_usage_perc{model_name="sim-llama-3-8b-saturated"}'
+      - series: 'vllm:kv_cache_usage_perc{model_name="sim-llama-3-8b-saturated"}'
         values: '0.95x40'
-      - series: 'vllm:gpu_cache_usage_perc{model_name="sim-llama-3-8b-edge"}'
+      - series: 'vllm:kv_cache_usage_perc{model_name="sim-llama-3-8b-edge"}'
         values: '0.9x40'
-      - series: 'vllm:gpu_cache_usage_perc{model_name="sim-llama-3-8b-steady"}'
+      - series: 'vllm:kv_cache_usage_perc{model_name="sim-llama-3-8b-steady"}'
         values: '0.4x40'
 
     alert_rule_test:

@@ -23,7 +23,48 @@ Comparison links are at the foot of this file, one per released version.
 
 ## [Unreleased]
 
+### Fixed
+
+- ⚠️ **The simulated vLLM metric surface was two releases out of date, and failing
+  silently.** `0.1.0` and `0.2.0` emitted the pre-V1 spellings of two series. Nothing
+  broke, which is the whole problem: a renamed metric does not error, it just stops
+  matching, so every test here stayed green while the repo's central claim — that what
+  you build against the simulator transfers unchanged to a real vLLM deployment — had
+  quietly stopped being true for these two.
+
+  | Was | Now | Why upstream moved it |
+  |--|--|--|
+  | `vllm:gpu_cache_usage_perc` | `vllm:kv_cache_usage_perc` | V1 dropped CPU KV-cache offload, so `gpu_` distinguished nothing |
+  | `vllm:time_per_output_token_seconds` | `vllm:inter_token_latency_seconds` | same measurement, clearer name |
+
+  Every other series this rig emits — TTFT, e2e latency, the token counters,
+  `request_success_total`, the running/waiting gauges — kept its name and is unchanged.
+
+  Updated together, so none of them can disagree: the simulator, the
+  `LLMKVCacheSaturated` alert, the `llm:tpot:p95_5m` recording rule, the LLM dashboard,
+  the promtool tests and the docs. **The recorded rule names are deliberately NOT
+  renamed** — `llm:tpot:p95_5m` stays, because `tpot` is what the measurement is called
+  and renaming it would break every dashboard built on it for no gain.
+
+  ⚠️ **Upgrading an existing install:** re-run `./scripts/install.sh <target>`. Any
+  dashboard or alert of your own that references the two old names needs the same edit —
+  `--vllm-surface both` below is the quickest way to find them.
+
+  ⚠️ **The histogram bucket boundaries were NOT re-verified against V1** and remain as
+  transcribed from v0.6.x. That is the more dangerous half and is stated plainly in
+  [docs/versions.md](docs/versions.md): a wrong metric name fails loudly, a wrong bucket
+  boundary returns a confident, plausible, wrong percentile.
+
 ### Added
+
+- **`--vllm-surface v1|v0|both`** on `scripts/llm-sim.py` (or `LLM_SIM_VLLM_SURFACE`),
+  defaulting to `v1`. `both` emits the superseded v0 names alongside the current ones,
+  which turns the rename above into something useful: point an existing dashboard at a
+  `both` simulator and every panel still bound to a v0 name is precisely the set your
+  engine upgrade will break. `METRIC_SURFACES` in that file is the single place the
+  mapping lives, and `--selftest` now asserts the default emits v1 and *not* v0.
+  Real vLLM only ever emits one surface — `both` is a rig affordance, not a fidelity
+  claim.
 
 - **A social preview card** — `docs/social-preview.png`, the 1280×640 image GitHub
   renders in place of a bare link wherever this repo is shared. The setting lives only in
