@@ -31,14 +31,39 @@ Comparison links are at the foot of this file, one per released version.
   history and a way back: the card is the top row of the LLM board — both tenants either
   side of the 2s threshold — over the repo name, the compose one-liner and the CI claim.
 
-  `docs/social-preview.py` regenerates it (needs `pillow`, nothing else). ⚠️ It crops
-  `docs/llm-dashboard.png` by **hardcoded pixel coordinates**, so retaking that
-  screenshot at a different window size moves the crop and the box in the script has to
-  be re-derived. Nothing checks this — the card is not on any install or CI path.
+  `docs/social-preview.py` regenerates it (needs `pillow`, nothing else). It crops
+  `docs/llm-dashboard.png` by **fraction rather than by pixel**, because the invariant
+  that actually holds is "the top row occupies this proportion of the board" — Grafana
+  lays panels out on a 24-column grid, so that survives both a differently-sized window
+  and a later resize of the file. It warns if the crop lands under 1280px, the width
+  below which it would be upscaling.
 
   Uploading it is manual, and re-uploading is the only way to change what GitHub serves:
   **Settings → General → Social preview → Edit → Upload an image**. Confirm with
   `gh api repos/ChrisAdkin8/k8s-ai-observability --jq .uses_custom_open_graph_image`.
+
+- `docs/optimize-images.py` — resizes and palette-quantises the dashboard screenshots to
+  the settings below. Idempotent: a file already at the target width and depth is skipped,
+  so it is safe to re-run and safe to wire into a pre-commit hook.
+
+### Changed
+
+- **The dashboard screenshots are optimised** — 1.1 MB down to 414 KB, a 62% cut in what
+  the README costs a first-time visitor before they have read a word. They were 3456px
+  wide against GitHub's ~896px content column, so three quarters of every byte was
+  reaching no display at any pixel ratio.
+
+  Visually lossless rather than merely acceptable: these are flat UI screenshots with
+  ~2700 distinct colours, so a 256-entry palette reproduces them at a measured mean
+  channel error of 0.19/255, and dithering changes nothing because there is almost no
+  gradient to dither. Re-check that if a board ever gains a heat-map or a photographic
+  panel.
+
+  **2400px, not the 1792px the README alone would want**, because `social-preview.py`
+  crops 78% of `llm-dashboard.png` and renders it 1280px wide: at a 1792px source that
+  crop is a 1.09x downscale and the card's text visibly softens. 2400px keeps it a 1.45x
+  supersample. The alternative was a second full-resolution copy of the same screenshot,
+  which is the kind of duplicate this repo avoids everywhere else.
 
 ## [0.2.0] — 2026-07-31
 

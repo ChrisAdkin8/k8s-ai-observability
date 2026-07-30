@@ -16,12 +16,27 @@ RULE = (38, 42, 51)
 
 # --- the panel band ------------------------------------------------------
 # Crop the whole top row of the board: "Time to first token - p95 (alert fires
-# above 2s)" and "Inter-token latency - p95". Coords are in the ORIGINAL 3456x1988
-# screenshot. Both panels complete, no awkward cuts.
-CROP = (631, 230, 631 + 2682, 230 + 649)   # 2682x649, ~4.13:1
-BAND_H = round(1280 / (2682 / 649))         # 310
+# above 2s)" and "Inter-token latency - p95". Both panels complete, no awkward cuts.
+#
+# Expressed as FRACTIONS of the source, not pixels. The invariant that actually
+# holds is "the top row occupies this proportion of the board" — Grafana lays the
+# panels out on a 24-column grid, so that stays true whatever size the window was
+# when the screenshot was taken, and whatever the file is later resized to. Pixel
+# coordinates held neither: the first optimisation pass over docs/*.png would have
+# silently moved the crop.
+FRAC = (0.1826, 0.1157, 0.9586, 0.4422)     # x0, y0, x1, y1
 
-panel = Image.open(SRC).convert("RGB").crop(CROP).resize((W, BAND_H), Image.LANCZOS)
+src = Image.open(SRC).convert("RGB")
+sw, sh = src.size
+box = (round(FRAC[0] * sw), round(FRAC[1] * sh), round(FRAC[2] * sw), round(FRAC[3] * sh))
+BAND_H = round(W / ((box[2] - box[0]) / (box[3] - box[1])))   # 310 at any source size
+
+if box[2] - box[0] < W:
+    print(f"WARN: crop is {box[2]-box[0]}px wide, upscaling to {W} — card text will be "
+          f"soft. Regenerate from a source at least {round(W / (FRAC[2]-FRAC[0]))}px wide.",
+          file=sys.stderr)
+
+panel = src.crop(box).resize((W, BAND_H), Image.LANCZOS)
 
 card = Image.new("RGB", (W, H), BG)
 card.paste(panel, (0, 0))
