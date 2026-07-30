@@ -12,12 +12,26 @@ Notable changes to this repo, newest first. The format follows
 | **MINOR** | nothing | a new dashboard, alert, load profile, target or check |
 | **PATCH** | nothing | fixes, docs, and pinned-version bumps that change none of the above |
 
+While the version is `0.x` a breaking change bumps the **MINOR**, per semver's
+initial-development rule — the table above applies as written from `1.0.0`. Either way
+the migration steps are in the entry.
+
 Pinned upstream versions live in [docs/versions.md](docs/versions.md); a bump there is
 worth an entry below whenever it changes behaviour rather than just a number.
 
 Comparison links are at the foot of this file, one per released version.
 
 ## [Unreleased]
+
+_Nothing yet._
+
+## [0.2.0] — 2026-07-31
+
+Two things this rig could not do before: show you the boards without a cluster, and hand
+you a dashboard you could import anywhere.
+
+⚠️ **Upgrading from 0.1.0 requires one manual step** — see the ConfigMap rename under
+Changed.
 
 ### Added
 
@@ -118,5 +132,6 @@ Initial public release. Build and test GPU and LLM observability without a GPU.
   a GPU, running the advertised `task local:up` end to end including every acceptance
   check, with a diagnostics bundle on failure and weekly upstream-drift detection.
 
-[Unreleased]: https://github.com/ChrisAdkin8/k8s-ai-observability/compare/v0.1.0...HEAD
+[Unreleased]: https://github.com/ChrisAdkin8/k8s-ai-observability/compare/v0.2.0...HEAD
+[0.2.0]: https://github.com/ChrisAdkin8/k8s-ai-observability/compare/v0.1.0...v0.2.0
 [0.1.0]: https://github.com/ChrisAdkin8/k8s-ai-observability/releases/tag/v0.1.0
