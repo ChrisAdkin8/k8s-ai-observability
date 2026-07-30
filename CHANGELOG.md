@@ -58,6 +58,15 @@ Comparison links are at the foot of this file, one per released version.
 - Dashboards now carry `app.kubernetes.io/part-of=gpu-sim-dashboards`, and `teardown.sh`
   removes them by it.
 
+- The README now opens with the compose path, since it is the fastest way to see the
+  boards; `task local:up` follows as the way to exercise Kubernetes itself.
+
+- The compose stack's ports are overridable — `PROMETHEUS_PORT` and `GRAFANA_PORT`, the
+  same names `scripts/config.sh` already uses. Not cosmetic: `scripts/prometheus.sh` and
+  `scripts/grafana.sh` hold port-forwards on 9090 and 3000, and a loopback-bound
+  port-forward wins over the container's wildcard binding. Run both at once and you get
+  the *other* Prometheus at the same URL, with nothing reporting an error.
+
 ### Fixed
 
 - `teardown.sh` left the dashboard ConfigMaps behind. They were never applied from a file,
