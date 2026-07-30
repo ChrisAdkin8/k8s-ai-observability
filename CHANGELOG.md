@@ -23,7 +23,22 @@ Comparison links are at the foot of this file, one per released version.
 
 ## [Unreleased]
 
-_Nothing yet._
+### Added
+
+- **A social preview card** — `docs/social-preview.png`, the 1280×640 image GitHub
+  renders in place of a bare link wherever this repo is shared. The setting lives only in
+  GitHub's web UI and is exposed by no API, so the artefact is kept here to give it a
+  history and a way back: the card is the top row of the LLM board — both tenants either
+  side of the 2s threshold — over the repo name, the compose one-liner and the CI claim.
+
+  `docs/social-preview.py` regenerates it (needs `pillow`, nothing else). ⚠️ It crops
+  `docs/llm-dashboard.png` by **hardcoded pixel coordinates**, so retaking that
+  screenshot at a different window size moves the crop and the box in the script has to
+  be re-derived. Nothing checks this — the card is not on any install or CI path.
+
+  Uploading it is manual, and re-uploading is the only way to change what GitHub serves:
+  **Settings → General → Social preview → Edit → Upload an image**. Confirm with
+  `gh api repos/ChrisAdkin8/k8s-ai-observability --jq .uses_custom_open_graph_image`.
 
 ## [0.2.0] — 2026-07-31
 
