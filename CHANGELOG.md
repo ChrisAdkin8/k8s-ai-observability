@@ -37,6 +37,10 @@ Comparison links are at the foot of this file, one per released version.
   Kubernetes manifests. Shared by the promtool tests and the compose stack, so both read
   what the cluster actually applies rather than a second copy.
 - `task compose` / `make compose`.
+- Instructions for publishing the boards to grafana.com, in
+  `manifests/dashboards/README.md`. Both were checked against a Grafana whose only
+  datasource was named and uid'd differently: `id` is null and no panel carries a fixed
+  datasource uid, so they import anywhere.
 
 ### Changed
 

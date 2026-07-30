@@ -53,6 +53,30 @@ increase to divide by 300. Not a fault — see
 default Prometheus datasource on load. If panels render "datasource not found" on first
 open, pick the Prometheus datasource in the dashboard's variable dropdown once.
 
+## Publishing to grafana.com
+
+Both boards are portable and have been checked against a Grafana whose only datasource
+was named and uid'd differently from anything here:
+
+- `id` is `null` — required, or the upload is treated as an update to someone else's board
+- no hardcoded datasource uid anywhere; every panel binds to `${datasource}`
+- that variable is a `datasource`-type variable with `query: prometheus`, so it resolves
+  to whatever Prometheus the importer already has
+
+They also work against **real** hardware, which is the point: the GPU board's temperature
+and power panels read `DCGM_FI_DEV_GPU_TEMP` / `_POWER_USAGE`, which a genuine
+dcgm-exporter emits directly (here they are recording rules), and the LLM board's `model`
+variable is `label_values(vllm:num_requests_running, model_name)`, which real vLLM
+answers.
+
+To publish: sign in at [grafana.com](https://grafana.com), go to your org's **Dashboards**
+and upload the `.json`. It needs a name, a description, and the datasource it expects
+(Prometheus). You get a numeric dashboard id back — add it to the table at the top of this
+file so the two stay connected.
+
+**If you republish after editing**, upload a new revision rather than a new dashboard, so
+the id people have imported keeps working.
+
 ## Editing a board
 
 Edit in Grafana, then **Dashboard settings → JSON Model**, copy it back over the file
