@@ -98,6 +98,32 @@ tasks:
     cmds:
       - ./scripts/rule-tests.sh
 
+  # ---- the no-Kubernetes path ------------------------------------------------
+  # Both boards and both alert sets in under a minute, reading the same dashboards,
+  # rules, simulator and profiles the cluster does. See compose/README.md for what it
+  # deliberately cannot exercise.
+  compose:
+    desc: 'Both dashboards without Kubernetes (task compose -- down|logs|ps)'
+    dir: '{{.ROOT_DIR}}/compose'
+    interactive: true
+    preconditions:
+      - sh: docker compose version >/dev/null 2>&1
+        msg: |
+          The docker compose plugin is not available (`docker compose version` failed).
+          Install Docker Desktop, or the compose plugin for your runtime:
+            https://docs.docker.com/compose/install/
+    cmds:
+      - 'docker compose {{.CLI_ARGS | default "up -d"}}'
+      - cmd: |
+          {{if not .CLI_ARGS}}echo
+          echo "  GPU:        http://localhost:${GRAFANA_PORT:-3000}/d/gpu-sim-dcgm"
+          echo "  LLM:        http://localhost:${GRAFANA_PORT:-3000}/d/llm-sim-overview"
+          echo "  Prometheus: http://localhost:${PROMETHEUS_PORT:-9090}"
+          echo
+          echo "  Alerts need a few minutes to clear their 'for:' durations."
+          echo "  Stop with: task compose -- down"{{end}}
+        silent: true
+
   # Cluster-agnostic escape hatch: the scripts act on the CURRENT kubecontext, so
   # this is here for when you already know which cluster you are pointed at.
   # Prefer the namespaced forms (task eks:load) — they guard the context first.

@@ -1,0 +1,92 @@
+{
+  "annotations": { "list": [] },
+  "editable": true,
+  "graphTooltip": 0,
+  "schemaVersion": 39,
+  "tags": ["gpu", "dcgm", "simulation"],
+  "title": "GPU Simulation — DCGM Overview",
+  "uid": "gpu-sim-dcgm",
+  "time": { "from": "now-15m", "to": "now" },
+  "refresh": "30s",
+  "templating": {
+    "list": [
+      {
+        "name": "datasource",
+        "type": "datasource",
+        "query": "prometheus",
+        "refresh": 1,
+        "hide": 0,
+        "current": {},
+        "regex": ""
+      }
+    ]
+  },
+  "panels": [
+    {
+      "id": 1,
+      "type": "timeseries",
+      "title": "GPU Utilization (%)",
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 0 },
+      "datasource": { "type": "prometheus", "uid": "${datasource}" },
+      "fieldConfig": { "defaults": { "unit": "percent", "min": 0, "max": 100 }, "overrides": [] },
+      "targets": [
+        {
+          "datasource": { "type": "prometheus", "uid": "${datasource}" },
+          "expr": "DCGM_FI_DEV_GPU_UTIL",
+          "legendFormat": "{{Hostname}} gpu{{gpu}}",
+          "refId": "A"
+        }
+      ]
+    },
+    {
+      "id": 2,
+      "type": "timeseries",
+      "title": "GPU Memory Used (%)",
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 0 },
+      "datasource": { "type": "prometheus", "uid": "${datasource}" },
+      "fieldConfig": { "defaults": { "unit": "percent", "min": 0, "max": 100 }, "overrides": [] },
+      "targets": [
+        {
+          "datasource": { "type": "prometheus", "uid": "${datasource}" },
+          "expr": "100 * DCGM_FI_DEV_FB_USED / clamp_min(DCGM_FI_DEV_FB_USED + DCGM_FI_DEV_FB_FREE, 1)",
+          "legendFormat": "{{Hostname}} gpu{{gpu}}",
+          "refId": "A"
+        }
+      ]
+    },
+    {
+      "id": 3,
+      "type": "timeseries",
+      "title": "GPU Temperature (°C) — derived",
+      "description": "The fake dcgm-exporter does not emit DCGM_FI_DEV_GPU_TEMP. This series is synthesised from utilisation by a recording rule in manifests/alerts/gpu-prometheusrule.yaml (Tesla-T4 model: 32 °C idle → ~77 °C at 100%) and carries source=\"derived\".",
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 8 },
+      "datasource": { "type": "prometheus", "uid": "${datasource}" },
+      "fieldConfig": { "defaults": { "unit": "celsius" }, "overrides": [] },
+      "targets": [
+        {
+          "datasource": { "type": "prometheus", "uid": "${datasource}" },
+          "expr": "DCGM_FI_DEV_GPU_TEMP",
+          "legendFormat": "{{Hostname}} gpu{{gpu}}",
+          "refId": "A"
+        }
+      ]
+    },
+    {
+      "id": 4,
+      "type": "timeseries",
+      "title": "GPU Power Draw (W) — derived",
+      "description": "The fake dcgm-exporter does not emit DCGM_FI_DEV_POWER_USAGE. This series is synthesised from utilisation by a recording rule in manifests/alerts/gpu-prometheusrule.yaml (Tesla-T4 model: 12 W idle → 70 W at 100%) and carries source=\"derived\".",
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 8 },
+      "datasource": { "type": "prometheus", "uid": "${datasource}" },
+      "fieldConfig": { "defaults": { "unit": "watt" }, "overrides": [] },
+      "targets": [
+        {
+          "datasource": { "type": "prometheus", "uid": "${datasource}" },
+          "expr": "DCGM_FI_DEV_POWER_USAGE",
+          "legendFormat": "{{Hostname}} gpu{{gpu}}",
+          "refId": "A"
+        }
+      ]
+    }
+  ]
+}

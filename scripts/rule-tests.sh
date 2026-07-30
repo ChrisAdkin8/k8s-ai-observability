@@ -14,14 +14,14 @@
 # — apiVersion/kind/metadata wrapping a `spec:` — and promtool only reads plain
 # Prometheus rule files (`groups:` at the top level). The alternative would be to keep
 # rule files in the repo and generate the CRs from them, which is the cleaner design
-# but changes what `kubectl apply -f manifests/alerts/` means; a 3-line extraction
+# but changes what `kubectl apply -f manifests/alerts/` means; unwrapping on demand
 # keeps the applied manifest the single source of truth.
 #
-# The extraction is a de-indent, not a YAML parse, because this repo has no YAML
-# dependency at all (no pip, no yq) and adding one for a test harness would be a worse
-# trade than a transformation whose input is two files we own. It is asserted below
-# rather than assumed: an extraction that silently produced nothing would make every
-# test vacuously pass, which is the one failure mode a test harness must not have.
+# scripts/extract.sh does the unwrapping, and is shared with the compose stack rather
+# than reimplemented here — two copies of the same transformation is how the rules
+# promtool tests and the rules Prometheus actually loads start to differ. What is
+# asserted below is that the extraction produced something: silently yielding nothing
+# would make every test pass vacuously, the one failure mode a test harness must not have.
 set -euo pipefail
 cd "$(dirname "${BASH_SOURCE[0]}")/.."
 
@@ -45,38 +45,29 @@ fi
 WORK="$(mktemp -d)"
 trap 'rm -rf "$WORK"' EXIT
 
-# PrometheusRule -> plain Prometheus rule file.
-#
-# Everything under `spec:` is indented by exactly two spaces, so dropping the `spec:`
-# line and removing two leading spaces from every line after it yields `groups:` at
-# column 0. Relative indentation is preserved, which is what keeps the `expr: >-`
-# block scalars valid.
-#
-# The awk rules are ordered deliberately: the print rule runs before the one that sets
-# the flag, so the `spec:` line itself is consumed rather than emitted.
-extract() {
-  awk 'f { sub(/^  /, ""); print } /^spec:[[:space:]]*$/ { f = 1 }' "$1"
-}
-
 echo "==> extracting rule files from the PrometheusRule manifests"
-for src in manifests/alerts/*.yaml; do
-  base="$(basename "$src" .yaml)"
-  base="${base%-prometheusrule}"          # gpu-prometheusrule.yaml -> gpu
-  out="$WORK/${base}-rules.yaml"
-  extract "$src" > "$out"
+./scripts/extract.sh rules "$WORK" >/dev/null
 
+shopt -s nullglob
+produced=("$WORK"/*-rules.yaml)
+if [[ ${#produced[@]} -eq 0 ]]; then
+  echo "ERROR: scripts/extract.sh produced no rule files from manifests/alerts/." >&2
+  exit 1
+fi
+
+for out in "${produced[@]}"; do
   # Assert the extraction actually produced rules. A restructured manifest (a `spec:`
   # that stops being top-level, a switch to multi-document YAML) would otherwise
   # yield an empty file that promtool happily reports as passing zero tests.
   if ! grep -q '^groups:' "$out"; then
-    echo "ERROR: $src produced no 'groups:' — is 'spec:' still top-level?" >&2
+    echo "ERROR: $(basename "$out") has no 'groups:' — is 'spec:' still top-level?" >&2
     exit 1
   fi
   if ! grep -qE '^\s+- (record|alert):' "$out"; then
-    echo "ERROR: $src produced a rule file with no rules in it." >&2
+    echo "ERROR: $(basename "$out") has no rules in it." >&2
     exit 1
   fi
-  printf '    %-40s -> %s (%s rules)\n' "$src" "$(basename "$out")" \
+  printf '    %-24s %s rules\n' "$(basename "$out")" \
     "$(grep -cE '^\s+- (record|alert):' "$out")"
 done
 

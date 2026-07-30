@@ -19,7 +19,47 @@ Comparison links are at the foot of this file, one per released version.
 
 ## [Unreleased]
 
-_Nothing yet._
+### Added
+
+- **A no-Kubernetes path** — [`compose/`](compose/). `docker compose up -d` gives both
+  dashboards and both alert sets on `localhost:3000` in about a minute, with nothing
+  installed on the host. It reads the *same* dashboards, recording rules, alerts,
+  simulator and load profiles the cluster applies, and uses the same scrape job names, so
+  every query in `docs/observability.md` pastes in unchanged. What it cannot exercise is
+  Kubernetes itself — scheduling on `nvidia.com/gpu`, ServiceMonitor discovery, the
+  sidecar import — and `compose/README.md` says so plainly.
+- `compose/gpu-metrics-sim.py` — a compose-only stand-in for the fake-gpu-operator's
+  exporter, which is a device plugin and a DaemonSet and so has no meaning outside a
+  cluster. Copies its exact surface: three series, same labels, same eight `Tesla-T4`s,
+  same all-or-nothing memory model. Three series are enough for all four GPU panels and
+  every GPU alert, because temperature and power are derived by the shipped rules.
+- `scripts/extract.sh` — unwraps the Prometheus rules and LLM profiles out of the
+  Kubernetes manifests. Shared by the promtool tests and the compose stack, so both read
+  what the cluster actually applies rather than a second copy.
+- `task compose` / `make compose`.
+
+### Changed
+
+- **Dashboards are now plain `.json`** in `manifests/dashboards/`, rather than JSON
+  embedded in hand-maintained ConfigMap YAML. One artefact, used three ways: wrapped in a
+  ConfigMap by `install.sh`, mounted by the compose stack, or uploaded to grafana.com and
+  imported into any Grafana. The filename is the uid, and `assert_dashboard_contract`
+  fails the install if a filename and the `uid` inside it disagree.
+
+  The generated ConfigMap names change with it — `dcgm-gpu-dashboard` becomes
+  `gpu-sim-dcgm-dashboard`, `llm-sim-dashboard` becomes `llm-sim-overview-dashboard`. On
+  a cluster installed before this change, delete the two old ConfigMaps by hand;
+  otherwise both are imported and Grafana holds two boards under one uid.
+
+- Dashboards now carry `app.kubernetes.io/part-of=gpu-sim-dashboards`, and `teardown.sh`
+  removes them by it.
+
+### Fixed
+
+- `teardown.sh` left the dashboard ConfigMaps behind. They were never applied from a file,
+  so there was no `-f` to delete them by, and nothing else covered them. Selected on the
+  ownership label above rather than `grafana_dashboard=1`, because the chart ships several
+  boards under that same sidecar label and the delete runs before the Helm uninstall.
 
 ## [0.1.0] — 2026-07-30
 

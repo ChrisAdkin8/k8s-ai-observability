@@ -5,7 +5,7 @@
 ## a destroy prompt, `task eks:up`). This Makefile is kept for anyone without Task
 ## installed — both are thin wrappers over scripts/, so neither owns any logic. If you
 ## standardise on one, delete the other rather than maintaining both.
-.PHONY: help selftest rule-tests up-local \
+.PHONY: help selftest rule-tests compose compose-down up-local \
         cluster-local install-local verify-local grafana-local prom-local teardown-local destroy-local \
         tf-init-eks tf-apply-eks install-eks verify-eks grafana-eks prom-eks teardown-eks destroy-eks \
         tf-init-gke tf-apply-gke install-gke verify-gke grafana-gke prom-gke teardown-gke destroy-gke
@@ -19,6 +19,11 @@ selftest:     ## validate the LLM simulator locally (no cluster needed)
 
 rule-tests:   ## unit-test the alert + recording rules with promtool (no cluster needed)
 	./scripts/rule-tests.sh
+
+compose:      ## both dashboards without Kubernetes — localhost:3000 (see compose/README.md)
+	cd compose && docker compose up -d
+compose-down: ## stop the no-Kubernetes stack
+	cd compose && docker compose down
 
 ## --- local (kind) — no cloud account, no credentials, no spend ---
 up-local:       ## ONE SHOT: kind cluster -> stacks -> acceptance checks

@@ -186,7 +186,8 @@ kubectl apply -f manifests/workloads/extras/
 ## Dashboard
 
 A self-contained **GPU Simulation — DCGM Overview** dashboard (util / memory / temp /
-power) ships as a sidecar ConfigMap: `manifests/dashboards/dcgm-configmap.yaml`. The
+power) ships as `manifests/dashboards/gpu-sim-dcgm.json`, which `install.sh` wraps in a
+sidecar ConfigMap and the compose stack mounts directly. The
 temp/power panels depend on the recording rules above — apply the dashboard without
 `manifests/alerts/` and they stay blank.
 

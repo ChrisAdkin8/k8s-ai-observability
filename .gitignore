@@ -50,6 +50,10 @@ venv/
 prompt.md
 prompt-*.md
 
+# Unwrapped from the Kubernetes manifests by compose/compose.yaml at start-up. Never
+# edited by hand and never committed: manifests/ stays the single source of truth.
+compose/.generated/
+
 # OS / editor cruft
 .DS_Store
 *.swp

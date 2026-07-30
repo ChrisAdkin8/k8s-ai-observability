@@ -44,7 +44,7 @@ grafana:
       label: grafana_dashboard
       searchNamespace: ALL   # discover our dashboard ConfigMaps in any namespace
   # The DCGM dashboard is shipped as a self-contained sidecar ConfigMap
-  # (manifests/dashboards/dcgm-configmap.yaml) — no grafana.com egress required, and
+  # (generated from manifests/dashboards/*.json) — no grafana.com egress required, and
   # verify.sh asserts that exact ConfigMap by name. To use the fuller upstream board
   # 12239 instead, see manifests/dashboards/README.md. Prometheus is auto-provisioned as
   # the default datasource, which the dashboard's datasource template variable resolves to.

@@ -1,0 +1,12 @@
+# The boards bind to a datasource template variable that resolves to the default
+# Prometheus datasource on load, so isDefault matters here.
+apiVersion: 1
+datasources:
+  - name: Prometheus
+    type: prometheus
+    uid: prometheus
+    access: proxy
+    url: http://prometheus:9090
+    isDefault: true
+    jsonData:
+      timeInterval: 15s   # match scrape_interval, so $__rate_interval is sane

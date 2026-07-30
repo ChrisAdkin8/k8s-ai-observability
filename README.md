@@ -12,15 +12,23 @@ No hardware, no quota, no drivers, no model weights.
 eight simulated GPUs](docs/gpu-dashboard.png)
 
 ```sh
+cd compose && docker compose up -d     # both boards on localhost:3000. ~1 min, no Kubernetes.
+```
+
+That is the fastest way to see it. To exercise Kubernetes itself — scheduling on
+`nvidia.com/gpu`, the device plugin, ServiceMonitor discovery, the Grafana sidecar:
+
+```sh
 task local:up        # kind cluster -> full stack -> acceptance checks. ~6 min, $0.
 task local:grafana   # holds one port-forward, opens both boards on localhost:3000
 task local:destroy   # prompts, then removes everything
 ```
 
-That's the whole local path — no cloud account, no credentials, no `terraform.tfvars`,
-no spend. `local` is not a reduced-fidelity preview: it runs the same manifests, the same
-pinned charts and the same acceptance checks as EKS and GKE, which exist only to prove it
-works on managed Kubernetes.
+No cloud account, no credentials, no `terraform.tfvars`, no spend. `local` is not a
+reduced-fidelity preview: it runs the same manifests, the same pinned charts and the same
+acceptance checks as EKS and GKE, which exist only to prove it works on managed
+Kubernetes. The compose stack reads those same dashboards, rules, simulator and profiles
+— see [compose/](compose/) for what it deliberately cannot cover.
 
 ## What you get
 
@@ -30,10 +38,12 @@ works on managed Kubernetes.
 - **LLM serving simulation** — [`scripts/llm-sim.py`](scripts/llm-sim.py), one
   dependency-free Python file emitting real vLLM metric names, types and histogram
   buckets. Two tenants side by side: one healthy, one deliberately overloaded.
-- **Two Grafana dashboards**, shipped as ConfigMaps and imported by the sidecar — nothing
-  is ever clicked into place, so a re-install reproduces them exactly.
-- **Recording rules and alerts** over both domains, [unit-tested with
-  `promtool`](tests/) in seconds without a cluster.
+- **Recording rules and alerts** over both domains, [unit-tested with `promtool`](tests/)
+  in about a second, with no cluster — both sides of every threshold, including the ones
+  the rig never drives. If you build alerting here, you can test it here.
+- **Two Grafana dashboards**, one `.json` each, used three ways: wrapped in a ConfigMap
+  for the sidecar, mounted by the compose stack, or imported into any Grafana. Nothing is
+  ever clicked into place, so a re-install reproduces them exactly.
 - **An acceptance suite** ([`scripts/verify.sh`](scripts/verify.sh)) that asserts metrics
   are flowing, both boards render, and the alerts actually reach `firing`.
 
@@ -78,6 +88,7 @@ In short: build the *pipeline* here, tune the *numbers* on real hardware.
 | [`task`](https://taskfile.dev/docs/installation) | the front door. `brew install go-task/tap/go-task`; needs >= 3.32 |
 | `terraform` >= 1.6, plus `aws` or `gcloud` | EKS/GKE only. GKE also needs `gke-gcloud-auth-plugin` — a [common silent miss](docs/gke.md#prerequisites) |
 | `promtool` | optional, for `task rule-tests`. Ships inside the Prometheus release |
+| `docker compose` | optional, for the [no-Kubernetes path](compose/). Nothing else on the host |
 
 `task tools` checks all of the above, and only fails on the target-agnostic ones.
 
@@ -121,6 +132,7 @@ Every command below takes any of the three prefixes ( `local` | `eks` | `gke` ):
 | `task prefix:llm-load -- ramp` | drive an LLM load curve (`ramp`, `burst`, `saturation`, `idle`) |
 | `task prefix:teardown` / `prefix:destroy` | remove the stacks / and the cluster too |
 | `task rule-tests` / `task selftest` | no cluster needed — see [tests/](tests/) |
+| `task compose` | no cluster at all — both boards in ~1 min, see [compose/](compose/) |
 
 Both load drivers target opt-in Deployments that `install.sh` does *not* apply, so apply
 the one you need first or the task fails its precondition:
@@ -138,6 +150,7 @@ the drift assertions — Task only wraps it. To drive the phases as scripts inst
 
 | | Time | Cost |
 |--|--|--|
+| `compose` | ~1 min | $0 |
 | `local` | ~6 min end to end | $0 |
 | `eks` / `gke` | ~20 min, node provisioning being the long pole | Billed hourly whether idle or not — control plane, 2 nodes, one NAT gateway, disks. Order of magnitude: tens of cents an hour. **Always `task <prefix>:destroy` when finished.** |
 
@@ -173,6 +186,7 @@ If a board 404s or its panels come up empty, see
 | [docs/observability.md](docs/observability.md) | where each metric comes from, reading the GPU board, eight PromQL queries that also work against real hardware, derived temperature and power, driving load |
 | [docs/llm-simulation.md](docs/llm-simulation.md) | the vLLM simulator, load profiles, LLM alerts |
 | [tests/](tests/) | the rule tests and the simulator selftest — what they cover and how to add one |
+| [compose/](compose/) | the no-Kubernetes path: what it shares with the cluster, and what it cannot exercise |
 | [docs/usage.md](docs/usage.md) | running every phase as scripts instead of Task |
 | [docs/versions.md](docs/versions.md) | every pinned version and the one place each is set |
 | [docs/eks.md](docs/eks.md) / [docs/gke.md](docs/gke.md) | per-cloud specifics |

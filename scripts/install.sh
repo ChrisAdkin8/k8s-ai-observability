@@ -45,9 +45,27 @@ echo "==> [2/5] kube-prometheus-stack (first, so ServiceMonitor/PrometheusRule C
 "${KUBECTL[@]}" -n "$MONITORING_NS" rollout status "deploy/${KPS_RELEASE}-operator" --timeout=5m || true
 
 echo "==> [2b] apply dashboards + ServiceMonitors + alert rules (CRDs present & webhook ready)"
-# Whole directories: these now hold both the GPU and the LLM manifests, and
-# kubectl skips non-YAML files (the READMEs) when given a directory.
-"${KUBECTL[@]}" apply -f manifests/dashboards/
+# Dashboards are built from the .json files rather than shipped as hand-maintained
+# ConfigMaps, exactly as the llm-sim script ConfigMap is built from scripts/llm-sim.py
+# further down. The board is then ONE artefact: the file Grafana provisioning mounts in
+# the compose path, the file you upload to grafana.com, and the file this ConfigMap
+# wraps — so they cannot disagree. `create --dry-run | apply` keeps it idempotent.
+#
+# Two labels, for two different consumers:
+#   grafana_dashboard=1                        — what the kube-prometheus-stack sidecar
+#     selects on. Without it the ConfigMap is created and silently never imported.
+#   app.kubernetes.io/part-of=gpu-sim-dashboards — ownership, so teardown.sh can remove
+#     OUR boards without touching the several the chart ships under the same sidecar
+#     label. Deleting by grafana_dashboard=1 alone would take the chart's with them.
+for board in manifests/dashboards/*.json; do
+  cm="$(dashboard_configmap_name "$board")"
+  "${KUBECTL[@]}" -n "$MONITORING_NS" create configmap "$cm" \
+    --from-file="$(basename "$board")=$board" \
+    --dry-run=client -o yaml \
+    | "${KUBECTL[@]}" label --local -f - \
+        grafana_dashboard=1 app.kubernetes.io/part-of=gpu-sim-dashboards -o yaml \
+    | "${KUBECTL[@]}" apply -f -
+done
 "${KUBECTL[@]}" apply -f manifests/servicemonitor/
 "${KUBECTL[@]}" apply -f manifests/alerts/
 

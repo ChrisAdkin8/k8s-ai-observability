@@ -41,7 +41,7 @@ cluster, exactly as `gpu-busy` keeps `GPUHighUtilization` firing on the GPU side
 | `llm-sim` Service | `llm-sim` | One ClusterIP Service in front of all simulator pods |
 | `llm-sim` ServiceMonitor | `monitoring` | Tells Prometheus to scrape them every 15s |
 | `llm-simulation-alerts` | `monitoring` | Recording rules + four alerts |
-| `llm-sim-dashboard` | `monitoring` | The Grafana board, loaded by the sidecar |
+| `llm-sim-overview-dashboard` | `monitoring` | The Grafana board, generated from `manifests/dashboards/llm-sim-overview.json` and loaded by the sidecar |
 
 The simulator itself is [`scripts/llm-sim.py`](../scripts/llm-sim.py) — one standard-library
 Python file, no dependencies, no image to build. `install.sh` loads it into ConfigMap

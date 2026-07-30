@@ -68,13 +68,25 @@ LLM_SATURATED_MODEL="sim-llama-3-8b-saturated"
 LLM_DRIVEN_MODEL="sim-llama-3-8b-driven"        # opt-in extras only
 
 # ---- dashboards --------------------------------------------------------------
-# Shipped as self-contained sidecar ConfigMaps (no grafana.com egress).
+# The boards live in manifests/dashboards/ as plain .json — one artefact each, used
+# three ways: wrapped in a sidecar ConfigMap by install.sh, mounted by Grafana
+# provisioning in the compose path, and uploaded as-is to grafana.com. No egress is
+# needed at install time either way.
+#
+# The FILENAME carries the uid (gpu-sim-dcgm.json -> uid gpu-sim-dcgm), which is what
+# lets the ConfigMap name be derived rather than tracked. assert_dashboard_contract
+# enforces that the filename and the .uid inside really do agree.
 # To swap in the fuller upstream board 12239, see manifests/dashboards/README.md.
-DASHBOARD_CM="dcgm-gpu-dashboard"      # ConfigMap name; verify.sh asserts this exact name
 DASHBOARD_UID="gpu-sim-dcgm"           # MUST match the .uid in the dashboard JSON — it's what
                                        # makes /d/<uid> a stable deep link across re-installs
-LLM_DASHBOARD_CM="llm-sim-dashboard"
 LLM_DASHBOARD_UID="llm-sim-overview"
+
+# ConfigMap name for a board file. Derived, not configured: a second place to spell
+# the name is a second place for it to drift, and verify.sh looks the ConfigMap up by
+# calling this same function.
+dashboard_configmap_name() { echo "$(basename "$1" .json)-dashboard"; }
+DASHBOARD_CM="$(dashboard_configmap_name "$DASHBOARD_UID")"
+LLM_DASHBOARD_CM="$(dashboard_configmap_name "$LLM_DASHBOARD_UID")"
 GRAFANA_PORT="${GRAFANA_PORT:-3000}"   # local port used by scripts/grafana.sh
 
 # Deep links straight to each board (Grafana redirects /d/<uid> to the slug URL).
@@ -323,27 +335,35 @@ assert_manifest_namespaces() {
 # and validating only the name and uid would leave a second board's JSON
 # unchecked. Pipe-delimited strings because bash 3.2 (macOS) has no dict type.
 assert_dashboard_contract() {
-  local triples=(
-    "manifests/dashboards/dcgm-configmap.yaml|${DASHBOARD_CM}|${DASHBOARD_UID}"
-    "manifests/dashboards/llm-configmap.yaml|${LLM_DASHBOARD_CM}|${LLM_DASHBOARD_UID}"
-  )
-  local entry cm name uid
-  for entry in "${triples[@]}"; do
-    cm="${entry%%|*}"; entry="${entry#*|}"
-    name="${entry%%|*}"; uid="${entry#*|}"
+  local uid file
+  for uid in "$DASHBOARD_UID" "$LLM_DASHBOARD_UID"; do
+    file="manifests/dashboards/${uid}.json"
 
-    [[ -f "$cm" ]] || { echo "ERROR: $cm not found (run from the repo root)" >&2; exit 1; }
-
-    if ! grep -qE "^[[:space:]]+name:[[:space:]]+${name}[[:space:]]*$" "$cm"; then
-      echo "ERROR: $cm ConfigMap name does not match config.sh ($name)." >&2
-      echo "       verify.sh looks the dashboard up by that exact name. Align them." >&2
+    if [[ ! -f "$file" ]]; then
+      echo "ERROR: $file not found (run from the repo root)." >&2
+      echo "       config.sh names uid '$uid', and the board file is named after its" >&2
+      echo "       uid — install.sh derives the ConfigMap name from that filename." >&2
       exit 1
     fi
 
-    if ! grep -qE "\"uid\":[[:space:]]*\"${uid}\"" "$cm"; then
-      echo "ERROR: $cm has no dashboard with uid \"${uid}\"." >&2
-      echo "       config.sh builds the /d/<uid> deep link that install.sh and" >&2
-      echo "       grafana.sh advertise; a mismatch links to a Grafana 404." >&2
+    # The filename says one uid; the JSON must agree. They are read independently —
+    # Grafana serves /d/<uid> from the JSON, while install.sh and grafana.sh build
+    # that link from config.sh — so a mismatch is a confident link to a Grafana 404.
+    if ! grep -qE "\"uid\"[[:space:]]*:[[:space:]]*\"${uid}\"" "$file"; then
+      echo "ERROR: $file does not declare \"uid\": \"${uid}\"." >&2
+      echo "       The filename and the uid inside the board must match: the file is" >&2
+      echo "       what Grafana loads, and config.sh is what advertises the URL." >&2
+      exit 1
+    fi
+  done
+
+  # Every board in the directory is applied by install.sh, so any file that is not
+  # valid JSON breaks the install — catch it here rather than mid-apply.
+  local board
+  for board in manifests/dashboards/*.json; do
+    if ! python3 -c "import json,sys; json.load(open(sys.argv[1]))" "$board" 2>/dev/null; then
+      echo "ERROR: $board is not valid JSON. install.sh wraps every .json in this" >&2
+      echo "       directory into a dashboard ConfigMap; a malformed one fails the apply." >&2
       exit 1
     fi
   done

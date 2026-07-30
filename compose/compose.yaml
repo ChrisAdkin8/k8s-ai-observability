@@ -1,0 +1,124 @@
+# The no-Kubernetes path: both dashboards, both alert sets, in under a minute.
+#
+# WHAT THIS IS FOR. The Kubernetes targets need a container runtime with 8 GiB, kind,
+# helm and about six minutes. That is the right price for proving scheduling, the device
+# plugin and the operator wiring — and far too high a price for "show me the boards" or
+# "does my PromQL work". This stack answers those, and nothing else.
+#
+# WHAT IS SHARED WITH THE CLUSTER PATH, verbatim and unmodified:
+#   * the dashboards          ../manifests/dashboards/*.json
+#   * the recording rules
+#     and alerts              ../manifests/alerts/  (unwrapped by scripts/extract.sh)
+#   * the LLM simulator       ../scripts/llm-sim.py
+#   * the load profiles       ../manifests/llm/10-profiles.yaml (same, unwrapped)
+#   * the scrape job names    llm-sim / fake-dcgm-exporter, so every query in
+#                             docs/observability.md works here unchanged
+#
+# WHAT IS NOT: gpu-metrics-sim.py, which stands in for run-ai/fake-gpu-operator. That is
+# a device plugin and a DaemonSet, so it has no meaning outside a cluster. See the header
+# of that file for exactly what it copies and why three series are enough.
+#
+# So: everything you can BUILD here transfers. What you cannot exercise here is
+# Kubernetes itself — scheduling on nvidia.com/gpu, the ServiceMonitor selectors, the
+# sidecar import path. `task local:up` is what covers those.
+
+name: gpu-sim
+
+services:
+  # Unwraps the rules and profiles out of the Kubernetes manifests into ./.generated,
+  # so this stack reads the SAME files the cluster applies rather than a second copy.
+  # busybox because scripts/extract.sh is POSIX sh + awk on purpose; running it here is
+  # what keeps `docker compose up` self-contained, with no host-side prerequisite.
+  generate:
+    image: busybox:1.36
+    volumes:
+      - ..:/repo:ro
+      - ./.generated:/out
+    command:
+      - sh
+      - -euc
+      - |
+        /repo/scripts/extract.sh rules    /out/rules
+        /repo/scripts/extract.sh profiles /out/profiles
+        # Fail loudly rather than leaving Prometheus to start with no rules and the
+        # derived temp/power panels silently blank.
+        test -s /out/rules/gpu-rules.yaml
+        test -s /out/rules/llm-rules.yaml
+        test -s /out/profiles/steady.json
+        test -s /out/profiles/saturated.json
+        echo "extracted rules + profiles from the Kubernetes manifests"
+
+  # The healthy tenant. Same file, same profile as llm-steady on the cluster.
+  llm-steady:
+    image: python:3.12-slim
+    command: ["python3", "/opt/llm-sim/llm_sim.py", "--profile", "/etc/llm-sim/steady.json"]
+    environment:
+      PYTHONUNBUFFERED: "1"
+      PYTHONDONTWRITEBYTECODE: "1"
+    volumes:
+      - ../scripts/llm-sim.py:/opt/llm-sim/llm_sim.py:ro
+      - ./.generated/profiles:/etc/llm-sim:ro
+    depends_on:
+      generate: { condition: service_completed_successfully }
+
+  # The tenant that is overloaded on purpose, so LLMHighTTFT and LLMQueueBacklog fire
+  # here exactly as they do on the cluster. Two tenants side by side is the point.
+  llm-saturated:
+    image: python:3.12-slim
+    command: ["python3", "/opt/llm-sim/llm_sim.py", "--profile", "/etc/llm-sim/saturated.json"]
+    environment:
+      PYTHONUNBUFFERED: "1"
+      PYTHONDONTWRITEBYTECODE: "1"
+    volumes:
+      - ../scripts/llm-sim.py:/opt/llm-sim/llm_sim.py:ro
+      - ./.generated/profiles:/etc/llm-sim:ro
+    depends_on:
+      generate: { condition: service_completed_successfully }
+
+  # Compose-only stand-in for the fake-gpu-operator's exporter — see its file header.
+  gpu-metrics:
+    image: python:3.12-slim
+    command: ["python3", "/opt/gpu-sim/gpu-metrics-sim.py"]
+    environment:
+      PYTHONUNBUFFERED: "1"
+      PYTHONDONTWRITEBYTECODE: "1"
+    volumes:
+      - ./gpu-metrics-sim.py:/opt/gpu-sim/gpu-metrics-sim.py:ro
+
+  prometheus:
+    image: prom/prometheus:v3.7.3
+    command:
+      - --config.file=/etc/prometheus/prometheus.yml
+      - --storage.tsdb.path=/prometheus
+      # 2h is plenty: the boards default to a 15m window and this stack is ephemeral.
+      - --storage.tsdb.retention.time=2h
+      - --web.enable-lifecycle
+    # Overridable, and not cosmetically: scripts/prometheus.sh holds a port-forward on
+    # this same port, and config.sh already exposes PROMETHEUS_PORT for exactly that
+    # reason. Run both at once without it and the loopback-bound port-forward shadows
+    # this container — same URL, different Prometheus, no error anywhere.
+    ports: ["${PROMETHEUS_PORT:-9090}:9090"]
+    volumes:
+      - ./prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - ./.generated/rules:/etc/prometheus/rules:ro
+    depends_on:
+      generate: { condition: service_completed_successfully }
+
+  grafana:
+    image: grafana/grafana:11.6.0
+    ports: ["${GRAFANA_PORT:-3000}:3000"]   # see PROMETHEUS_PORT above
+    environment:
+      # Matches the cluster: anonymous Viewer so the boards need no login, admin kept
+      # for editing. Safe for the same reason it is there — this binds to localhost.
+      GF_AUTH_ANONYMOUS_ENABLED: "true"
+      GF_AUTH_ANONYMOUS_ORG_ROLE: Viewer
+      GF_SECURITY_ADMIN_PASSWORD: admin
+      GF_USERS_DEFAULT_THEME: dark
+      # Land on the GPU board instead of the empty home dashboard.
+      GF_DASHBOARDS_DEFAULT_HOME_DASHBOARD_PATH: /var/lib/grafana/dashboards/gpu-sim-dcgm.json
+    volumes:
+      - ./grafana/datasources.yml:/etc/grafana/provisioning/datasources/prometheus.yml:ro
+      - ./grafana/dashboards.yml:/etc/grafana/provisioning/dashboards/gpu-sim.yml:ro
+      # The boards themselves, straight from the repo — no copy, no ConfigMap.
+      - ../manifests/dashboards:/var/lib/grafana/dashboards:ro
+    depends_on: [prometheus]

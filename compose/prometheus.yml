@@ -1,0 +1,27 @@
+# Prometheus for the compose stack.
+#
+# ⚠️ THE JOB NAMES ARE LOAD-BEARING. `llm-sim` and `fake-dcgm-exporter` are what the
+# ServiceMonitors produce on Kubernetes, and scripts/verify.sh selects on them
+# (up{job="llm-sim"}, up{job=~".*dcgm.*"}). Keeping them identical here is what lets
+# every query in docs/observability.md be pasted into either stack unchanged.
+global:
+  # 15s to match manifests/servicemonitor/. The LLM board's rate() panels need >= 2
+  # samples in the window, so this must stay <= 30s.
+  scrape_interval: 15s
+  # 30s to match the kube-prometheus-stack default the recording rules are tuned for.
+  evaluation_interval: 30s
+
+# Unwrapped from manifests/alerts/ by the `generate` service — the same rule groups the
+# cluster applies, including the ones that synthesise temperature and power. Without
+# these the GPU board's lower half is blank.
+rule_files:
+  - /etc/prometheus/rules/*.yaml
+
+scrape_configs:
+  - job_name: llm-sim
+    static_configs:
+      - targets: ["llm-steady:9401", "llm-saturated:9401"]
+
+  - job_name: fake-dcgm-exporter
+    static_configs:
+      - targets: ["gpu-metrics:9400"]
