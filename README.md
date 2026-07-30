@@ -101,6 +101,21 @@ prints the exact `colima` / Docker Desktop / `podman machine` command to fix it.
 colima start --cpu 4 --memory 8 --disk 40
 ```
 
+**Or run the trimmed stack instead.** `LITE=1` drops Alertmanager, kube-state-metrics,
+node-exporter and the chart's ~100 default rules, and puts Prometheus on 256Mi/512Mi —
+which lowers the floor to 3 GiB and the recommendation to 4:
+
+```sh
+LITE=1 task local:up
+```
+
+It keeps everything `local` exists to prove: ServiceMonitor discovery, PrometheusRule
+evaluation, the Grafana sidecar import, and scheduling on `nvidia.com/gpu`. Both
+dashboards render and every acceptance check in `verify.sh` still runs and still passes —
+none of them touches what was removed.
+[`values-lite.yaml`](helm/kube-prometheus-stack/values-lite.yaml) lists exactly what
+you give up.
+
 ## Quick start
 
 Three targets — `local`, `eks`, `gke` — each with two phases. **Phase 1** creates the

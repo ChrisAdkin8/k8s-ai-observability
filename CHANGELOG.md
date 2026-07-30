@@ -66,6 +66,29 @@ Comparison links are at the foot of this file, one per released version.
   Real vLLM only ever emits one surface — `both` is a rig affordance, not a fidelity
   claim.
 
+- **A trimmed monitoring profile — `LITE=1`.**
+  [`helm/kube-prometheus-stack/values-lite.yaml`](helm/kube-prometheus-stack/values-lite.yaml),
+  an overlay applied on top of `values.yaml` rather than a second copy of it, so nothing
+  load-bearing is stated twice. It drops Alertmanager, kube-state-metrics, node-exporter
+  and the chart's ~100 default rules, and puts Prometheus on 256Mi/512Mi with 2h
+  retention — taking the runtime floor from 5 GiB to 3 and the recommendation from 8 to 4.
+
+  This exists because the 8 GiB ask is the most common reason a first `task local:up`
+  never finishes: colima ships 2 CPU / 2 GiB, Prometheus sits Pending, and the run reads
+  as a broken repo rather than an under-provisioned VM. The compose path answers "show me
+  the boards"; this answers "let me exercise Kubernetes on the laptop I have".
+
+  Nothing `local` exists to prove is given up — ServiceMonitor discovery, PrometheusRule
+  evaluation, the sidecar dashboard import and `nvidia.com/gpu` scheduling all still run,
+  and every check in `verify.sh` still applies. Verified rather than assumed: no `kube_*`
+  or `node_*` series appears in either dashboard, either rule file or `verify.sh`, and
+  the alert checks read Prometheus's own `ALERTS` series, which never involves
+  Alertmanager. Alert *delivery* is not exercised — but it was not exercised by the full
+  profile either.
+
+  `LITE` is resolved in `scripts/config.sh`, so the Helm values stack and `kind-up.sh`'s
+  sizing floor cannot disagree about which profile is being installed.
+
 - **A social preview card** — `docs/social-preview.png`, the 1280×640 image GitHub
   renders in place of a bare link wherever this repo is shared. The setting lives only in
   GitHub's web UI and is exposed by no API, so the artefact is kept here to give it a

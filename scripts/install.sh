@@ -33,10 +33,13 @@ echo "==> [1/5] Helm repos"
 "${HELM[@]}" repo update >/dev/null
 
 echo "==> [2/5] kube-prometheus-stack (first, so ServiceMonitor/PrometheusRule CRDs + admission webhook exist)"
+[[ "$LITE" == "1" ]] && echo "    LITE=1 — trimmed stack, see helm/kube-prometheus-stack/values-lite.yaml"
+# KPS_VALUES is built in config.sh so kind-up.sh's sizing floor and this values
+# stack can never disagree about which profile is being installed.
 "${HELM[@]}" upgrade --install "$KPS_RELEASE" "$KPS_CHART" \
   --version "$KPS_CHART_VERSION" \
   --namespace "$MONITORING_NS" --create-namespace \
-  -f helm/kube-prometheus-stack/values.yaml \
+  "${KPS_VALUES[@]}" \
   --wait --timeout 15m
 # Readiness (not just ordering): the PrometheusRule validating webhook must be serving
 # before we apply custom rules. `helm --wait` above already blocks until the operator +

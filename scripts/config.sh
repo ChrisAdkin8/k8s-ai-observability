@@ -142,12 +142,35 @@ GCP_REGION="${GCP_REGION:-europe-west1}"
 # header of KIND_CONFIG for the full argument.
 KIND_CONFIG="kind/gpu-sim.yaml"
 
-# Container-runtime floor. Prometheus alone requests 1Gi and limits 2Gi, and the kind
-# control plane wants roughly another 1Gi, so colima's 2 CPU / 2 GiB default cannot run
-# this: Prometheus simply sits Pending, which reads as a broken install rather than an
-# under-provisioned VM. scripts/kind-up.sh checks these before creating anything.
-KIND_MIN_MEMORY_GIB="${KIND_MIN_MEMORY_GIB:-5}"    # below this, refuse
-KIND_WANT_MEMORY_GIB="${KIND_WANT_MEMORY_GIB:-8}"  # below this, warn
+# LITE=1 trims the monitoring stack so `local` fits a small container runtime —
+# helm/kube-prometheus-stack/values-lite.yaml documents exactly what is given up.
+# Read here rather than in install.sh because kind-up.sh needs it too: the sizing
+# floor below and the Helm values must agree, and they are two different scripts.
+LITE="${LITE:-0}"
+[[ "$LITE" == "1" || "$LITE" == "true" ]] && LITE=1 || LITE=0
+
+# The Helm values stack, in -f order. Lite is an OVERLAY on the base file, never a
+# replacement: everything load-bearing stays stated once in values.yaml.
+KPS_VALUES=(-f helm/kube-prometheus-stack/values.yaml)
+[[ "$LITE" == "1" ]] && KPS_VALUES+=(-f helm/kube-prometheus-stack/values-lite.yaml)
+
+# Container-runtime floor. On the default profile Prometheus alone requests 1Gi and
+# limits 2Gi, and the kind control plane wants roughly another 1Gi, so colima's
+# 2 CPU / 2 GiB default cannot run this: Prometheus simply sits Pending, which reads
+# as a broken install rather than an under-provisioned VM. scripts/kind-up.sh checks
+# these before creating anything.
+#
+# LITE=1 lowers the floor because it lowers the demand — Prometheus drops to
+# 256Mi/512Mi and Alertmanager, kube-state-metrics and node-exporter go away. The
+# floor still is not 2 GiB: the kind node, the control plane, the operator and two
+# Helm releases have a cost that trimming values cannot remove.
+if [[ "$LITE" == "1" ]]; then
+  KIND_MIN_MEMORY_GIB="${KIND_MIN_MEMORY_GIB:-3}"
+  KIND_WANT_MEMORY_GIB="${KIND_WANT_MEMORY_GIB:-4}"
+else
+  KIND_MIN_MEMORY_GIB="${KIND_MIN_MEMORY_GIB:-5}"
+  KIND_WANT_MEMORY_GIB="${KIND_WANT_MEMORY_GIB:-8}"
+fi
 KIND_MIN_CPUS="${KIND_MIN_CPUS:-2}"
 KIND_WANT_CPUS="${KIND_WANT_CPUS:-4}"
 

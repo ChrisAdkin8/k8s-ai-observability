@@ -1,0 +1,70 @@
+# LITE overlay for kube-prometheus-stack — applied ON TOP of values.yaml, never
+# instead of it (`helm -f values.yaml -f values-lite.yaml`). It carries only the
+# deltas, so anything that matters to this rig is stated once, in values.yaml,
+# and cannot drift between a full and a lite install.
+#
+# WHY THIS EXISTS. The default stack needs a container runtime with 8 GiB, and
+# colima ships 2 CPU / 2 GiB. That gap is the single biggest reason a first-time
+# `task local:up` never completes: Prometheus sits Pending and the run reads as a
+# broken repo rather than an under-provisioned VM. The compose path answers "show
+# me the boards" — this answers "let me exercise KUBERNETES on the laptop I have".
+#
+# WHAT IS GIVEN UP, precisely — nothing this repo's own acceptance suite covers:
+#   * kube-state-metrics and node-exporter. Verified unused: no kube_* or node_*
+#     series appears in either dashboard, either PrometheusRule, or verify.sh.
+#     You lose cluster-object and host metrics, which this rig never plotted.
+#   * Alertmanager. verify.sh asserts alerts reach `firing` via the ALERTS series,
+#     which Prometheus synthesises ITSELF — it never queries Alertmanager. So
+#     alert EVALUATION is fully exercised here; alert DELIVERY (routing, grouping,
+#     inhibition, notification) is not, and is not exercised by the full profile
+#     either.
+#   * The chart's default Kubernetes alert rules. Useful reading, ~100 rules of
+#     evaluation cost, and orthogonal to anything here.
+#   * History: 2h retention rather than 10d, matching the compose stack. The
+#     boards default to a 15m window, so this is invisible in normal use.
+#
+# WHAT IS KEPT: Prometheus, Grafana, the Prometheus Operator and its CRDs — so
+# ServiceMonitor discovery, PrometheusRule evaluation, the sidecar dashboard
+# import and scheduling on nvidia.com/gpu all still run. Those are the things
+# `local` exists to prove, and none of them are what costs the memory.
+#
+#   LITE=1 task local:up          # or: LITE=1 ./scripts/install.sh local
+#
+# Sizing is not a guess: the requests below were derived from what the trimmed set
+# actually needs, but a laptop under memory pressure will still evict. If pods go
+# Pending, the runtime is genuinely too small — raise it rather than cutting these
+# further, because below ~256Mi Prometheus OOMs during WAL replay instead.
+
+prometheus:
+  prometheusSpec:
+    # 2h, not the chart's 10d. The TSDB is an emptyDir here either way, so this
+    # bounds live memory rather than disk.
+    retention: 2h
+    resources:
+      requests: { cpu: 100m, memory: 256Mi }
+      limits: { memory: 512Mi }
+
+grafana:
+  resources:
+    requests: { cpu: 50m, memory: 96Mi }
+    limits: { memory: 192Mi }
+
+prometheusOperator:
+  resources:
+    requests: { cpu: 50m, memory: 96Mi }
+    limits: { memory: 192Mi }
+
+# --- dropped -----------------------------------------------------------------
+# See the header for why each of these is safe to lose HERE and nowhere else.
+alertmanager:
+  enabled: false
+
+kubeStateMetrics:
+  enabled: false
+
+nodeExporter:
+  enabled: false
+
+# ~100 Kubernetes mixin rules, none of which this repo asserts on.
+defaultRules:
+  create: false
