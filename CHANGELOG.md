@@ -15,55 +15,15 @@ Notable changes to this repo, newest first. The format follows
 Pinned upstream versions live in [docs/versions.md](docs/versions.md); a bump there is
 worth an entry below whenever it changes behaviour rather than just a number.
 
-> **No git tags exist yet**, so there are no release-comparison links in this file — a
-> confident link to a 404 is the failure mode this repo goes out of its way to avoid
-> elsewhere. Tag the baseline to make it pinnable:
-> `git tag -a v0.1.0 067b4c4 -m "Initial public release" && git push origin v0.1.0`
+Comparison links are at the foot of this file, one per released version.
 
 ## [Unreleased]
 
-### Added
+_Nothing yet._
 
-- **Unit tests for every recording rule and alert**, run with `promtool` in about a
-  second with no cluster and no network: `task rule-tests` (or `make rule-tests`, or
-  `./scripts/rule-tests.sh`). `scripts/rule-tests.sh` extracts the `spec:` block from
-  each PrometheusRule custom resource into a plain rule file, then runs `promtool check
-  rules` and `promtool test rules` over it, so the applied manifest stays the single
-  source of truth rather than being generated from something else.
+## [0.1.0] — 2026-07-30
 
-  These cover what `scripts/verify.sh` structurally cannot. A live check only ever sees
-  the alerts the shipped workloads happen to drive — `GPUHighUtilization` and
-  `LLMHighTTFT` — and only from the firing side. The new tests assert both sides of every
-  threshold, the derived temperature and power arithmetic, the `by (model_name)`
-  aggregation that keeps the two tenants apart, the self-disabling `unless on (UUID)`
-  guard, and the two alerts nothing on the rig ever reaches (`LLMKVCacheSaturated`,
-  `GPUMetricsAbsent` / `LLMMetricsAbsent`). See [tests/](tests/), which also documents
-  the two properties these tests cannot pin and why.
-
-- `promtool` is now reported by `task tools` (optional — nothing else needs it), and
-  pinned for CI as `PROMETHEUS_VERSION` in `.github/workflows/ci.yml`.
-
-- **"Why not just…"** in the README: honest comparisons against a real GPU node, kwok,
-  Grafana's TestData datasource, pushing synthetic series straight into Prometheus, and
-  running real vLLM with a small model.
-
-- **"Reading the GPU board"** in [docs/observability.md](docs/observability.md) —
-  why four traces move while the rest sit flat at zero, and why the memory panel shows
-  two bands with nothing between them.
-
-### Changed
-
-- The README is restructured around what a first-time reader needs: a dashboard screenshot
-  and a runnable command above the fold, the fidelity caveat reframed from a disclaimer
-  into a *transfers / does not transfer* table below the pitch, and a cost-and-time table.
-  Panel-level explanation moved to `docs/observability.md`.
-
-- CI's fast job is now `selftest + rule tests + shell syntax`.
-
-## 0.1.0 — 2026-07-30
-
-Initial public release (untagged; `067b4c4`). Build and test GPU and LLM observability
-without a GPU.
+Initial public release. Build and test GPU and LLM observability without a GPU.
 
 ### Added
 
@@ -87,6 +47,13 @@ without a GPU.
   manifests, pinned charts and acceptance checks as the clouds.
 - **Two front doors** — a Taskfile and a Makefile, both thin wrappers over `scripts/`,
   which remains the source of truth for install ordering and the wrong-context guard.
+- **Tests that need no cluster** — `promtool` unit tests over every recording rule and
+  alert (`task rule-tests`), and a simulator exposition selftest (`task selftest`). Both
+  run in seconds. They cover what a live check structurally cannot: both sides of every
+  threshold, the derived temperature and power arithmetic, the `by (model_name)`
+  aggregation that keeps the two tenants apart, the self-disabling `unless on (UUID)`
+  guard, and the alerts nothing on the rig ever drives. See [tests/](tests/), which also
+  documents the two properties these tests cannot pin, and why.
 - **Acceptance suite** — `scripts/verify.sh`, GPU checks 1-5 (including 4b/4c/4d) and LLM
   checks L1-L6: metrics flowing, both boards served to an unauthenticated request, and the
   alerts genuinely reaching `firing`.
@@ -97,3 +64,6 @@ without a GPU.
 - **CI** — a fast job plus the full stack stood up on kind on a runner that has never seen
   a GPU, running the advertised `task local:up` end to end including every acceptance
   check, with a diagnostics bundle on failure and weekly upstream-drift detection.
+
+[Unreleased]: https://github.com/ChrisAdkin8/k8s-ai-observability/compare/v0.1.0...HEAD
+[0.1.0]: https://github.com/ChrisAdkin8/k8s-ai-observability/releases/tag/v0.1.0
