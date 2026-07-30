@@ -1,0 +1,58 @@
+# Terraform — state can contain secrets (kubeconfig material, Grafana password)
+**/.terraform/
+# NB: .terraform.lock.hcl is deliberately NOT ignored. HashiCorp's guidance is to
+# commit it: it pins provider versions and checksums, so ~> constraints resolve to
+# the same builds on every machine and in CI. Ignoring it silently reintroduces the
+# drift the constraints exist to prevent.
+*.tfstate
+*.tfstate.*
+crash.log
+crash.*.log
+# Saved plans. NOT covered by *.tfstate, and just as sensitive: a plan file is an
+# unencrypted archive of the whole resource graph, including values Terraform marks
+# sensitive in console output. `terraform show` reads one back in plain text.
+*.tfplan
+*.tfplan.*
+tfplan
+# tfvars often hold project IDs / account-specific values — commit only the .example
+*.tfvars
+!*.tfvars.example
+override.tf
+override.tf.json
+*_override.tf
+*_override.tf.json
+.terraformrc
+terraform.rc
+
+# Taskfile dotenv — holds GCP_PROJECT / regions, i.e. account-specific values
+.env
+
+# Local kube/helm artefacts
+kubeconfig
+*.kubeconfig
+
+# Python. scripts/llm-sim.py is stdlib-only and runs locally via `make selftest`,
+# which leaves bytecode next to the source. (The in-cluster copy sets
+# PYTHONDONTWRITEBYTECODE=1 because its root filesystem is read-only.)
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+.pytest_cache/
+
+# Agent/editor local state. settings.local.json is per-machine and holds tool
+# permission allowlists; a shared .claude/settings.json is fine to commit, so this
+# targets only the local variant rather than the whole directory.
+**/.claude/settings.local.json
+
+# The authoring briefs, kept locally but deliberately untracked. Globbed rather than
+# listed one by one — the list went stale the first time a new brief was written.
+prompt.md
+prompt-*.md
+
+# OS / editor cruft
+.DS_Store
+*.swp
+*.swo
+.idea/
+.vscode/

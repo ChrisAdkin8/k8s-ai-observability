@@ -1,0 +1,82 @@
+# Load profiles — the simulator's entire control surface.
+#
+# Each simulator Deployment polls its own profile every 10s and applies changes
+# WITHOUT restarting, so counters and histograms stay continuous. Edit one of
+# these with `kubectl edit`, or use ./scripts/drive-llm-load.sh, and watch
+# llmsim_profile_generation tick up on the dashboard to confirm it landed.
+#
+# ⚠️ JSON, not YAML. The simulator is standard-library-only and Python has no
+#    YAML parser in stdlib.
+#
+# ⚠️ model_name is an IDENTITY, not a label. It must be unique per Deployment:
+#    the recording rules aggregate by (model_name), and verify.sh asserts the
+#    steady tenant by name. Two Deployments sharing a name merge into one
+#    meaningless series. scripts/config.sh asserts these match LLM_*_MODEL.
+#
+# WHY THESE NUMBERS: capacity_rps uses the CONGESTED inter-token latency, because a
+# server at capacity is by definition running a full batch:
+#   itl_full  = base_itl x (1 + CONGESTION_AT_FULL_LOAD) = 0.015 x 1.5 = 0.0225
+#   capacity  = max_concurrency / (base_ttft + gen_mean x itl_full)
+#             = 16 / (0.08 + 256 x 0.0225) = 16 / 5.84 = 2.74 rps
+#   steady    1.8 rps = 0.66x capacity -> queue stays ~0,  p95 TTFT well under 1s
+#   saturated 6.0 rps = 2.19x capacity -> queue fills to (max_in_flight -
+#                                         max_concurrency) = 160, so by Little's
+#                                         Law TTFT plateaus at the real queue
+#                                         wait, 160 / 2.74 = ~58s. p95 TTFT ~60s,
+#                                         and verify.sh L3b bounds it at 120s.
+#   The LLMHighTTFT alert fires above 2s, so steady sits below the line and
+#   saturated sits above it. Change one number and re-check the others.
+#
+# ⚠️ An earlier revision computed capacity from the UNcongested base_itl and got
+#    4.08 rps. steady was then set to 2.4 rps believing that was 0.59x capacity;
+#    it was really 0.88x, and the queue ran away until it pinned at 160 — making
+#    steady and saturated indistinguishable on the dashboard. Tune against the
+#    figure llmsim_capacity_rps reports, not against the base-latency figure.
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: llm-profile-steady
+  namespace: llm-sim
+  labels:
+    app.kubernetes.io/part-of: gpu-sim-llm
+data:
+  profile.json: |
+    {
+      "model_name": "sim-llama-3-8b-steady",
+      "arrival_rate_rps": 1.8,
+      "max_concurrency": 16,
+      "max_in_flight": 176,
+      "prompt_tokens":     {"mean": 512, "stddev": 128},
+      "generation_tokens": {"mean": 256, "stddev": 64},
+      "base_ttft_seconds": 0.08,
+      "base_itl_seconds": 0.015,
+      "kv_cache_tokens_capacity": 32768,
+      "finish_reasons": {"stop": 0.90, "length": 0.09, "abort": 0.01},
+      "seed": null
+    }
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: llm-profile-saturated
+  namespace: llm-sim
+  labels:
+    app.kubernetes.io/part-of: gpu-sim-llm
+data:
+  # Identical to steady except model_name and arrival_rate_rps. That is the
+  # whole difference between a healthy tenant and one that trips the alert.
+  profile.json: |
+    {
+      "model_name": "sim-llama-3-8b-saturated",
+      "arrival_rate_rps": 6.0,
+      "max_concurrency": 16,
+      "max_in_flight": 176,
+      "prompt_tokens":     {"mean": 512, "stddev": 128},
+      "generation_tokens": {"mean": 256, "stddev": 64},
+      "base_ttft_seconds": 0.08,
+      "base_itl_seconds": 0.015,
+      "kv_cache_tokens_capacity": 32768,
+      "finish_reasons": {"stop": 0.88, "length": 0.09, "abort": 0.03},
+      "seed": null
+    }

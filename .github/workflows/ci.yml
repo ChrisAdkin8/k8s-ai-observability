@@ -1,0 +1,291 @@
+# CI — stands up the ENTIRE stack on a runner that has never seen a GPU.
+#
+# This repo's premise is "no GPU hardware, quota, drivers or model weights required",
+# which has a useful consequence: unlike most Kubernetes infra repos, it can prove its
+# own claim in CI for free. So this workflow does not lint manifests or dry-run Helm —
+# it runs the advertised one-shot path, `task local:up`, end to end, including every
+# acceptance check in scripts/verify.sh.
+#
+# OPTIONAL SECRETS (both, or neither):
+#   DOCKERHUB_USERNAME / DOCKERHUB_TOKEN — a free Docker Hub account and a read-only
+#   access token. Four images come from Docker Hub (kindest/node, python:3.12-slim,
+#   busybox, grafana/grafana); anonymous pulls are rate-limited per-IP and Actions
+#   runners share egress IPs, so unauthenticated runs are flakier. The login step is
+#   gated on the secrets being present, because pull requests FROM FORKS never receive
+#   secrets at all — an ungated login would fail every external contribution and make it
+#   look like the contributor's fault.
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+  # Weekly drift detection. The stack tracks two upstream Helm charts and a pinned
+  # kindest/node image; without this, upstream breakage is discovered by a stranger.
+  # NOTE: `schedule` fires only on the default branch, so this trigger cannot be
+  # verified before merge — workflow_dispatch runs the same job to prove the code path.
+  schedule:
+    - cron: '17 4 * * 1'
+
+# Pushing twice should not leave two 20-minute runs racing.
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+env:
+  # Pinned deliberately: an unpinned toolchain turns someone else's release into a
+  # mystery red run on an unrelated commit.
+  #   kind    — v0.32.0 ships kindest/node:v1.36.1 as its default, which is what
+  #             kind/gpu-sim.yaml pins. Bump the two together.
+  #   kubectl — tracks the node image's minor (1.36).
+  #   helm    — v3, NOT the v4 line. Helm 4 is a major version this repo has not been
+  #             validated against, and CI should exercise what users actually run.
+  KIND_VERSION: v0.32.0
+  KUBECTL_VERSION: v1.36.3
+  HELM_VERSION: v3.21.3
+  TASK_VERSION: v3.52.0
+  # promtool has no release of its own — it ships inside the Prometheus archive, so
+  # this is a Prometheus version. Without the leading v: the git tag carries one and
+  # the tarball name does not, and both spellings are needed below.
+  PROMETHEUS_VERSION: 3.7.3
+
+jobs:
+  # ---------------------------------------------------------------------------
+  # Seconds, no cluster, no network. Runs in parallel with the slow job so a typo
+  # in the most-edited file in the repo does not cost a 20-minute wait.
+  # ---------------------------------------------------------------------------
+  fast:
+    name: selftest + rule tests + shell syntax
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+
+      # Validates the simulator's Prometheus exposition: histogram bucket
+      # monotonicity, +Inf consistency, HELP/TYPE correctness, and that rendering
+      # /metrics observes nothing. Standard library only — no install step needed.
+      - name: LLM simulator selftest
+        run: python3 scripts/llm-sim.py --selftest
+
+      # promtool is the only tool this job installs, and it is worth it: the stack
+      # job below can only ever observe the two alerts the shipped workloads happen
+      # to drive, and only from the firing side. These tests cover every rule, both
+      # sides of every threshold, and the recording-rule arithmetic — in seconds,
+      # with no cluster, so a broken threshold fails here rather than 20 minutes in.
+      - name: Install promtool
+        run: |
+          set -euo pipefail
+          mkdir -p "$HOME/.local/bin"
+          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+          curl -fsSL "https://github.com/prometheus/prometheus/releases/download/v${PROMETHEUS_VERSION}/prometheus-${PROMETHEUS_VERSION}.linux-amd64.tar.gz" \
+            | tar -xz -C /tmp "prometheus-${PROMETHEUS_VERSION}.linux-amd64/promtool"
+          mv "/tmp/prometheus-${PROMETHEUS_VERSION}.linux-amd64/promtool" "$HOME/.local/bin/promtool"
+          chmod +x "$HOME/.local/bin/promtool"
+
+      - name: Alert + recording rule tests
+        run: ./scripts/rule-tests.sh
+
+      # Syntax only. `shellcheck` would find real bugs rather than just parse errors,
+      # but pointing it at the existing scripts surfaces a warning backlog whose triage
+      # is a separate piece of work. Deliberately deferred, not overlooked.
+      # Note the glob: scripts/llm-sim.py is Python, and `bash -n` reads one file at a
+      # time, hence the loop rather than passing the whole glob at once.
+      - name: Shell syntax
+        run: |
+          for f in scripts/*.sh; do
+            echo "bash -n $f"
+            bash -n "$f"
+          done
+
+  # ---------------------------------------------------------------------------
+  # The real test: a kind cluster, both Helm releases, all the wiring, and every
+  # acceptance check.
+  # ---------------------------------------------------------------------------
+  stack:
+    name: full stack on kind
+    runs-on: ubuntu-latest
+    # Derived from the repo's OWN timeouts, not guessed:
+    #   install.sh:40  helm kube-prometheus-stack  --wait --timeout 15m
+    #   install.sh:45  rollout status operator     --timeout=5m
+    #   install.sh:64  helm fake-gpu-operator      --wait --timeout 15m
+    #   install.sh:80  rollout status per DaemonSet --timeout=5m x N  (N unbounded in source)
+    #   install.sh:98  llm-steady + llm-saturated  3m each
+    #   verify.sh      polling loops                ~16m  (36x10s is the longest)
+    # MEASURED: N=3 (device-plugin, mig-faker, nvidia-dcgm-exporter), so the worst case
+    # is ~75 min. Every rollout wait is `|| true`, so a partially-broken cluster does
+    # NOT fail fast — it walks every timeout, then fails in verify.sh. A cap below the
+    # worst case would guillotine the BROKEN run, which is the one whose diagnostics
+    # matter, hence the wide margin over the healthy case.
+    #
+    # A healthy run measured 5m17s — far under the 15-25 min originally estimated.
+    # If a green run ever approaches 35 min, something is waiting that should not be.
+    # Re-derive this cap if install.sh's timeouts or the DaemonSet count change.
+    timeout-minutes: 90
+    # The `secrets` context cannot be used in a job- or step-level `if`, so it is
+    # collapsed to a boolean here and tested via the env context below.
+    env:
+      HAVE_DOCKERHUB: ${{ secrets.DOCKERHUB_USERNAME != '' && secrets.DOCKERHUB_TOKEN != '' }}
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+
+      # Gated on the secrets existing — see the header. Forks get the unauthenticated
+      # path: flakier, but it runs.
+      - name: Log in to Docker Hub (skipped without secrets)
+        if: env.HAVE_DOCKERHUB == 'true'
+        uses: docker/login-action@c94ce9fb468520275223c153574b00df6fe4bcc9 # v3
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+
+      # ⚠️ DO NOT REMOVE — and if a later run passes without it, that is luck, not proof.
+      #
+      # Nothing in this repo raises these limits, and kind in CI routinely exhausts
+      # them: the Prometheus Operator, Prometheus, Grafana's dashboard sidecar,
+      # kube-state-metrics, node-exporter, the device plugin, the DCGM exporter and two
+      # llm-sim pods all establish watches on a shared host kernel.
+      #
+      # The symptom MISDIRECTS. On exhaustion the Grafana sidecar silently never
+      # imports the dashboard ConfigMaps, so verify.sh check 4 PASSES (the ConfigMap
+      # exists regardless) while check 4b 404s — and 4b's own message says "sidecar not
+      # imported it yet?", which reads like a timing problem. The natural response is to
+      # raise the polling loop and watch it fail again. If you ever see 4 pass and 4b
+      # 404 here, check these limits before touching anything else.
+      - name: Raise inotify limits (kind + Prometheus stack exhaust the defaults)
+        run: |
+          sudo sysctl -w fs.inotify.max_user_watches=524288
+          sudo sysctl -w fs.inotify.max_user_instances=512
+
+      - name: Install pinned toolchain
+        run: |
+          set -euo pipefail
+          mkdir -p "$HOME/.local/bin"
+          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+
+          curl -fsSLo "$HOME/.local/bin/kind" \
+            "https://kind.sigs.k8s.io/dl/${KIND_VERSION}/kind-linux-amd64"
+
+          curl -fsSLo "$HOME/.local/bin/kubectl" \
+            "https://dl.k8s.io/release/${KUBECTL_VERSION}/bin/linux/amd64/kubectl"
+
+          curl -fsSL "https://get.helm.sh/helm-${HELM_VERSION}-linux-amd64.tar.gz" \
+            | tar -xz -C /tmp linux-amd64/helm
+          mv /tmp/linux-amd64/helm "$HOME/.local/bin/helm"
+
+          curl -fsSL "https://github.com/go-task/task/releases/download/${TASK_VERSION}/task_linux_amd64.tar.gz" \
+            | tar -xz -C /tmp task
+          mv /tmp/task "$HOME/.local/bin/task"
+
+          chmod +x "$HOME"/.local/bin/*
+
+      # Two-part, because `task tools` alone is NOT sufficient here: it marks
+      # kubectl/helm/curl/python3 fatal but kind and docker OPTIONAL — deliberately, so
+      # it is not red for someone who only uses a cloud target. Those two are exactly
+      # what this job depends on, so a silently failed kind install would let
+      # `task tools` exit 0 and only surface ~12 minutes later inside kind-up.sh.
+      - name: Preflight
+        run: |
+          set -euo pipefail
+          task tools
+          kind version
+          kubectl version --client
+          helm version --short
+          docker info >/dev/null
+
+      # Phase 1 (scripts/kind-up.sh) -> Phase 2 (scripts/install.sh) -> verify.sh.
+      #
+      # Deliberately NOT helm/kind-action or an inline `kind create cluster`:
+      # kind/gpu-sim.yaml carries the run.ai/simulated-gpu-node-pool label the whole
+      # stack selects on, and kind-up.sh owns both the runtime sizing preflight and the
+      # rename of kind's context to gpu-sim-local that every downstream script expects.
+      # A workflow that builds its own cluster stops testing what users actually run,
+      # and would go green while the real entry point is broken.
+      - name: task local:up
+        id: up
+        run: task local:up
+
+      # always(), not failure(): a job that exceeds timeout-minutes is CANCELLED, and
+      # failure() is not guaranteed to fire on the cancellation path — it would collect
+      # nothing on the run that needs it most.
+      #
+      # The `up` guard is the carve-out for concurrency supersession: cancel-in-progress
+      # usually kills a run before it reaches this step, in which case `up` is 'skipped'
+      # and there is no cluster worth dumping. A run superseded MID-`up` still produces
+      # an artifact — an accepted limitation, since Actions does not distinguish a
+      # timeout cancel from a supersession cancel.
+      - name: Diagnostics
+        if: always() && steps.up.outcome != 'skipped'
+        run: |
+          mkdir -p /tmp/diag
+          d=/tmp/diag
+          kind get clusters > "$d/kind-clusters.txt" 2>&1 || true
+
+          # Bail out early if there is no cluster. Verified on a real red run: when
+          # kind-up.sh's naming-invariant guard rejects a bad label it exits BEFORE
+          # creating anything, and every kubectl call below then writes the same
+          # "connection refused" wall into eleven separate files. That artifact is
+          # worse than none — it looks like signal and is pure noise. In that case the
+          # step log is the diagnostic, and it is already clear.
+          if ! kind get clusters 2>/dev/null | grep -q '[^[:space:]]'; then
+            {
+              echo "No kind cluster exists."
+              echo
+              echo "The failure happened before or during cluster creation, so kubectl"
+              echo "dumps would be meaningless. Read the 'task local:up' step log — for"
+              echo "a naming-invariant break, scripts/kind-up.sh prints the exact"
+              echo "expected label and why the mismatch matters."
+            } > "$d/NO-CLUSTER.txt"
+            cat "$d/NO-CLUSTER.txt"
+            ls -la "$d"
+            exit 0
+          fi
+
+          # Everything below is best-effort: a broken cluster must not break the dump.
+          kubectl get pods -A -o wide                          > "$d/pods.txt"          2>&1 || true
+          kubectl get events -A --sort-by=.lastTimestamp       > "$d/events.txt"        2>&1 || true
+          # A missing nvidia.com/gpu allocatable is the signature of the three-way
+          # naming-invariant break (node label value vs topology pool vs node selector).
+          kubectl get nodes -o json                            > "$d/nodes.json"        2>&1 || true
+          kubectl get ds,deploy -A -o wide                     > "$d/workloads.txt"     2>&1 || true
+          kubectl get servicemonitor,prometheusrule -A         > "$d/crds.txt"          2>&1 || true
+          kubectl get cm -n monitoring -l grafana_dashboard=1  > "$d/dashboard-cms.txt" 2>&1 || true
+
+          # N for the timeout arithmetic above — install.sh waits 5m per DaemonSet.
+          kubectl -n gpu-operator get ds                       > "$d/fake-gpu-ds.txt"   2>&1 || true
+
+          for p in $(kubectl get pods -A -o jsonpath='{range .items[?(@.status.phase!="Running")]}{.metadata.namespace}/{.metadata.name}{"\n"}{end}' 2>/dev/null); do
+            ns="${p%%/*}"; name="${p##*/}"
+            [ "$name" = "" ] && continue
+            kubectl -n "$ns" describe pod "$name" >> "$d/describe-notready.txt" 2>&1 || true
+          done
+
+          for ns in gpu-operator llm-sim monitoring; do
+            for pod in $(kubectl -n "$ns" get pods -o name 2>/dev/null); do
+              echo "### $ns/$pod" >> "$d/logs-$ns.txt"
+              kubectl -n "$ns" logs "$pod" --all-containers --tail=200 >> "$d/logs-$ns.txt" 2>&1 || true
+            done
+          done
+
+          # The most common real failure is a scrape target down or a rule not yet
+          # evaluated — neither is visible from pod status alone.
+          # Service name is "${KPS_RELEASE}-prometheus"; KPS_RELEASE is
+          # "kube-prometheus-stack" (scripts/config.sh:23).
+          kubectl -n monitoring port-forward svc/kube-prometheus-stack-prometheus 9090:9090 >/dev/null 2>&1 &
+          pf=$!; sleep 5
+          curl -sf http://localhost:9090/api/v1/targets > "$d/prom-targets.json" 2>&1 || true
+          curl -sf http://localhost:9090/api/v1/rules   > "$d/prom-rules.json"   2>&1 || true
+          kill "$pf" 2>/dev/null || true; wait "$pf" 2>/dev/null || true
+
+          echo "--- collected ---"; ls -la "$d"
+
+      - name: Upload diagnostics
+        if: always() && steps.up.outcome != 'skipped'
+        uses: actions/upload-artifact@330a01c490aca151604b8cf639adc76d48f6c5d4 # v5
+        with:
+          name: diagnostics-${{ github.run_id }}-${{ github.run_attempt }}
+          path: /tmp/diag
+          retention-days: 14
+          if-no-files-found: warn

@@ -1,0 +1,221 @@
+# Unit tests for manifests/alerts/gpu-prometheusrule.yaml.
+#
+# Run with ./scripts/rule-tests.sh (or `task rule-tests`) — it extracts the rule file
+# from the PrometheusRule CR and drops it next to this file, which is why rule_files
+# below is a bare name rather than a path into manifests/.
+#
+# evaluation_interval is 30s to match the kube-prometheus-stack default. It is not
+# cosmetic here: the derived-series test asserts behaviour ACROSS successive rule
+# evaluations, so how often the group runs is part of what is under test.
+rule_files:
+  - gpu-rules.yaml
+
+evaluation_interval: 30s
+
+tests:
+  # =========================================================================
+  # Derived temperature and power. The fake exporter emits neither, so these
+  # two recording rules are the only reason the dashboard's lower half is not
+  # blank — and their arithmetic is invisible from the dashboard JSON.
+  # =========================================================================
+  - interval: 30s
+    name: derived temp/power track the T4 model at both ends of the range
+    input_series:
+      # An idle GPU and a busy one, so both ends of the linear model are pinned.
+      - series: 'DCGM_FI_DEV_GPU_UTIL{UUID="GPU-idle", gpu="0", Hostname="node-1"}'
+        values: '0x20'
+      - series: 'DCGM_FI_DEV_GPU_UTIL{UUID="GPU-busy", gpu="1", Hostname="node-1"}'
+        values: '100x20'
+
+    promql_expr_test:
+      # idle 32 °C / 12 W, 100% util 77 °C / 70 W — the Tesla-T4 figures the rule
+      # comments claim. A coefficient typo moves these and nothing else notices.
+      - expr: DCGM_FI_DEV_GPU_TEMP
+        eval_time: 2m
+        exp_samples:
+          - labels: 'DCGM_FI_DEV_GPU_TEMP{Hostname="node-1", UUID="GPU-busy", gpu="1", source="derived"}'
+            value: 77
+          - labels: 'DCGM_FI_DEV_GPU_TEMP{Hostname="node-1", UUID="GPU-idle", gpu="0", source="derived"}'
+            value: 32
+
+      - expr: DCGM_FI_DEV_POWER_USAGE
+        eval_time: 2m
+        exp_samples:
+          - labels: 'DCGM_FI_DEV_POWER_USAGE{Hostname="node-1", UUID="GPU-busy", gpu="1", source="derived"}'
+            value: 70
+          - labels: 'DCGM_FI_DEV_POWER_USAGE{Hostname="node-1", UUID="GPU-idle", gpu="0", source="derived"}'
+            value: 12
+
+      # THE SELF-CANCELLATION REGRESSION, and the reason this file uses
+      # promql_expr_test at several successive eval_times rather than one.
+      #
+      # Each evaluation writes DCGM_FI_DEV_GPU_TEMP back into the same series the
+      # rule reads. Drop the {source!="derived"} matcher from the `unless` and the
+      # rule starts matching its OWN previous output: the series is produced,
+      # cancelled, produced, cancelled — alternating on every evaluation. A single
+      # eval_time has a 50% chance of landing on a good tick and passing.
+      - expr: count(DCGM_FI_DEV_GPU_TEMP)
+        eval_time: 1m
+        exp_samples: [{ labels: '{}', value: 2 }]
+      - expr: count(DCGM_FI_DEV_GPU_TEMP)
+        eval_time: 1m30s
+        exp_samples: [{ labels: '{}', value: 2 }]
+      - expr: count(DCGM_FI_DEV_GPU_TEMP)
+        eval_time: 2m
+        exp_samples: [{ labels: '{}', value: 2 }]
+      - expr: count(DCGM_FI_DEV_GPU_TEMP)
+        eval_time: 2m30s
+        exp_samples: [{ labels: '{}', value: 2 }]
+
+  # =========================================================================
+  # The other half of `unless on (UUID)`: a GPU whose REAL temperature is being
+  # exported must not also get a synthesised one. This is what makes the rules
+  # safe to leave in place against real hardware, and it is untestable on this
+  # rig — the fake exporter never emits the real series.
+  # =========================================================================
+  - interval: 30s
+    name: a real exporter series suppresses the derived one for that GPU only
+    input_series:
+      - series: 'DCGM_FI_DEV_GPU_UTIL{UUID="GPU-real", gpu="0", Hostname="node-1"}'
+        values: '50x20'
+      - series: 'DCGM_FI_DEV_GPU_UTIL{UUID="GPU-fake", gpu="1", Hostname="node-1"}'
+        values: '50x20'
+      # No source label at all — which is what a genuine dcgm-exporter emits, and
+      # what {source!="derived"} is written to match.
+      - series: 'DCGM_FI_DEV_GPU_TEMP{UUID="GPU-real", gpu="0", Hostname="node-1"}'
+        values: '61x20'
+
+    promql_expr_test:
+      # GPU-real keeps its exported value and gains no derived twin...
+      - expr: DCGM_FI_DEV_GPU_TEMP{UUID="GPU-real"}
+        eval_time: 2m
+        exp_samples:
+          - labels: 'DCGM_FI_DEV_GPU_TEMP{Hostname="node-1", UUID="GPU-real", gpu="0"}'
+            value: 61
+      # ...while GPU-fake, with no exported series, still gets one: 32 + 0.45*50.
+      - expr: DCGM_FI_DEV_GPU_TEMP{UUID="GPU-fake"}
+        eval_time: 2m
+        exp_samples:
+          - labels: 'DCGM_FI_DEV_GPU_TEMP{Hostname="node-1", UUID="GPU-fake", gpu="1", source="derived"}'
+            value: 54.5
+
+  # =========================================================================
+  # GPUHighUtilization — the alert scripts/verify.sh polls for six minutes.
+  # =========================================================================
+  - interval: 30s
+    name: GPUHighUtilization fires above the threshold, and only above it
+    input_series:
+      # 85 is the bottom of the gpu-busy annotation band (85-99): if the rule ever
+      # stops firing at 85, the shipped workload stops driving the alert.
+      - series: 'DCGM_FI_DEV_GPU_UTIL{UUID="GPU-busy", gpu="0", Hostname="node-1"}'
+        values: '85x20'
+      # Exactly at the threshold. `> 80` is strict, so this must never fire —
+      # nothing else in the repo pins that boundary.
+      - series: 'DCGM_FI_DEV_GPU_UTIL{UUID="GPU-edge", gpu="1", Hostname="node-1"}'
+        values: '80x20'
+      # Top of the gpu-steady band (40-60) — comfortably clear.
+      - series: 'DCGM_FI_DEV_GPU_UTIL{UUID="GPU-steady", gpu="2", Hostname="node-1"}'
+        values: '60x20'
+
+    alert_rule_test:
+      # for: 1m has not elapsed — pending, not firing.
+      - eval_time: 30s
+        alertname: GPUHighUtilization
+        exp_alerts: []
+
+      - eval_time: 5m
+        alertname: GPUHighUtilization
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+              UUID: GPU-busy
+              gpu: "0"
+              Hostname: node-1
+            exp_annotations:
+              summary: "GPU 0 on node-1 above 80% utilisation"
+              description: "DCGM_FI_DEV_GPU_UTIL has been > 80% for 1m (simulated)."
+
+  # =========================================================================
+  # GPUHighMemoryUsage. Fires permanently on this rig by construction (the fake
+  # exporter reports memory all-or-nothing), so a live check can only ever see
+  # it firing — the not-firing and divide-by-zero cases live here or nowhere.
+  # =========================================================================
+  - interval: 30s
+    name: GPUHighMemoryUsage is allocation-driven, and survives a zero denominator
+    input_series:
+      # Allocated: FB_USED = the whole 15360 MiB, FB_FREE = 0. Exactly 100%.
+      - series: 'DCGM_FI_DEV_FB_USED{UUID="GPU-alloc", gpu="0", Hostname="node-1"}'
+        values: '15360x20'
+      - series: 'DCGM_FI_DEV_FB_FREE{UUID="GPU-alloc", gpu="0", Hostname="node-1"}'
+        values: '0x20'
+      # Unallocated: the mirror image. 0%.
+      - series: 'DCGM_FI_DEV_FB_USED{UUID="GPU-free", gpu="1", Hostname="node-1"}'
+        values: '0x20'
+      - series: 'DCGM_FI_DEV_FB_FREE{UUID="GPU-free", gpu="1", Hostname="node-1"}'
+        values: '15360x20'
+      # Both zero — the case clamp_min(x, 1) exists for. Without it this is 0/0 =
+      # NaN, which does not fire either, but silently poisons any aggregate built
+      # over the expression. With it the GPU reads a clean 0%.
+      - series: 'DCGM_FI_DEV_FB_USED{UUID="GPU-zero", gpu="2", Hostname="node-1"}'
+        values: '0x20'
+      - series: 'DCGM_FI_DEV_FB_FREE{UUID="GPU-zero", gpu="2", Hostname="node-1"}'
+        values: '0x20'
+
+    # ⚠️ KNOWN LIMITATION, stated rather than papered over: this block RESTATES the
+    # alert's expression instead of reading it from the rule, so it pins the intended
+    # arithmetic but will not notice the rule drifting away from it. There is no way
+    # to do better here — the memory percentage is not a recording rule, so it has no
+    # name to query, and dropping clamp_min turns 0/0 into NaN, which fails `> 90`
+    # exactly as 0 does. The alert cannot tell the two apart; only the value can, and
+    # the value is what a dashboard panel aggregating over these GPUs would consume.
+    promql_expr_test:
+      # 0, not NaN. `count(x == 0)` would also count a NaN out, so assert the value.
+      - expr: 100 * DCGM_FI_DEV_FB_USED / clamp_min(DCGM_FI_DEV_FB_USED + DCGM_FI_DEV_FB_FREE, 1)
+        eval_time: 3m
+        exp_samples:
+          - labels: '{Hostname="node-1", UUID="GPU-alloc", gpu="0"}'
+            value: 100
+          - labels: '{Hostname="node-1", UUID="GPU-free", gpu="1"}'
+            value: 0
+          - labels: '{Hostname="node-1", UUID="GPU-zero", gpu="2"}'
+            value: 0
+
+    alert_rule_test:
+      - eval_time: 3m
+        alertname: GPUHighMemoryUsage
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+              UUID: GPU-alloc
+              gpu: "0"
+              Hostname: node-1
+            exp_annotations:
+              summary: "GPU 0 on node-1 above 90% memory"
+              description: "Simulated framebuffer usage > 90% for 2m."
+
+  # =========================================================================
+  # GPUMetricsAbsent. Never exercised on the rig — the fake exporter is always
+  # up — so this is the only place it is ever proven to work.
+  # =========================================================================
+  - interval: 30s
+    name: GPUMetricsAbsent fires when the exporter stops being scraped
+    input_series:
+      # Deliberately NOT DCGM_FI_DEV_GPU_UTIL: the point is that it is missing.
+      # Something has to exist, or there is no series for the test to advance on.
+      - series: 'up{job="fake-dcgm-exporter"}'
+        values: '0x20'
+
+    alert_rule_test:
+      # for: 5m not yet elapsed.
+      - eval_time: 4m
+        alertname: GPUMetricsAbsent
+        exp_alerts: []
+
+      - eval_time: 6m
+        alertname: GPUMetricsAbsent
+        exp_alerts:
+          - exp_labels:
+              severity: critical
+            exp_annotations:
+              summary: "No GPU (DCGM) metrics are being scraped"
+              description: "DCGM_FI_DEV_GPU_UTIL absent for 5m — scrape target down?"

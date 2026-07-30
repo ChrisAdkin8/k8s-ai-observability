@@ -1,0 +1,20 @@
+# Copy to terraform.tfvars and adjust. Keep region in sync with scripts/config.sh
+# (export GCP_PROJECT and GCP_REGION for the scripts).
+#
+# project is NOT set here on purpose: scripts/config.sh exports TF_VAR_project from
+# GCP_PROJECT, so the project is stated once. A value here would override that export
+# (tfvars outrank the environment), so uncomment only to target a different project
+# than the one the Phase-2 scripts will use.
+# project = "my-gcp-project-id"
+region       = "europe-west1"
+machine_type = "e2-standard-2" # amd64, >= 2 vCPU / 8 GB
+node_count   = 1               # per zone (regional cluster ~3 zones => ~3 nodes)
+
+# REQUIRED — no default, so an unset value fails the plan rather than leaving the
+# control plane open. Use a VPN or office range; a dynamic home IP will lock you out.
+api_allowed_cidrs = ["203.0.113.0/24"]
+# Contract overrides. Values deliberately NOT restated here — they live in
+# terraform/modules/contract/variables.tf, and copying them into a comment is how
+# they go stale. Uncomment only to diverge from the contract on purpose.
+# cluster_name = "..."
+# k8s_version  = "..."

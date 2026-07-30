@@ -1,0 +1,13 @@
+# Namespace for the simulated LLM serving stack.
+#
+# Numbered 00- so `kubectl apply -f manifests/llm/` (which applies files in
+# alphabetical order) creates it before anything that lives in it.
+#
+# ⚠️ Must match LLM_NS in scripts/config.sh — install.sh fails loudly if they
+# drift, because the static manifests here hardcode the name.
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: llm-sim
+  labels:
+    app.kubernetes.io/part-of: gpu-sim-llm

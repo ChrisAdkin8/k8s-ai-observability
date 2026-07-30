@@ -1,0 +1,24 @@
+# Target deployment for scripts/drive-load.sh — starts idle; the driver walks its
+# simulated-gpu-utilization annotation over time to produce ramps / spike trains.
+# Opt-in: kubectl apply -f manifests/workloads/extras/
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: gpu-driven
+  namespace: default
+  labels: { app.kubernetes.io/part-of: gpu-sim-workloads }
+spec:
+  replicas: 1
+  selector: { matchLabels: { app: gpu-driven } }
+  template:
+    metadata:
+      labels: { app: gpu-driven, app.kubernetes.io/part-of: gpu-sim-workloads }
+      annotations:
+        run.ai/simulated-gpu-utilization: "0-5"   # driver overrides this over time
+    spec:
+      containers:
+        - name: workload
+          image: busybox:1.36
+          command: ["sh", "-c", "sleep infinity"]
+          resources:
+            limits: { nvidia.com/gpu: "1" }

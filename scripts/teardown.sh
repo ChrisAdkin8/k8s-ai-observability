@@ -1,0 +1,108 @@
+#!/usr/bin/env bash
+# teardown.sh <eks|gke|local> [--destroy] — remove the stacks; with --destroy also
+# remove the cluster itself (`terraform destroy` on the clouds, `kind delete` on local).
+# Ordering is critical: uninstall Helm releases and let any cloud LB/PVC drain BEFORE
+# terraform destroy, or dangling ELBs/target-groups/disks hang the destroy.
+set -euo pipefail
+cd "$(dirname "${BASH_SOURCE[0]}")/.."
+source scripts/config.sh
+
+TARGET="${1:?usage: teardown.sh <eks|gke|local> [--destroy]}"
+DESTROY="${2:-}"
+case "$TARGET" in
+  eks)   require_tools terraform aws ;;
+  gke)   require_tools terraform gcloud ;;
+  local) require_tools kind ;;
+  *)     echo "target must be eks|gke|local" >&2; exit 1 ;;
+esac
+
+# Reaching the cluster is REQUIRED to remove the stacks, but must not be required to
+# destroy the infrastructure. A cluster deleted by hand, or a destroy that failed
+# partway, leaves the kubeconfig step failing while the billable resources it was
+# meant to clean up (control plane, NAT gateway, EBS) are still running — and this
+# script is the only documented route to `terraform destroy` (Makefile, Taskfile,
+# README, docs/*.md all funnel through it). So an unreachable cluster is fatal on its
+# own, and merely skips a stage under --destroy.
+if CTX="$(ensure_context "$TARGET")"; then
+  CLUSTER_REACHABLE=1
+else
+  CLUSTER_REACHABLE=0
+  if [[ "$DESTROY" != "--destroy" ]]; then
+    echo "ERROR: cannot reach the $TARGET cluster (see above), and there is nothing" >&2
+    echo "       else for a stacks-only teardown to do." >&2
+    echo "       If the cluster is already gone and you want the INFRASTRUCTURE removed:" >&2
+    echo "         ./scripts/teardown.sh $TARGET --destroy" >&2
+    exit 1
+  fi
+  echo "WARNING: cannot reach the $TARGET cluster — skipping Helm/manifest removal."
+  if [[ "$TARGET" == "local" ]]; then
+    # Nothing billable, nothing outside the machine: a kind cluster that cannot be
+    # reached has no resources to strand, so there is nothing here to weigh up.
+    echo "         Continuing to 'kind delete cluster' to remove whatever is left."
+  else
+    echo "         Continuing to 'terraform destroy' so infrastructure is not stranded."
+    echo "         If the cluster IS alive and this is a kubeconfig/credentials problem,"
+    echo "         Ctrl-C now: destroying with LoadBalancers still present can leave"
+    echo "         dangling cloud resources that block or slow the destroy."
+  fi
+fi
+
+if [[ "$CLUSTER_REACHABLE" -eq 1 ]]; then
+  KUBECTL=(kubectl --context "$CTX")
+  HELM=(helm --kube-context "$CTX")
+
+  echo "==> removing workloads + apps (in reverse dependency order)"
+  # Opt-in extras first in each family — they may not exist, hence --ignore-not-found.
+  # Deleting manifests/llm/ removes the llm-sim namespace, which cascades to the
+  # simulator Deployments, Service, profile ConfigMaps and the generated script
+  # ConfigMap; the per-object deletes that follow it are then no-ops.
+  "${KUBECTL[@]}" delete -f manifests/llm/extras/ --ignore-not-found
+  "${KUBECTL[@]}" delete -f manifests/llm/ --ignore-not-found
+  "${KUBECTL[@]}" delete -f manifests/workloads/extras/ --ignore-not-found
+  "${KUBECTL[@]}" delete -f manifests/workloads/ --ignore-not-found
+  "${HELM[@]}" uninstall "$FAKE_GPU_RELEASE" -n "$FAKE_GPU_NS" 2>/dev/null || true
+  "${KUBECTL[@]}" delete -f manifests/alerts/ --ignore-not-found
+  "${KUBECTL[@]}" delete -f manifests/servicemonitor/ --ignore-not-found
+  "${HELM[@]}" uninstall "$KPS_RELEASE" -n "$MONITORING_NS" 2>/dev/null || true
+
+  echo "==> waiting for any cloud-backed Services/PVCs to drain (defaults use emptyDir + port-forward, so usually none)"
+  # NAMESPACE AND NAME MUST COME OUT TOGETHER. `-o name` looks like it carries the
+  # namespace and does not: with -A it still prints bare "service/<name>", so splitting
+  # on "/" yields the literal string "service" as the namespace. The delete then targets
+  # a namespace that does not exist and `--ignore-not-found` reports SUCCESS, so the
+  # drain silently removes nothing and we proceed to destroy with the ELB still attached
+  # — the exact dangling-LB hang the ordering in this file exists to prevent.
+  lbs="$("${KUBECTL[@]}" get svc -A --field-selector spec.type=LoadBalancer \
+    -o jsonpath='{range .items[*]}{.metadata.namespace}{" "}{.metadata.name}{"\n"}{end}' 2>/dev/null || true)"
+  if [[ -n "${lbs//[[:space:]]/}" ]]; then
+    echo "    LoadBalancer services still present — deleting and waiting:"
+    # Here-string, not a pipe: a piped `while` runs in a subshell, so a failure inside it
+    # is invisible here and (under pipefail) can abort the run before terraform destroy.
+    while read -r ns name; do
+      [[ -n "$ns" && -n "$name" ]] || continue
+      echo "      $ns/$name"
+      "${KUBECTL[@]}" -n "$ns" delete svc "$name" --ignore-not-found || true
+    done <<<"$lbs"
+    sleep 30
+  fi
+  "${KUBECTL[@]}" delete pvc -n "$MONITORING_NS" --all --ignore-not-found 2>/dev/null || true
+fi
+
+if [[ "$DESTROY" == "--destroy" ]]; then
+  if [[ "$TARGET" == "local" ]]; then
+    # No Terraform, no cloud resources, nothing billable to strand — so unlike the cloud
+    # path this cannot half-fail and leave you paying for it. Delete the cluster, then
+    # drop the renamed context: `kind delete` removes the entry it created (kind-<name>),
+    # not the gpu-sim-local alias configure_kubeconfig renamed it to, so without this a
+    # stale context accumulates on every rebuild.
+    echo "==> deleting the kind cluster ($CLUSTER_NAME)"
+    kind delete cluster --name "$CLUSTER_NAME"
+    kubectl config delete-context "gpu-sim-local" >/dev/null 2>&1 || true
+  else
+    echo "==> terraform destroy ($TARGET)"
+    terraform -chdir="terraform/$TARGET" destroy -auto-approve
+  fi
+else
+  echo "==> stacks removed. Cluster left running. Re-run with '--destroy' to remove it:"
+  echo "    ./scripts/teardown.sh $TARGET --destroy"
+fi

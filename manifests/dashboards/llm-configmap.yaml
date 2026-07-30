@@ -1,0 +1,523 @@
+# Self-contained LLM serving dashboard, provisioned via the Grafana sidecar
+# (label grafana_dashboard=1). No grafana.com egress. verify.sh asserts this
+# exact ConfigMap by name and the uid below.
+#
+# The GPU board (dcgm-configmap.yaml, uid gpu-sim-dcgm) is deliberately left
+# untouched — it is this repo's proof that a stock DCGM dashboard works unchanged.
+#
+# Every per-tenant panel breaks out by model_name. Showing the healthy and the
+# saturated tenant side by side IS the point of running two simulators; a board
+# that sums them away discards it.
+#
+# The default window below is 15m, not the usual 30m, because this rig is
+# short-lived: a freshly installed cluster has only minutes of history, and on a
+# 30m window that history is squeezed into the right-hand third with the rest of
+# the canvas blank — which reads as "the panels never populated" when the data
+# was there all along. 15m still comfortably covers the 5m recording-rule
+# windows this board queries (llm:*_5m, from manifests/alerts/).
+#
+# Separately, and unavoidably: the llm:tokens:*_rate5m panels under-read for the
+# first 5 minutes after install. rate() over [5m] on a counter that started
+# inside the window climbs linearly to the true value as the window fills — the
+# saturated tenant walks ~76 → 700 tok/s over exactly 5m. That is the rate
+# window warming up, not the simulator ramping: the queue is at its 160 plateau
+# from the first scrape.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: llm-sim-dashboard
+  namespace: monitoring   # must match config.sh MONITORING_NS
+  labels:
+    grafana_dashboard: "1"
+data:
+  llm-simulation.json: |
+    {
+      "annotations": {
+        "list": []
+      },
+      "editable": true,
+      "graphTooltip": 1,
+      "schemaVersion": 39,
+      "tags": [
+        "llm",
+        "vllm",
+        "simulation"
+      ],
+      "title": "LLM Simulation — vLLM Serving Overview",
+      "uid": "llm-sim-overview",
+      "time": {
+        "from": "now-15m",
+        "to": "now"
+      },
+      "refresh": "30s",
+      "templating": {
+        "list": [
+          {
+            "name": "datasource",
+            "type": "datasource",
+            "query": "prometheus",
+            "refresh": 1,
+            "hide": 0,
+            "current": {},
+            "regex": ""
+          },
+          {
+            "name": "model",
+            "type": "query",
+            "datasource": {
+              "type": "prometheus",
+              "uid": "${datasource}"
+            },
+            "query": "label_values(vllm:num_requests_running, model_name)",
+            "refresh": 1,
+            "includeAll": true,
+            "multi": true,
+            "current": {
+              "text": "All",
+              "value": "$__all"
+            },
+            "label": "Model"
+          }
+        ]
+      },
+      "panels": [
+        {
+          "id": 1,
+          "type": "timeseries",
+          "title": "Time to first token — p95 (alert fires above 2s)",
+          "description": "The healthy tenant sits below the red line; the saturated one sits above it. That gap is the whole demonstration: same code, same dashboard, one tenant degraded.",
+          "gridPos": {
+            "h": 9,
+            "w": 12,
+            "x": 0,
+            "y": 0
+          },
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "fieldConfig": {
+            "defaults": {
+              "unit": "s",
+              "min": 0,
+              "custom": {
+                "fillOpacity": 8
+              },
+              "thresholds": {
+                "mode": "absolute",
+                "steps": [
+                  {
+                    "color": "green",
+                    "value": null
+                  },
+                  {
+                    "color": "red",
+                    "value": 2
+                  }
+                ]
+              }
+            },
+            "overrides": []
+          },
+          "options": {
+            "legend": {
+              "displayMode": "table",
+              "placement": "bottom",
+              "calcs": [
+                "last",
+                "max"
+              ]
+            }
+          },
+          "targets": [
+            {
+              "datasource": {
+                "type": "prometheus",
+                "uid": "${datasource}"
+              },
+              "expr": "llm:ttft:p95_5m{model_name=~\"$model\"}",
+              "legendFormat": "{{model_name}}",
+              "refId": "A"
+            }
+          ]
+        },
+        {
+          "id": 4,
+          "type": "timeseries",
+          "title": "Inter-token latency — p95",
+          "description": "vllm:time_per_output_token_seconds. Degrades mildly with concurrency, unlike TTFT which is dominated by queueing. NOTE: p95 here reads high because of bucket resolution, not load. A full batch models ITL at 22.5ms, which falls inside the wide (25ms, 50ms] bucket, so histogram_quantile interpolates and reports ~43ms. Real vLLM uses the same bucket boundaries, so do not set an ITL SLO from this number.",
+          "gridPos": {
+            "h": 9,
+            "w": 12,
+            "x": 12,
+            "y": 0
+          },
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "fieldConfig": {
+            "defaults": {
+              "unit": "s",
+              "min": 0
+            },
+            "overrides": []
+          },
+          "targets": [
+            {
+              "datasource": {
+                "type": "prometheus",
+                "uid": "${datasource}"
+              },
+              "expr": "llm:tpot:p95_5m{model_name=~\"$model\"}",
+              "legendFormat": "{{model_name}}",
+              "refId": "A"
+            }
+          ]
+        },
+        {
+          "id": 2,
+          "type": "timeseries",
+          "title": "Requests running vs waiting — $model",
+          "description": "One panel per model (repeats on $model), because the two tenants operate at very different scales and a shared panel hides that. Waiting is on the RIGHT axis: a saturated tenant queues ~160 against a running batch of 16, and on one axis the running series flattens to nothing. Waiting plateaus at max_in_flight - max_concurrency; a healthy tenant should sit near zero. If both tenants pin at the same numbers, arrival exceeds capacity for both — compare arrival_rate_rps against llmsim_capacity_rps.",
+          "gridPos": {
+            "h": 9,
+            "w": 12,
+            "x": 0,
+            "y": 9
+          },
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "fieldConfig": {
+            "defaults": {
+              "unit": "short",
+              "min": 0,
+              "custom": {
+                "fillOpacity": 8,
+                "axisPlacement": "left"
+              }
+            },
+            "overrides": [
+              {
+                "matcher": {
+                  "id": "byFrameRefID",
+                  "options": "A"
+                },
+                "properties": [
+                  {
+                    "id": "custom.axisLabel",
+                    "value": "running (in batch)"
+                  },
+                  {
+                    "id": "color",
+                    "value": {
+                      "mode": "fixed",
+                      "fixedColor": "green"
+                    }
+                  }
+                ]
+              },
+              {
+                "matcher": {
+                  "id": "byFrameRefID",
+                  "options": "B"
+                },
+                "properties": [
+                  {
+                    "id": "custom.axisPlacement",
+                    "value": "right"
+                  },
+                  {
+                    "id": "custom.axisLabel",
+                    "value": "waiting (queued)"
+                  },
+                  {
+                    "id": "custom.fillOpacity",
+                    "value": 0
+                  },
+                  {
+                    "id": "custom.lineWidth",
+                    "value": 2
+                  },
+                  {
+                    "id": "color",
+                    "value": {
+                      "mode": "fixed",
+                      "fixedColor": "orange"
+                    }
+                  }
+                ]
+              }
+            ]
+          },
+          "options": {
+            "legend": {
+              "displayMode": "table",
+              "placement": "bottom",
+              "calcs": [
+                "last",
+                "max"
+              ]
+            }
+          },
+          "targets": [
+            {
+              "datasource": {
+                "type": "prometheus",
+                "uid": "${datasource}"
+              },
+              "expr": "vllm:num_requests_running{model_name=~\"$model\"}",
+              "legendFormat": "running",
+              "refId": "A"
+            },
+            {
+              "datasource": {
+                "type": "prometheus",
+                "uid": "${datasource}"
+              },
+              "expr": "vllm:num_requests_waiting{model_name=~\"$model\"}",
+              "legendFormat": "waiting",
+              "refId": "B"
+            }
+          ],
+          "repeat": "model",
+          "repeatDirection": "h",
+          "maxPerRow": 2
+        },
+        {
+          "id": 3,
+          "type": "timeseries",
+          "title": "Token throughput",
+          "description": "Prompt (prefill) and generation (decode) tokens per second, from the vllm:*_tokens_total counters.",
+          "gridPos": {
+            "h": 8,
+            "w": 12,
+            "x": 0,
+            "y": 18
+          },
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "fieldConfig": {
+            "defaults": {
+              "unit": "none",
+              "min": 0
+            },
+            "overrides": []
+          },
+          "options": {
+            "legend": {
+              "displayMode": "list",
+              "placement": "bottom"
+            }
+          },
+          "targets": [
+            {
+              "datasource": {
+                "type": "prometheus",
+                "uid": "${datasource}"
+              },
+              "expr": "llm:tokens:generation_rate5m{model_name=~\"$model\"}",
+              "legendFormat": "{{model_name}} generation tok/s",
+              "refId": "A"
+            },
+            {
+              "datasource": {
+                "type": "prometheus",
+                "uid": "${datasource}"
+              },
+              "expr": "llm:tokens:prompt_rate5m{model_name=~\"$model\"}",
+              "legendFormat": "{{model_name}} prompt tok/s",
+              "refId": "B"
+            }
+          ]
+        },
+        {
+          "id": 8,
+          "type": "timeseries",
+          "title": "Cross-domain — generated tokens per GPU watt (cluster-wide)",
+          "description": "⚠️ These two signals are driven INDEPENDENTLY. Nothing in this rig makes GPU utilisation follow LLM load: GPU load comes from the pod annotations on the gpu-* workloads, LLM load from the simulator profiles. This panel demonstrates the query pattern and dashboard wiring across two metric families — it does NOT show causation. Note the denominator is itself a derived series (DCGM_FI_DEV_POWER_USAGE is synthesised from utilisation by gpu-prometheusrule.yaml).",
+          "gridPos": {
+            "h": 8,
+            "w": 12,
+            "x": 12,
+            "y": 18
+          },
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "fieldConfig": {
+            "defaults": {
+              "unit": "none",
+              "min": 0
+            },
+            "overrides": []
+          },
+          "targets": [
+            {
+              "datasource": {
+                "type": "prometheus",
+                "uid": "${datasource}"
+              },
+              "expr": "llm:tokens_per_watt:5m",
+              "legendFormat": "tokens/sec per watt (cluster)",
+              "refId": "A"
+            }
+          ]
+        },
+        {
+          "id": 5,
+          "type": "timeseries",
+          "title": "KV cache utilisation",
+          "description": "vllm:gpu_cache_usage_perc — active request tokens over kv_cache_tokens_capacity from the load profile.",
+          "gridPos": {
+            "h": 8,
+            "w": 8,
+            "x": 0,
+            "y": 26
+          },
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "fieldConfig": {
+            "defaults": {
+              "unit": "percentunit",
+              "min": 0,
+              "max": 1
+            },
+            "overrides": []
+          },
+          "targets": [
+            {
+              "datasource": {
+                "type": "prometheus",
+                "uid": "${datasource}"
+              },
+              "expr": "vllm:gpu_cache_usage_perc{model_name=~\"$model\"}",
+              "legendFormat": "{{model_name}}",
+              "refId": "A"
+            }
+          ]
+        },
+        {
+          "id": 6,
+          "type": "timeseries",
+          "title": "Request outcomes by finish reason",
+          "description": "vllm:request_success_total. Rejections (arrivals refused because max_in_flight was reached) are counted separately as llmsim_requests_rejected_total — a rejected request never ran, so it is not a vLLM 'success' of any reason.",
+          "gridPos": {
+            "h": 8,
+            "w": 8,
+            "x": 8,
+            "y": 26
+          },
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "fieldConfig": {
+            "defaults": {
+              "unit": "none",
+              "min": 0
+            },
+            "overrides": []
+          },
+          "targets": [
+            {
+              "datasource": {
+                "type": "prometheus",
+                "uid": "${datasource}"
+              },
+              "expr": "sum by (model_name, finished_reason) (rate(vllm:request_success_total{model_name=~\"$model\"}[5m]))",
+              "legendFormat": "{{model_name}} {{finished_reason}}",
+              "refId": "A"
+            },
+            {
+              "datasource": {
+                "type": "prometheus",
+                "uid": "${datasource}"
+              },
+              "expr": "sum by (model_name) (rate(llmsim_requests_rejected_total{model_name=~\"$model\"}[5m]))",
+              "legendFormat": "{{model_name}} rejected (at capacity)",
+              "refId": "B"
+            }
+          ]
+        },
+        {
+          "id": 7,
+          "type": "stat",
+          "title": "Profile generation",
+          "description": "Increments each time a simulator successfully reloads its load profile. This is how you confirm a drive-llm-load.sh edit actually landed — ConfigMap updates take up to ~60s to reach the pod. If it never moves after an edit, the profile is mounted with subPath (which kubelet never updates).",
+          "gridPos": {
+            "h": 8,
+            "w": 8,
+            "x": 16,
+            "y": 26
+          },
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "fieldConfig": {
+            "defaults": {
+              "unit": "none"
+            },
+            "overrides": []
+          },
+          "options": {
+            "reduceOptions": {
+              "calcs": [
+                "lastNotNull"
+              ]
+            },
+            "textMode": "value_and_name"
+          },
+          "targets": [
+            {
+              "datasource": {
+                "type": "prometheus",
+                "uid": "${datasource}"
+              },
+              "expr": "llmsim_profile_generation{model_name=~\"$model\"}",
+              "legendFormat": "{{model_name}}",
+              "refId": "A"
+            }
+          ]
+        },
+        {
+          "id": 9,
+          "type": "table",
+          "title": "Simulated GPU attribution",
+          "description": "Which simulated GPU each simulator pod holds. The pod knows only the device plugin's allocation id (device_id, from MOCK_NVIDIA_VISIBLE_DEVICES — injected by Allocate(), not a webhook), which is NOT the GPU's DCGM UUID and never matches one. So this joins on the pod instead: the exporter labels each allocated GPU with its consumer, and Prometheus renames those to exported_* because target labels win the collision. Columns UUID and gpu therefore come from the DCGM side and are the real thing. Only pods that request nvidia.com/gpu appear — llm-saturated deliberately runs unbound, so its absence here is expected.",
+          "gridPos": {
+            "h": 8,
+            "w": 24,
+            "x": 0,
+            "y": 34
+          },
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "options": {
+            "showHeader": true
+          },
+          "targets": [
+            {
+              "datasource": {
+                "type": "prometheus",
+                "uid": "${datasource}"
+              },
+              "expr": "llmsim_gpu_binding_info * on (namespace, pod) group_left(UUID, gpu, modelName) label_replace(label_replace(DCGM_FI_DEV_GPU_UTIL{exported_pod!=\"\"}, \"namespace\", \"$1\", \"exported_namespace\", \"(.*)\"), \"pod\", \"$1\", \"exported_pod\", \"(.*)\")",
+              "format": "table",
+              "instant": true,
+              "refId": "A"
+            }
+          ]
+        }
+      ]
+    }

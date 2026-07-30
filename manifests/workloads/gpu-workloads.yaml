@@ -1,0 +1,75 @@
+# Sample GPU workloads. Each requests nvidia.com/gpu (satisfied by the fake operator)
+# and drives simulated utilisation via the pod-template annotation.
+#
+# ⚠️ The run.ai/simulated-gpu-utilization annotation MUST be on the POD TEMPLATE
+#    (spec.template.metadata.annotations) — NOT the Deployment's top-level metadata.
+#    Misplace it and you get scheduled pods with flat/zero metrics.
+#
+# The container itself does no real work (busybox sleep); the annotation is what moves
+# the DCGM metrics. "busy" (85-99) is the one that trips GPUHighUtilization.
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: gpu-idle
+  namespace: default
+  labels: { app.kubernetes.io/part-of: gpu-sim-workloads }
+spec:
+  replicas: 1
+  selector: { matchLabels: { app: gpu-idle } }
+  template:
+    metadata:
+      labels: { app: gpu-idle, app.kubernetes.io/part-of: gpu-sim-workloads }
+      annotations:
+        run.ai/simulated-gpu-utilization: "0-5"
+    spec:
+      containers:
+        - name: workload
+          image: busybox:1.36
+          command: ["sh", "-c", "sleep infinity"]
+          resources:
+            limits: { nvidia.com/gpu: "1" }
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: gpu-steady
+  namespace: default
+  labels: { app.kubernetes.io/part-of: gpu-sim-workloads }
+spec:
+  replicas: 1
+  selector: { matchLabels: { app: gpu-steady } }
+  template:
+    metadata:
+      labels: { app: gpu-steady, app.kubernetes.io/part-of: gpu-sim-workloads }
+      annotations:
+        run.ai/simulated-gpu-utilization: "40-60"
+    spec:
+      containers:
+        - name: workload
+          image: busybox:1.36
+          command: ["sh", "-c", "sleep infinity"]
+          resources:
+            limits: { nvidia.com/gpu: "1" }
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: gpu-busy
+  namespace: default
+  labels: { app.kubernetes.io/part-of: gpu-sim-workloads }
+spec:
+  replicas: 1
+  selector: { matchLabels: { app: gpu-busy } }
+  template:
+    metadata:
+      labels: { app: gpu-busy, app.kubernetes.io/part-of: gpu-sim-workloads }
+      annotations:
+        run.ai/simulated-gpu-utilization: "85-99"   # trips GPUHighUtilization
+    spec:
+      containers:
+        - name: workload
+          image: busybox:1.36
+          command: ["sh", "-c", "sleep infinity"]
+          resources:
+            limits: { nvidia.com/gpu: "1" }

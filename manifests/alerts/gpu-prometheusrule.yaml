@@ -1,0 +1,100 @@
+# GPU recording + alert rules over the fake DCGM metrics. Alert names contain "GPU" so
+# verify.sh can find them. Thresholds are chosen so the "busy" sample workload (util
+# 85-99) reliably trips GPUHighUtilization.
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: gpu-simulation-alerts
+  namespace: monitoring   # must match config.sh MONITORING_NS (install.sh guards drift)
+  labels:
+    release: kube-prometheus-stack
+spec:
+  groups:
+    # ---- derived (synthetic) thermal/power series -----------------------------
+    # WHY THIS EXISTS: the fake dcgm-exporter (status-exporter, chart 0.0.59) emits
+    # ONLY three DCGM series — DCGM_FI_DEV_GPU_UTIL, _FB_USED, _FB_FREE. It has no
+    # knob to add more (no args, no metrics-config env var, nothing in `helm show
+    # values`). So DCGM_FI_DEV_GPU_TEMP / _POWER_USAGE simply do not exist, and the
+    # temperature/power panels of the DCGM dashboard were permanently blank.
+    #
+    # We synthesise them here from utilisation, and RECORD THEM UNDER THE REAL DCGM
+    # NAMES on purpose: the point of this project is that production dashboards and
+    # queries work unchanged, so a stock DCGM board (e.g. grafana.com 12239) should
+    # find the series it expects. Every derived sample carries source="derived" so
+    # it is always distinguishable from a genuine exporter sample.
+    #
+    # Coefficients model a Tesla-T4 (the simulated gpuProduct): idle 32 °C / 12 W,
+    # 100% util ≈ 77 °C / 70 W (T4 TDP). Linear in util, so the curves track the
+    # workload annotations — idle/steady/busy are visibly different on the board.
+    #
+    # `unless on (UUID) <real metric>{source!="derived"}` makes these SELF-DISABLING: if
+    # a future chart version starts exporting the real series for a GPU, the derived
+    # sample for that GPU stops being produced instead of double-plotting alongside it.
+    # The {source!="derived"} matcher is LOAD-BEARING, not decoration — without it the
+    # rule reads back its OWN previous output and cancels itself every other evaluation.
+    - name: gpu.simulation.derived
+      rules:
+        - record: DCGM_FI_DEV_GPU_TEMP
+          expr: >-
+            (32 + 0.45 * DCGM_FI_DEV_GPU_UTIL)
+            unless on (UUID) DCGM_FI_DEV_GPU_TEMP{source!="derived"}
+          labels:
+            source: derived
+
+        - record: DCGM_FI_DEV_POWER_USAGE
+          expr: >-
+            (12 + 0.58 * DCGM_FI_DEV_GPU_UTIL)
+            unless on (UUID) DCGM_FI_DEV_POWER_USAGE{source!="derived"}
+          labels:
+            source: derived
+
+    - name: gpu.simulation.rules
+      rules:
+        - alert: GPUHighUtilization
+          expr: DCGM_FI_DEV_GPU_UTIL > 80
+          for: 1m
+          labels:
+            severity: warning
+          annotations:
+            summary: "GPU {{ $labels.gpu }} on {{ $labels.Hostname }} above 80% utilisation"
+            description: "DCGM_FI_DEV_GPU_UTIL has been > 80% for 1m (simulated)."
+
+        # ALWAYS FIRING HERE, BY CONSTRUCTION, and unlike GPUHighUtilization
+        # above it is not firing because a workload drives it. The fake exporter
+        # reports memory all-or-nothing per GPU: an allocated GPU is
+        # FB_USED=15360, FB_FREE=0, an unallocated one the reverse. So every
+        # allocated GPU reads exactly 100% for as long as it is held, trips this
+        # 2m after install, and never clears. No GPU can ever report a value in
+        # between.
+        #
+        # Kept unchanged because the expression is correct against real
+        # hardware, where FB_USED follows model weights and KV-cache growth.
+        # Only the simulated input is degenerate. Raising the threshold would
+        # not help: there is nothing between 0% and 100% here to catch.
+        #
+        # This restates the model deliberately, so the rule can be understood
+        # without leaving the file. docs/observability.md#metrics describes the
+        # same thing; change gpuMemory or the allocation model and both need
+        # updating, as does the GPU dashboard caption in README.md.
+        - alert: GPUHighMemoryUsage
+          # Guard divide-by-zero with clamp on the denominator.
+          expr: >-
+            100 * DCGM_FI_DEV_FB_USED
+            / clamp_min(DCGM_FI_DEV_FB_USED + DCGM_FI_DEV_FB_FREE, 1) > 90
+          for: 2m
+          labels:
+            severity: warning
+          annotations:
+            summary: "GPU {{ $labels.gpu }} on {{ $labels.Hostname }} above 90% memory"
+            description: "Simulated framebuffer usage > 90% for 2m."
+
+        - alert: GPUMetricsAbsent
+          # Not exercised by default (the fake exporter is always up). To test:
+          #   kubectl -n gpu-operator scale deploy/<dcgm-exporter> --replicas=0
+          expr: absent(DCGM_FI_DEV_GPU_UTIL)
+          for: 5m
+          labels:
+            severity: critical
+          annotations:
+            summary: "No GPU (DCGM) metrics are being scraped"
+            description: "DCGM_FI_DEV_GPU_UTIL absent for 5m — scrape target down?"

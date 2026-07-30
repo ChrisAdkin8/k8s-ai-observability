@@ -1,0 +1,25 @@
+# fake-gpu-operator Helm values.
+# Repo:  https://runai.jfrog.io/artifactory/api/helm/fake-gpu-operator-charts-prod
+# Release: gpu-operator   Namespace: gpu-operator
+#
+# ⚠️ THREE-WAY NAMING INVARIANT — these must match Terraform + scripts/config.sh:
+#   topology.nodePoolLabelKey  == NODE_POOL_LABEL_KEY (label KEY on the nodes)
+#   topology.nodePools.<name>  == the label VALUE on the nodes (Terraform sets
+#                                 run.ai/simulated-gpu-node-pool=default)
+# A mismatch = green install, ZERO GPUs.
+
+topology:
+  nodePoolLabelKey: run.ai/simulated-gpu-node-pool
+  nodePools:
+    default:            # <-- equals the node-label VALUE
+      gpuCount: 8        # 8/node gives headroom for the opt-in extra workloads
+      gpuProduct: Tesla-T4
+      gpuMemory: 15360  # MiB
+
+# These are real managed CPU nodes → device-plugin mode (default). Do NOT enable the
+# KWOK virtual-node path here. The operator also deploys a fake dcgm-exporter that emits
+# DCGM_FI_DEV_* metrics; manifests/servicemonitor wires Prometheus to it.
+#
+# NOTE: chart knob names/defaults drift between versions. After first install, verify:
+#   helm show values fake-gpu-operator/fake-gpu-operator
+#   kubectl get svc,servicemonitor -n gpu-operator --show-labels

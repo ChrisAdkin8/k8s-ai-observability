@@ -1,0 +1,270 @@
+# Unit tests for manifests/alerts/llm-prometheusrule.yaml.
+#
+# Run with ./scripts/rule-tests.sh (or `task rule-tests`) — it extracts the rule file
+# from the PrometheusRule CR and drops it next to this file, which is why rule_files
+# below is a bare name rather than a path into manifests/.
+#
+# HISTOGRAM INPUT. The `le` values below are genuine members of TTFT_BUCKETS /
+# TPOT_BUCKETS in scripts/llm-sim.py — a subset, not an invention, because
+# histogram_quantile only reads the bucket the quantile lands in and the one beneath
+# it, and 23 boundaries per tenant would bury the arithmetic being asserted. Each
+# tenant's observations are placed entirely inside ONE bucket, which makes the
+# expected p95 a two-term calculation anyone can check by hand rather than a number
+# that came out of a run.
+#
+# ⚠️ WHAT THESE TESTS DO NOT PIN: the rate() WINDOW. Every counter below rises
+# linearly, so rate(x[5m]) and rate(x[1m]) return the same value and narrowing a
+# window would go unnoticed. Pinning it needs a counter whose slope changes inside
+# the window, which drags Prometheus's rate extrapolation into every expected value
+# and costs more in legibility than the regression is worth — the window is in the
+# rule's own name (`..._rate5m`, `..._5m`), where a change is visible in review.
+rule_files:
+  - llm-rules.yaml
+
+evaluation_interval: 30s
+
+tests:
+  # =========================================================================
+  # THE by (model_name) INVARIANT — the one the rule file flags with ⚠️, and
+  # the reason two simulators run at all. A global quantile would merge the
+  # healthy tenant into the saturated one and describe neither.
+  #
+  # steady:    every TTFT in (0.08, 0.1]  -> p95 = 0.08 + 0.02*0.95 = 0.099
+  # saturated: every TTFT in (45, 60]     -> p95 = 45   + 15  *0.95 = 59.25
+  #
+  # Those two straddle the 2s LLMHighTTFT threshold on purpose: it is the same
+  # arrangement manifests/llm/10-profiles.yaml produces on a live cluster, so a
+  # threshold change that silently caught the healthy tenant fails here first.
+  # =========================================================================
+  - interval: 30s
+    name: TTFT p95 is per-tenant, and the alert catches only the saturated one
+    input_series:
+      # ---- steady: all mass in (0.08, 0.1] --------------------------------
+      - series: 'vllm:time_to_first_token_seconds_bucket{model_name="sim-llama-3-8b-steady", le="0.01"}'
+        values: '0x40'
+      - series: 'vllm:time_to_first_token_seconds_bucket{model_name="sim-llama-3-8b-steady", le="0.08"}'
+        values: '0x40'
+      - series: 'vllm:time_to_first_token_seconds_bucket{model_name="sim-llama-3-8b-steady", le="0.1"}'
+        values: '0+10x40'
+      - series: 'vllm:time_to_first_token_seconds_bucket{model_name="sim-llama-3-8b-steady", le="2.5"}'
+        values: '0+10x40'
+      - series: 'vllm:time_to_first_token_seconds_bucket{model_name="sim-llama-3-8b-steady", le="60.0"}'
+        values: '0+10x40'
+      - series: 'vllm:time_to_first_token_seconds_bucket{model_name="sim-llama-3-8b-steady", le="+Inf"}'
+        values: '0+10x40'
+
+      # ---- saturated: all mass in (45, 60] --------------------------------
+      - series: 'vllm:time_to_first_token_seconds_bucket{model_name="sim-llama-3-8b-saturated", le="0.01"}'
+        values: '0x40'
+      - series: 'vllm:time_to_first_token_seconds_bucket{model_name="sim-llama-3-8b-saturated", le="0.08"}'
+        values: '0x40'
+      - series: 'vllm:time_to_first_token_seconds_bucket{model_name="sim-llama-3-8b-saturated", le="0.1"}'
+        values: '0x40'
+      - series: 'vllm:time_to_first_token_seconds_bucket{model_name="sim-llama-3-8b-saturated", le="2.5"}'
+        values: '0x40'
+      - series: 'vllm:time_to_first_token_seconds_bucket{model_name="sim-llama-3-8b-saturated", le="45.0"}'
+        values: '0x40'
+      - series: 'vllm:time_to_first_token_seconds_bucket{model_name="sim-llama-3-8b-saturated", le="60.0"}'
+        values: '0+10x40'
+      - series: 'vllm:time_to_first_token_seconds_bucket{model_name="sim-llama-3-8b-saturated", le="+Inf"}'
+        values: '0+10x40'
+
+    promql_expr_test:
+      # Two series, not one. If the `by (model_name)` were dropped this collapses to
+      # a single number and the assertion below cannot be satisfied at all.
+      - expr: llm:ttft:p95_5m
+        eval_time: 10m
+        exp_samples:
+          - labels: 'llm:ttft:p95_5m{model_name="sim-llama-3-8b-saturated", source="simulated"}'
+            value: 59.25
+          - labels: 'llm:ttft:p95_5m{model_name="sim-llama-3-8b-steady", source="simulated"}'
+            value: 0.099
+
+      # p50 and p99 bracket p95 within the same bucket, which is what confirms the
+      # quantile argument is wired to the right rule — three rules differing by one
+      # literal are easy to transpose and impossible to spot by reading.
+      - expr: llm:ttft:p50_5m{model_name="sim-llama-3-8b-steady"}
+        eval_time: 10m
+        exp_samples:
+          - labels: 'llm:ttft:p50_5m{model_name="sim-llama-3-8b-steady", source="simulated"}'
+            value: 0.09
+      - expr: llm:ttft:p99_5m{model_name="sim-llama-3-8b-steady"}
+        eval_time: 10m
+        exp_samples:
+          - labels: 'llm:ttft:p99_5m{model_name="sim-llama-3-8b-steady", source="simulated"}'
+            value: 0.0998
+
+    alert_rule_test:
+      # for: 2m has not elapsed yet.
+      - eval_time: 1m
+        alertname: LLMHighTTFT
+        exp_alerts: []
+
+      # EXACTLY ONE alert. The healthy tenant sitting 20x under the threshold is as
+      # much of the assertion as the saturated one being over it: a rule that fired
+      # for both would still "work" on a live cluster and be useless.
+      - eval_time: 10m
+        alertname: LLMHighTTFT
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+              model_name: sim-llama-3-8b-saturated
+              source: simulated
+            exp_annotations:
+              summary: "Model sim-llama-3-8b-saturated p95 time-to-first-token above 2s"
+              description: "p95 TTFT has been over 2s for 2m (59.25s). Requests are queueing faster than they can be served (simulated)."
+
+  # =========================================================================
+  # TPOT. Its own block because the bucket layout is the point: the rule file
+  # warns that p95 TPOT reads HIGH at this rig's operating point because the
+  # (0.025, 0.05] bucket is 25ms wide. Pinning that here stops someone
+  # "fixing" the apparent inflation by changing the quantile or the buckets.
+  # =========================================================================
+  - interval: 30s
+    name: TPOT p95 interpolates across the wide 25-50ms bucket, as documented
+    input_series:
+      # Modelled ITL under a full batch is ~0.0225s — inside (0.01, 0.025].
+      - series: 'vllm:time_per_output_token_seconds_bucket{model_name="sim-llama-3-8b-steady", le="0.01"}'
+        values: '0x40'
+      - series: 'vllm:time_per_output_token_seconds_bucket{model_name="sim-llama-3-8b-steady", le="0.025"}'
+        values: '0+10x40'
+      - series: 'vllm:time_per_output_token_seconds_bucket{model_name="sim-llama-3-8b-steady", le="0.05"}'
+        values: '0+10x40'
+      - series: 'vllm:time_per_output_token_seconds_bucket{model_name="sim-llama-3-8b-steady", le="+Inf"}'
+        values: '0+10x40'
+
+    promql_expr_test:
+      # 0.01 + (0.025-0.01)*0.95 = 0.02425 — reported nearly double the ~0.0225s
+      # actually modelled. That is the histogram's resolution, not a bug.
+      - expr: llm:tpot:p95_5m
+        eval_time: 10m
+        exp_samples:
+          - labels: 'llm:tpot:p95_5m{model_name="sim-llama-3-8b-steady", source="simulated"}'
+            value: 0.02425
+
+  # =========================================================================
+  # The two threshold alerts that are NOT driven to their boundary on the rig:
+  # LLMQueueBacklog fires permanently (so a live check never sees it clear) and
+  # LLMKVCacheSaturated never fires at all (the shipped profiles stay well
+  # under 90%). Both boundaries only exist here.
+  # =========================================================================
+  - interval: 30s
+    name: queue-depth and KV-cache thresholds, on both sides of the boundary
+    input_series:
+      # The saturated tenant plateaus around 160 waiting; the steady one at 0.
+      - series: 'vllm:num_requests_waiting{model_name="sim-llama-3-8b-saturated"}'
+        values: '160x40'
+      - series: 'vllm:num_requests_waiting{model_name="sim-llama-3-8b-steady"}'
+        values: '0x40'
+      # Exactly at the threshold. `> 50` is strict — this must never fire.
+      - series: 'vllm:num_requests_waiting{model_name="sim-llama-3-8b-edge"}'
+        values: '50x40'
+
+      # gpu_cache_usage_perc is a FRACTION (0-1), not a percentage, which is what
+      # makes `> 0.9` correct and `> 90` a rule that can never fire. 0.95 fires,
+      # 0.9 does not, and the shipped profiles sit down at 0.4.
+      - series: 'vllm:gpu_cache_usage_perc{model_name="sim-llama-3-8b-saturated"}'
+        values: '0.95x40'
+      - series: 'vllm:gpu_cache_usage_perc{model_name="sim-llama-3-8b-edge"}'
+        values: '0.9x40'
+      - series: 'vllm:gpu_cache_usage_perc{model_name="sim-llama-3-8b-steady"}'
+        values: '0.4x40'
+
+    alert_rule_test:
+      - eval_time: 4m
+        alertname: LLMQueueBacklog
+        exp_alerts: []   # for: 5m
+      - eval_time: 8m
+        alertname: LLMQueueBacklog
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+              model_name: sim-llama-3-8b-saturated
+            exp_annotations:
+              summary: "Model sim-llama-3-8b-saturated has 160 requests queued"
+              description: "Offered load has exceeded serving capacity for 5m (simulated)."
+
+      - eval_time: 8m
+        alertname: LLMKVCacheSaturated
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+              model_name: sim-llama-3-8b-saturated
+            exp_annotations:
+              summary: "Model sim-llama-3-8b-saturated KV cache above 90%"
+              description: "Simulated KV-cache utilisation over 90% for 5m."
+
+  # =========================================================================
+  # LLMMetricsAbsent — never exercised on the rig, since the simulators are
+  # always up.
+  # =========================================================================
+  - interval: 30s
+    name: LLMMetricsAbsent fires when the simulators stop being scraped
+    input_series:
+      # Deliberately not vllm:num_requests_running — that is the one that is missing.
+      - series: 'up{job="llm-sim"}'
+        values: '0x40'
+
+    alert_rule_test:
+      - eval_time: 4m
+        alertname: LLMMetricsAbsent
+        exp_alerts: []
+      - eval_time: 6m
+        alertname: LLMMetricsAbsent
+        exp_alerts:
+          - exp_labels:
+              severity: critical
+            exp_annotations:
+              summary: "No LLM serving metrics are being scraped"
+              description: "vllm:num_requests_running absent for 5m — is the llm-sim ServiceMonitor matching, and are the simulator pods Running?"
+
+  # =========================================================================
+  # Cross-domain. llm:tokens_per_watt:5m reads DCGM_FI_DEV_POWER_USAGE, which is
+  # itself synthesised by gpu-prometheusrule.yaml — derived layered on derived.
+  # Fed here as a plain input series, which is exactly what it is by the time
+  # this rule sees it, so this stays a test of one rule file rather than two.
+  # =========================================================================
+  - interval: 30s
+    name: token rates aggregate per tenant, and tokens-per-watt spans both domains
+    input_series:
+      # +150 every 30s = 5 tokens/s per tenant, 10/s across the cluster.
+      - series: 'vllm:generation_tokens_total{model_name="sim-llama-3-8b-steady"}'
+        values: '0+150x40'
+      - series: 'vllm:generation_tokens_total{model_name="sim-llama-3-8b-saturated"}'
+        values: '0+150x40'
+      # ⚠️ 20/s, deliberately NOT a multiple of the 10/s cluster generation rate.
+      # Prompt and generation tokens are two counters one letter apart in the panel
+      # queries and the recording rules, and with the obvious round numbers here the
+      # cluster prompt rate came out identical to the cluster generation rate — so
+      # tokens_per_watt reading the wrong counter produced the right answer and the
+      # test passed. Keep these two rates incommensurable.
+      - series: 'vllm:prompt_tokens_total{model_name="sim-llama-3-8b-steady"}'
+        values: '0+600x40'
+      # Two GPUs at 50 W = 100 W total.
+      - series: 'DCGM_FI_DEV_POWER_USAGE{UUID="GPU-a", source="derived"}'
+        values: '50x40'
+      - series: 'DCGM_FI_DEV_POWER_USAGE{UUID="GPU-b", source="derived"}'
+        values: '50x40'
+
+    promql_expr_test:
+      - expr: llm:tokens:generation_rate5m
+        eval_time: 10m
+        exp_samples:
+          - labels: 'llm:tokens:generation_rate5m{model_name="sim-llama-3-8b-saturated", source="simulated"}'
+            value: 5
+          - labels: 'llm:tokens:generation_rate5m{model_name="sim-llama-3-8b-steady", source="simulated"}'
+            value: 5
+      - expr: llm:tokens:prompt_rate5m
+        eval_time: 10m
+        exp_samples:
+          - labels: 'llm:tokens:prompt_rate5m{model_name="sim-llama-3-8b-steady", source="simulated"}'
+            value: 20
+
+      # 10 tokens/s / 100 W. Cluster-aggregate, so no model_name survives — the
+      # rule file is explicit that this demonstrates the query pattern and shows no
+      # causation, the two signals being independently driven.
+      - expr: llm:tokens_per_watt:5m
+        eval_time: 10m
+        exp_samples:
+          - labels: 'llm:tokens_per_watt:5m{source="simulated"}'
+            value: 0.1

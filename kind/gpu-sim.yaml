@@ -1,0 +1,81 @@
+# kind cluster for the `local` target — the no-cloud path.
+#
+# ⚠️ THREE-WAY NAMING INVARIANT — this file is the LOCAL half of the contract that
+# Terraform satisfies on EKS/GKE (see scripts/config.sh):
+#   nodes[].labels                      == NODE_POOL_LABEL_KEY: NODE_POOL_NAME
+#   helm/fake-gpu-operator/values.yaml  -> topology.nodePoolLabelKey + nodePools.<name>
+# Setting the label HERE, at creation time, is the whole point: a post-hoc
+# `kubectl label node` is a step that can be forgotten, and forgetting it gives a
+# green install with ZERO GPUs. scripts/config.sh assert_kind_contract aborts the
+# install if this file drifts from config.sh, the same way assert_terraform_contract
+# does for the clouds.
+kind: Cluster
+apiVersion: kind.x-k8s.io/v1alpha4
+
+# MUST equal CLUSTER_NAME in scripts/config.sh (asserted). kind derives its kubecontext
+# from this as kind-<name>; configure_kubeconfig then renames it to gpu-sim-local so all
+# three targets present the same gpu-sim-<target> context shape to the wrong-context guard.
+name: gpu-sim
+
+nodes:
+  # Single node. kind removes the control-plane NoSchedule taint when it is the only
+  # node, so the GPU workloads and the LLM simulators schedule here. 8 simulated GPUs
+  # (helm/fake-gpu-operator/values.yaml) all hang off this one node, which is fine —
+  # nothing in this rig is actually GPU-bound.
+  - role: control-plane
+
+    # PINNED, and MUST stay on the K8S_VERSION line in scripts/config.sh (asserted).
+    # kind ties node images to kind RELEASES, not to Kubernetes releases: check the
+    # release notes for your kind binary before bumping this, because an image tag that
+    # predates your kind version is a documented way to get a cluster that never becomes
+    # Ready. Append @sha256:... if you want it pinned by content as well as by tag.
+    # v1.36.1 is the image kind v0.32.0 ships as its default.
+    image: kindest/node:v1.36.1
+
+    labels:
+      run.ai/simulated-gpu-node-pool: default
+
+    # ---- optional polish: make the control-plane scrape targets green ----------
+    #
+    # kube-prometheus-stack enables the kubeControllerManager / kubeScheduler / kubeEtcd
+    # / kubeProxy scrape targets BY DEFAULT (verified against the pinned chart 87.17.0),
+    # and helm/kube-prometheus-stack/values.yaml overrides none of them. kubeadm binds
+    # those four to 127.0.0.1, so without these patches the Prometheus targets page shows
+    # four red rows on a rig whose entire subject is observability.
+    #
+    # THIS IS WHY THE LOCAL TARGET IS kind AND NOT k3s/k3d. On k3s those components live
+    # inside one process and do not present kubeadm-shaped endpoints, so the fix would
+    # have to be a local-only Helm values overlay — forking the single values file that
+    # config.sh's assert_* functions exist to keep un-forked. Here the fix lives in the
+    # cluster config instead, and the Helm contract is untouched.
+    #
+    # Note this makes local MORE complete than the clouds, where the control plane is
+    # managed and those four targets are unreachable no matter what.
+    #
+    # Version caveat: the list-form `extraArgs` below is kubeadm v1beta4, which is what
+    # kind generates for Kubernetes >= 1.31. If you ever pin K8S_VERSION below 1.31, this
+    # block needs the v1beta3 map form instead. A patch whose apiVersion does not match
+    # is ignored rather than fatal, so the worst case here is four red targets, not a
+    # cluster that fails to build. Delete the whole `kubeadmConfigPatches` key if you
+    # would rather local matched the clouds exactly.
+    kubeadmConfigPatches:
+      - |
+        kind: ClusterConfiguration
+        apiVersion: kubeadm.k8s.io/v1beta4
+        controllerManager:
+          extraArgs:
+            - name: bind-address
+              value: 0.0.0.0
+        scheduler:
+          extraArgs:
+            - name: bind-address
+              value: 0.0.0.0
+        etcd:
+          local:
+            extraArgs:
+              - name: listen-metrics-urls
+                value: http://0.0.0.0:2381
+      - |
+        kind: KubeProxyConfiguration
+        apiVersion: kubeproxy.config.k8s.io/v1alpha1
+        metricsBindAddress: 0.0.0.0

@@ -1,0 +1,30 @@
+# Troubleshooting
+
+Nearly every failure here surfaces the same way: a panel with no data. The job is to tell the
+causes apart by working outwards from the producer.
+
+> **Looking for something narrower?** The LLM simulator has its own
+> [troubleshooting section](llm-simulation.md#troubleshooting) for profile and tenant problems,
+> and [observability.md](observability.md#metrics) covers what each GPU series is and is not.
+
+| Symptom | What it usually is |
+|--|--|
+| A dashboard link 404s | The Grafana sidecar has not imported the ConfigMap yet. `grafana.sh` warns and skips that board; wait about a minute and re-run. The ConfigMap must carry the label `grafana_dashboard=1`. |
+| Panels are empty | Either nothing is being produced, or nothing is being scraped. [Scrape the exporters by hand](observability.md#scrape-the-exporters-by-hand) to tell those apart. |
+| Panels fill in slowly, or rate panels read low just after install | Warm-up, not a fault — allow about 6 minutes. The `[5m]` rule windows, the alert `for:` durations and the ephemeral TSDB each add delay; [observability.md](observability.md#warm-up-the-first-few-minutes-after-install) breaks it down. |
+| Half the GPUs sit flat at 0% on the GPU board | Expected. `gpuCount` is 8 per node and the default workloads claim four; the headroom is for the opt-in extras in `manifests/workloads/extras/`. Flat-zero for an unclaimed GPU is a correct reading, not a missing series. |
+| A scrape target is down | `./scripts/prometheus.sh eks` says so on startup, and `/targets` lists every target. See [The Prometheus console](observability.md#the-prometheus-console). |
+| `task eks:load` or `eks:llm-load` fails its precondition | The opt-in Deployments are not applied. See [Quick start](../README.md#quick-start). |
+| A green install with zero GPUs | The naming invariant is broken. See [The naming invariant](architecture.md#the-naming-invariant-read-before-editing). |
+| `task local:up` fails before creating anything | The container runtime is missing or too small. The error names the exact `colima` / Docker Desktop / `podman machine` fix. |
+| Pods Pending on local, nothing scheduling | The runtime is under-provisioned. `kind-up.sh` warns between 5 and 8 GiB rather than refusing — raise it to 8 GiB / 4 CPU and recreate. |
+| `local:plan` / `local:apply` refuse to run | Expected. Those are Terraform-only; local's Phase 1 is `task local:cluster`, which `task local:up` runs for you. |
+| `kubeControllerManager` / `kubeScheduler` / `kubeEtcd` / `kubeProxy` targets down | Expected on EKS/GKE, where the control plane is managed and unreachable. On local, the `kubeadmConfigPatches` in `kind/gpu-sim.yaml` fix the bind addresses; if those targets are still down, that block did not apply. Optional polish, not required. |
+| Any `gke` script stops with `ERROR: 'gke-gcloud-auth-plugin' not found on PATH`, or GKE `kubectl` fails on the auth plugin — yet `gcloud components install gke-gcloud-auth-plugin` said it succeeded | A PATH problem, not an install problem, and the two look identical. `gcloud version` settles it: it lists the component from the SDK's own manifest, so a `gke-gcloud-auth-plugin` line there means the binary exists and only the PATH is wrong. Homebrew symlinks just the SDK's core binaries, leaving the plugin in `$(brew --prefix)/share/google-cloud-sdk/bin` — and `kubectl` execs it **by name**, so it reads as never installed. Put that directory on PATH or symlink the binary; both are in [gke.md](gke.md#gke-gcloud-auth-plugin). The scripts fail early here on purpose: `require_tools` in `scripts/config.sh` refuses up front rather than letting it surface later as a credential-plugin error mid-port-forward, which reads like a cluster fault. `task tools` distinguishes the two cases. |
+| GKE apply fails with `Error 400: No valid versions with the prefix "1.xx" found` | The contract's Kubernetes minor has aged out of GKE's **static** version list. This cluster is deliberately on no release channel, and `min_master_version` matches that list only — a minor leaves it while the EXTENDED channel still carries it. The GKE root now fails at **plan** time instead, with the fix in the message: bump `k8s_version` in `terraform/modules/contract` and move `scripts/config.sh` (`K8S_VERSION`) and `kind/gpu-sim.yaml` (node image) onto the same minor. `gcloud container get-server-config --region <region>` lists what is actually offered; the EKS and kind ceilings are documented alongside the variable. |
+| A script stops with `current-context is '...', expected 'gpu-sim-<target>'` | The wrong-context guard, working. Something selected a different context between steps. Re-run the script: it re-obtains credentials and re-applies the `gpu-sim-<target>` alias, replacing any stale one. If it instead refuses with *"Refusing to rename it"*, the cloud CLI did not authenticate you to the cluster you asked for — check `GCP_PROJECT` / `AWS_REGION` against `kubectl config get-contexts`. |
+| GKE Terraform says `No value for required variable` for `project` | `GCP_PROJECT` is unset, or you ran `terraform` by hand without sourcing `scripts/config.sh` — which is what maps it onto `TF_VAR_project`. `task gke:plan` / `gke:apply` source it for you. See [gke.md](gke.md#phase-1--infra-terraform). |
+
+`./scripts/verify.sh local` (or `eks` / `gke`) asserts the whole path end-to-end. It checks that
+metrics are flowing, that the dashboard is present under uid `gpu-sim-dcgm`, and that Grafana
+serves it to an anonymous request.

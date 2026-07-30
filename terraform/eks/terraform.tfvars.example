@@ -1,0 +1,14 @@
+# Copy to terraform.tfvars and adjust. Keep region in sync with scripts/config.sh.
+region        = "eu-west-1"
+instance_type = "t3.large" # amd64, >= 2 vCPU / 8 GB
+node_count    = 2
+
+# REQUIRED — no default, so an unset value fails the plan rather than leaving the
+# API endpoint open. Use a VPN or office range; a dynamic home IP will lock you out.
+api_allowed_cidrs = ["203.0.113.0/24"]
+
+# Contract overrides. Values deliberately NOT restated here — they live in
+# terraform/modules/contract/variables.tf, and copying them into a comment is how
+# they go stale. Uncomment only to diverge from the contract on purpose.
+# cluster_name = "..."
+# k8s_version  = "..."

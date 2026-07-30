@@ -1,0 +1,183 @@
+# The two simulator Deployments, plus the Service Prometheus scrapes.
+#
+# WHY TWO: this mirrors the GPU rig's gpu-idle / gpu-steady / gpu-busy pattern.
+# install.sh creates the conditions; verify.sh only observes them. `llm-saturated`
+# keeps LLMHighTTFT permanently firing, so the acceptance check is meaningful
+# without verify.sh having to mutate anything — and the dashboard shows a healthy
+# and a degraded tenant side by side, which is far more useful than one uniformly
+# saturated system.
+#
+# ⚠️ The profile is mounted as a DIRECTORY volume, never with subPath.
+#    subPath mounts are resolved once at container start and are NEVER updated by
+#    kubelet, so polling would read the same bytes forever: drive-llm-load.sh
+#    would exit 0, `kubectl get cm` would show the new profile, the pod would be
+#    healthy, and nothing would change. It reads as a broken simulator.
+#
+# The script ConfigMap (llm-sim-script) is created by scripts/install.sh from
+# scripts/llm-sim.py, so the simulator stays a normal, readable, runnable Python
+# file rather than a few hundred lines of indented YAML.
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: llm-steady
+  namespace: llm-sim
+  labels:
+    app.kubernetes.io/name: llm-sim
+    app.kubernetes.io/part-of: gpu-sim-llm
+    app.kubernetes.io/component: steady
+spec:
+  replicas: 1
+  selector:
+    matchLabels: { app.kubernetes.io/name: llm-sim, app.kubernetes.io/component: steady }
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: llm-sim
+        app.kubernetes.io/part-of: gpu-sim-llm
+        app.kubernetes.io/component: steady
+      annotations:
+        # Static, and deliberately never varied. GPU load and LLM load are
+        # decoupled in this rig — see docs/llm-simulation.md. Vary GPU load with
+        # the existing gpu-driven workload instead.
+        run.ai/simulated-gpu-utilization: "25-40"
+    spec:
+      # NOT optional. kubelet injects Docker-link-compatible env vars for every
+      # Service in this namespace, so the Service `llm-sim` below sets
+      # LLM_SIM_PORT=tcp://<clusterIP>:9401 in this container. The simulator used
+      # to read that exact name as its listen port and died at startup on every
+      # pod — a CrashLoopBackOff whose only symptom was an empty LLM dashboard.
+      # llm-sim.py now reads LLM_SIM_LISTEN_PORT instead; this line removes the
+      # whole injected set rather than leaving the next collision to chance.
+      # Nothing here consumes those vars — the simulator dials nothing, and
+      # MOCK_NVIDIA_VISIBLE_DEVICES comes from the device plugin's Allocate(),
+      # which this flag does not affect.
+      enableServiceLinks: false
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 65534
+        runAsGroup: 65534
+        seccompProfile: { type: RuntimeDefault }
+      containers:
+        - name: sim
+          image: python:3.12-slim
+          command: ["python3", "/opt/llm-sim/llm_sim.py",
+                    "--profile", "/etc/llm-sim/profile.json"]
+          env:
+            - name: PYTHONUNBUFFERED
+              value: "1"
+            - name: PYTHONDONTWRITEBYTECODE   # required by readOnlyRootFilesystem
+              value: "1"
+          ports:
+            - { name: llm-metrics, containerPort: 9401 }
+          readinessProbe:
+            httpGet: { path: /metrics, port: llm-metrics }
+            initialDelaySeconds: 3
+            periodSeconds: 10
+          # This is the ONLY Deployment that requests a simulated GPU. It exists
+          # purely so the device plugin injects MOCK_NVIDIA_VISIBLE_DEVICES,
+          # which the simulator turns into llmsim_gpu_binding_info's device_id.
+          # (That id is NOT the GPU's DCGM UUID and cannot be joined on — the
+          # join back to DCGM goes via (namespace, pod); see llm-sim.py's
+          # detect_binding().) Nothing load-bearing depends on it, and
+          # llm-saturated deliberately runs unbound to exercise the other path.
+          # If you have no simulated GPUs free, delete the nvidia.com/gpu line:
+          # the simulator still serves its full vllm:* surface, just unbound.
+          resources:
+            requests: { cpu: 25m, memory: 48Mi }
+            limits:
+              cpu: 500m
+              memory: 128Mi
+              nvidia.com/gpu: "1"
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities: { drop: ["ALL"] }
+          volumeMounts:
+            - { name: script,  mountPath: /opt/llm-sim, readOnly: true }
+            - { name: profile, mountPath: /etc/llm-sim, readOnly: true }
+      volumes:
+        - name: script
+          configMap: { name: llm-sim-script, defaultMode: 0555 }
+        - name: profile
+          configMap: { name: llm-profile-steady }
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: llm-saturated
+  namespace: llm-sim
+  labels:
+    app.kubernetes.io/name: llm-sim
+    app.kubernetes.io/part-of: gpu-sim-llm
+    app.kubernetes.io/component: saturated
+spec:
+  replicas: 1
+  selector:
+    matchLabels: { app.kubernetes.io/name: llm-sim, app.kubernetes.io/component: saturated }
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: llm-sim
+        app.kubernetes.io/part-of: gpu-sim-llm
+        app.kubernetes.io/component: saturated
+      annotations:
+        run.ai/simulated-gpu-utilization: "70-85"
+    spec:
+      enableServiceLinks: false   # see llm-steady above — LLM_SIM_PORT collision
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 65534
+        runAsGroup: 65534
+        seccompProfile: { type: RuntimeDefault }
+      containers:
+        - name: sim
+          image: python:3.12-slim
+          command: ["python3", "/opt/llm-sim/llm_sim.py",
+                    "--profile", "/etc/llm-sim/profile.json"]
+          env:
+            - name: PYTHONUNBUFFERED
+              value: "1"
+            - name: PYTHONDONTWRITEBYTECODE
+              value: "1"
+          ports:
+            - { name: llm-metrics, containerPort: 9401 }
+          readinessProbe:
+            httpGet: { path: /metrics, port: llm-metrics }
+            initialDelaySeconds: 3
+            periodSeconds: 10
+          resources:
+            requests: { cpu: 25m, memory: 48Mi }
+            limits:   { cpu: 500m, memory: 128Mi }
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities: { drop: ["ALL"] }
+          volumeMounts:
+            - { name: script,  mountPath: /opt/llm-sim, readOnly: true }
+            - { name: profile, mountPath: /etc/llm-sim, readOnly: true }
+          # NO nvidia.com/gpu request, on purpose. This proves the simulator runs
+          # fine unbound, which is the same path you land on if the GPU stack is
+          # absent or all 16 simulated GPUs are already allocated.
+      volumes:
+        - name: script
+          configMap: { name: llm-sim-script, defaultMode: 0555 }
+        - name: profile
+          configMap: { name: llm-profile-saturated }
+---
+# One Service in front of both pods. Prometheus tells them apart by `pod`, and
+# the metrics themselves by `model_name`.
+apiVersion: v1
+kind: Service
+metadata:
+  name: llm-sim
+  namespace: llm-sim
+  labels:
+    app.kubernetes.io/name: llm-sim
+    app.kubernetes.io/part-of: gpu-sim-llm
+spec:
+  type: ClusterIP
+  selector:
+    app.kubernetes.io/name: llm-sim
+  ports:
+    - { name: llm-metrics, port: 9401, targetPort: llm-metrics }

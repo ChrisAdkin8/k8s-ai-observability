@@ -1,0 +1,26 @@
+# Wires Prometheus to the simulated LLM servers in the llm-sim namespace.
+#
+# Lives in `monitoring` and reaches across via namespaceSelector, exactly like
+# fake-gpu-servicemonitor.yaml does for gpu-operator.
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: llm-sim
+  namespace: monitoring        # must match config.sh MONITORING_NS
+  labels:
+    release: kube-prometheus-stack   # harmless; picked up regardless due to Nil...=false
+spec:
+  namespaceSelector:
+    matchNames: [llm-sim]      # must match config.sh LLM_NS
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: llm-sim
+  endpoints:
+    # ⚠️ 15s is load-bearing, not cosmetic. verify.sh asserts
+    # rate(vllm:generation_tokens_total[1m]) > 0, and rate() needs at least TWO
+    # samples inside the window. At 15s you get four; at 60s you get one and
+    # rate() returns nothing at all — a failure that looks like a dead counter
+    # rather than a scrape-interval choice. Keep this <= 30s.
+    - port: llm-metrics
+      interval: 15s
+      path: /metrics

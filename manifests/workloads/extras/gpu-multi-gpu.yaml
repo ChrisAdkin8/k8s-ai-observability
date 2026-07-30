@@ -1,0 +1,24 @@
+# Multi-GPU fan-out: 2 replicas, each pod claiming 2 simulated GPUs — populates a busier,
+# multi-GPU-per-node cluster view. Needs a node with >=2 free fake GPUs per pod (topology
+# gpuCount is 8/node by default, so this fits). Opt-in.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: gpu-multi
+  namespace: default
+  labels: { app.kubernetes.io/part-of: gpu-sim-workloads }
+spec:
+  replicas: 2
+  selector: { matchLabels: { app: gpu-multi } }
+  template:
+    metadata:
+      labels: { app: gpu-multi, app.kubernetes.io/part-of: gpu-sim-workloads }
+      annotations:
+        run.ai/simulated-gpu-utilization: "60-80"
+    spec:
+      containers:
+        - name: workload
+          image: busybox:1.36
+          command: ["sh", "-c", "sleep infinity"]
+          resources:
+            limits: { nvidia.com/gpu: "2" }   # multi-GPU pod

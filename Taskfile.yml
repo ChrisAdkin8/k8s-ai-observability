@@ -1,0 +1,107 @@
+# Taskfile — single front door for both phases, on all three targets.
+#
+#   Install Task: https://taskfile.dev/docs/installation
+#     brew install go-task/tap/go-task            # macOS/Linux
+#     sh -c "$(curl --location https://taskfile.dev/install.sh)" -- -d -b ~/.local/bin
+#   Requires Task >= 3.32 (uses `prompt:` on the destructive tasks).
+#
+#   task                     # list everything
+#   task local:up            # kind -> stacks -> checks. No cloud account, no spend.
+#   task eks:up              # cluster -> stacks -> checks, end to end
+#   task gke:grafana         # open the dashboards
+#
+# THE ONE-SHOT PATH IS `task local:up`. Everything this repo demonstrates is simulated,
+# so the cloud targets are about proving it works on EKS/GKE — not a prerequisite for
+# seeing it work at all. local needs no account, no credentials, no terraform.tfvars.
+#
+# Per-target tasks come from taskfiles/target.yml, included THREE times with a different
+# CLOUD var — so eks, gke and local can never drift apart, because there is only one
+# definition. This wraps scripts/, it does not replace it: the scripts remain runnable on
+# their own and keep owning the ordering + drift guards.
+version: '3'
+
+# Optional: put GCP_PROJECT / GCP_REGION / AWS_REGION here instead of exporting
+# them each session. Missing file is not an error. The local target reads none of them.
+dotenv: ['.env']
+
+includes:
+  local:
+    taskfile: taskfiles/target.yml
+    vars: {CLOUD: local}
+  eks:
+    taskfile: taskfiles/target.yml
+    vars: {CLOUD: eks}
+  gke:
+    taskfile: taskfiles/target.yml
+    vars: {CLOUD: gke}
+
+tasks:
+  default:
+    desc: List available tasks
+    cmds: [task --list]
+    silent: true
+
+  tools:
+    desc: Check the local prerequisites (kubectl, helm, kind/docker, terraform + cloud CLIs)
+    silent: true
+    cmds:
+      # Only the target-agnostic tools are fatal. A missing gcloud is expected if you
+      # only ever run EKS (and vice versa) — reporting it is useful, failing on it
+      # would make `task tools` red for everyone who uses one target.
+      #
+      # terraform moved to optional when the local target landed: it is genuinely not
+      # needed to run this repo end to end any more, and marking it fatal would tell
+      # someone who only wants `task local:up` to install a tool they will never invoke.
+      - |
+        rc=0
+        check() {  # $1 tool, $2 fatal|optional, $3 note
+          if command -v "$1" >/dev/null 2>&1; then
+            printf '  \033[32mok  \033[0m %-24s %s\n' "$1" "$3"
+          elif [ "$2" = fatal ]; then
+            printf '  \033[31mMISS\033[0m %-24s %s\n' "$1" "$3"; rc=1
+          else
+            printf '  \033[33m--  \033[0m %-24s %s\n' "$1" "$3 (not needed unless you use it)"
+          fi
+        }
+        check kubectl                fatal    ""
+        check helm                   fatal    ""
+        check curl                   fatal    "used by verify.sh / grafana.sh"
+        check python3                fatal    "used by verify.sh"
+        check promtool               optional "task rule-tests — ships inside the Prometheus release"
+        check kind                   optional "local — the no-cloud target"
+        check docker                 optional "local — or podman; kind needs one of them"
+        check terraform              optional "EKS/GKE — >= 1.6"
+        check aws                    optional "EKS"
+        check gcloud                 optional "GKE"
+        check gke-gcloud-auth-plugin optional "GKE — the common silent miss"
+        [ $rc -eq 0 ] || echo "  one or more REQUIRED tools are missing"
+        exit $rc
+
+  # ---- the two checks that need no cloud, no cluster and no network ----------
+  # Both run in seconds. Between them they cover the two things this repo produces
+  # that are worth testing on their own: what the simulator emits, and what the
+  # PromQL over it computes.
+
+  # Validates the LLM simulator's Prometheus output: bucket monotonicity, +Inf
+  # consistency, HELP/TYPE correctness, and that rendering /metrics observes
+  # nothing. Run it before you push a change to scripts/llm-sim.py.
+  selftest:
+    desc: Validate the LLM simulator locally (no cluster needed)
+    cmds:
+      - python3 scripts/llm-sim.py --selftest
+
+  # Unit-tests every recording rule and alert in manifests/alerts/ with promtool:
+  # thresholds on both sides of the boundary, the derived-series arithmetic, and
+  # the alerts the live rig never drives. Run it before you push a change there.
+  rule-tests:
+    desc: Unit-test the alert + recording rules with promtool (no cluster needed)
+    cmds:
+      - ./scripts/rule-tests.sh
+
+  # Cluster-agnostic escape hatch: the scripts act on the CURRENT kubecontext, so
+  # this is here for when you already know which cluster you are pointed at.
+  # Prefer the namespaced forms (task eks:load) — they guard the context first.
+  load:
+    desc: 'Drive a utilisation curve on the CURRENT context (task load -- ramp|spikes)'
+    cmds:
+      - ./scripts/drive-load.sh {{.CLI_ARGS | default "ramp"}}

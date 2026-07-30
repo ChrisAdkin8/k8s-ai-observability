@@ -1,0 +1,133 @@
+# Recording rules and alerts over the simulated vLLM metrics.
+#
+# Alert names contain "LLM" for readability and grouping. verify.sh selects them
+# by EXACT name, never by wildcard — a wildcard is how an unrelated
+# always-firing alert can silently satisfy a check that looks meaningful.
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: llm-simulation-alerts
+  namespace: monitoring   # must match config.sh MONITORING_NS (install.sh guards drift)
+  labels:
+    release: kube-prometheus-stack
+spec:
+  groups:
+    # ---- recording rules -----------------------------------------------
+    # WHY: histogram_quantile over a 5m rate is expensive to repeat in every
+    # panel and every alert, and computing it once means the dashboard and the
+    # alert can never disagree about what "p95 TTFT" means.
+    #
+    # ⚠️ Aggregated `by (model_name)`, NOT globally. A global quantile merges the
+    # healthy and saturated tenants into one number that describes neither, and
+    # hides the degraded one — which is the tenant the alert exists to catch.
+    #
+    # These are this repo's own series, so they carry source="simulated". The
+    # vllm:* series they read do NOT: real vLLM emits no such label, and adding
+    # one would break exact-match joins against a real deployment.
+    - name: llm.simulation.derived
+      rules:
+        - record: llm:ttft:p50_5m
+          expr: >-
+            histogram_quantile(0.50, sum by (model_name, le)
+              (rate(vllm:time_to_first_token_seconds_bucket[5m])))
+          labels: { source: simulated }
+
+        - record: llm:ttft:p95_5m
+          expr: >-
+            histogram_quantile(0.95, sum by (model_name, le)
+              (rate(vllm:time_to_first_token_seconds_bucket[5m])))
+          labels: { source: simulated }
+
+        - record: llm:ttft:p99_5m
+          expr: >-
+            histogram_quantile(0.99, sum by (model_name, le)
+              (rate(vllm:time_to_first_token_seconds_bucket[5m])))
+          labels: { source: simulated }
+
+        - record: llm:tpot:p95_5m
+          expr: >-
+            histogram_quantile(0.95, sum by (model_name, le)
+              (rate(vllm:time_per_output_token_seconds_bucket[5m])))
+          labels: { source: simulated }
+
+        - record: llm:tokens:generation_rate5m
+          expr: sum by (model_name) (rate(vllm:generation_tokens_total[5m]))
+          labels: { source: simulated }
+
+        - record: llm:tokens:prompt_rate5m
+          expr: sum by (model_name) (rate(vllm:prompt_tokens_total[5m]))
+          labels: { source: simulated }
+
+        # Cross-domain, and CLUSTER-AGGREGATE on purpose.
+        #
+        # ⚠️ This correlates two INDEPENDENTLY DRIVEN signals. Nothing in this rig
+        # makes GPU utilisation follow LLM load — see docs/llm-simulation.md. It
+        # demonstrates the query pattern and the dashboard wiring; it does not
+        # show causation. Treating it as causal would be reading a relationship
+        # into noise.
+        #
+        # It also only works because DCGM_FI_DEV_POWER_USAGE is itself synthesised
+        # by the recording rules in gpu-prometheusrule.yaml — derived metrics
+        # layering on derived metrics.
+        - record: llm:tokens_per_watt:5m
+          expr: >-
+            sum(rate(vllm:generation_tokens_total[5m]))
+            / sum(DCGM_FI_DEV_POWER_USAGE)
+          labels: { source: simulated }
+
+    # ---- alerts ---------------------------------------------------------
+    - name: llm.simulation.rules
+      rules:
+        # EXERCISED BY DEFAULT: the llm-saturated Deployment keeps this firing.
+        # That is deliberate — install.sh creates the condition, verify.sh only
+        # observes it, exactly as gpu-busy keeps GPUHighUtilization firing.
+        #
+        # 2s sits between the steady tenant (~0.1s) and the saturated one
+        # (~60s, the real queue wait: 160 / 2.74 by Little's Law). Those three
+        # numbers interlock with the profile arithmetic in
+        # manifests/llm/10-profiles.yaml, so change one and re-check the others.
+        - alert: LLMHighTTFT
+          expr: llm:ttft:p95_5m > 2
+          for: 2m
+          labels:
+            severity: warning
+          annotations:
+            summary: "Model {{ $labels.model_name }} p95 time-to-first-token above 2s"
+            description: >-
+              p95 TTFT has been over 2s for 2m ({{ $value | printf "%.2f" }}s).
+              Requests are queueing faster than they can be served (simulated).
+
+        # EXERCISED BY DEFAULT: llm-saturated plateaus at ~160 waiting.
+        - alert: LLMQueueBacklog
+          expr: vllm:num_requests_waiting > 50
+          for: 5m
+          labels:
+            severity: warning
+          annotations:
+            summary: "Model {{ $labels.model_name }} has {{ $value }} requests queued"
+            description: "Offered load has exceeded serving capacity for 5m (simulated)."
+
+        # NOT exercised by default — the shipped profiles keep KV cache well
+        # under 90%. To test it, lower kv_cache_tokens_capacity in a profile:
+        #   kubectl -n llm-sim edit configmap llm-profile-steady
+        - alert: LLMKVCacheSaturated
+          expr: vllm:gpu_cache_usage_perc > 0.9
+          for: 5m
+          labels:
+            severity: warning
+          annotations:
+            summary: "Model {{ $labels.model_name }} KV cache above 90%"
+            description: "Simulated KV-cache utilisation over 90% for 5m."
+
+        # NOT exercised by default — the simulator is always up. To test it:
+        #   kubectl -n llm-sim scale deploy/llm-steady --replicas=0
+        - alert: LLMMetricsAbsent
+          expr: absent(vllm:num_requests_running)
+          for: 5m
+          labels:
+            severity: critical
+          annotations:
+            summary: "No LLM serving metrics are being scraped"
+            description: >-
+              vllm:num_requests_running absent for 5m — is the llm-sim
+              ServiceMonitor matching, and are the simulator pods Running?

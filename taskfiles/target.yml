@@ -1,0 +1,197 @@
+# Per-target tasks. Included THREE times from the root Taskfile with CLOUD=eks / gke /
+# local, so every task below exists for all three targets from one definition. That is
+# the point: three copies of this list is how eks, gke and local start disagreeing about
+# what "install" means.
+#
+# Phase 1 (provisioning) is Terraform on the clouds and scripts/kind-up.sh on local.
+# Phase 2 (install/verify/grafana/load/teardown) shells out to scripts/, which own the
+# install ordering, the wrong-context guard, and the drift assertions — and which are
+# already target-agnostic, because the only thing that differs between a cloud cluster
+# and a kind cluster is how the kubecontext is obtained. Deliberately thin: the moment
+# this file starts reimplementing that logic, the two disagree.
+#
+# Every task pins dir: {{.ROOT_DIR}} — included Taskfiles must not depend on which
+# directory Task chose to run them from, and the scripts + terraform -chdir paths
+# are all repo-root-relative.
+version: '3'
+
+vars:
+  TF_DIR: terraform/{{.CLOUD}}
+  # All three targets present the same context shape. kind names its context
+  # kind-gpu-sim; config.sh renames it to gpu-sim-local precisely so this stays uniform.
+  CTX: gpu-sim-{{.CLOUD}}
+  CLOUD_CLI: '{{if eq .CLOUD "eks"}}aws{{else if eq .CLOUD "gke"}}gcloud{{else}}kind{{end}}'
+  # Reused by every Terraform-only task below.
+  TF_ONLY_MSG: 'Terraform-only task. The local target has no infrastructure — its Phase 1 is `task local:cluster` (scripts/kind-up.sh), which `task local:up` runs for you.'
+
+tasks:
+  # ---- lifecycle ------------------------------------------------------------
+  # `desc` is templated per target, like everything else here. Without that, `task --list`
+  # shows one namespace's wording under all three — "terraform init" against local, or
+  # "local target only" against eks — which is worse than no description at all.
+  up:
+    desc: 'Bring up everything: {{if eq .CLOUD "local"}}kind cluster (no cloud account){{else}}cluster{{end}} (Phase 1) -> stacks (Phase 2) -> checks'
+    dir: '{{.ROOT_DIR}}'
+    cmds:
+      # Phase 1 dispatches on the target; Phase 2 is identical for all three.
+      - task: '{{if eq .CLOUD "local"}}cluster{{else}}apply{{end}}'
+      - task: install
+      - task: verify
+      - cmd: 'echo "Dashboards: task {{.CLOUD}}:grafana"'
+
+  # ---- Phase 1: local (kind) ------------------------------------------------
+  cluster:
+    desc: '{{if eq .CLOUD "local"}}Create the kind cluster (Phase 1){{else}}LOCAL TARGET ONLY — on {{.CLOUD}}, Phase 1 is {{.CLOUD}}:apply{{end}}'
+    dir: '{{.ROOT_DIR}}'
+    preconditions:
+      - sh: test "{{.CLOUD}}" = "local"
+        msg: 'cluster is the local target''s Phase 1. On {{.CLOUD}}, use: task {{.CLOUD}}:apply'
+    cmds:
+      - ./scripts/kind-up.sh
+
+  # ---- Phase 1: Terraform ---------------------------------------------------
+  # Every task in this block is Terraform-only, and each carries the same precondition
+  # rather than being hidden from `task --list` for local. A task that exists and says
+  # why it does not apply beats one that silently is not there.
+  init:
+    desc: '{{if eq .CLOUD "local"}}TERRAFORM ONLY — local has no infrastructure (use local:cluster){{else}}terraform init{{end}}'
+    dir: '{{.ROOT_DIR}}'
+    preconditions:
+      - sh: test "{{.CLOUD}}" != "local"
+        msg: '{{.TF_ONLY_MSG}}'
+    cmds:
+      - terraform -chdir={{.TF_DIR}} init
+    # Skip the (slow) provider download when the working dir is already set up.
+    # After a provider bump, re-run it explicitly:
+    #   terraform -chdir=terraform/{{.CLOUD}} init -upgrade
+    status:
+      - test -d {{.TF_DIR}}/.terraform
+
+  plan:
+    desc: '{{if eq .CLOUD "local"}}TERRAFORM ONLY — local has no infrastructure (use local:cluster){{else}}terraform plan (Phase 1){{end}}'
+    dir: '{{.ROOT_DIR}}'
+    deps: [init]
+    preconditions:
+      - sh: test "{{.CLOUD}}" != "local"
+        msg: '{{.TF_ONLY_MSG}}'
+      - sh: test -f {{.TF_DIR}}/terraform.tfvars
+        msg: |
+          {{.TF_DIR}}/terraform.tfvars missing. Create it:
+            cp {{.TF_DIR}}/terraform.tfvars.example {{.TF_DIR}}/terraform.tfvars
+          api_allowed_cidrs is REQUIRED — an unset value fails the plan rather than
+          leaving the API endpoint open.
+    cmds:
+      # Sourced for TF_VAR_project (config.sh maps GCP_PROJECT onto it), so var.project
+      # need not be restated in terraform.tfvars. Phase 2 shells out to scripts/ which
+      # source it themselves; these two Terraform tasks are the only ones that bypass them.
+      - . ./scripts/config.sh && terraform -chdir={{.TF_DIR}} plan {{.CLI_ARGS}}
+
+  apply:
+    desc: '{{if eq .CLOUD "local"}}TERRAFORM ONLY — local has no infrastructure (use local:cluster){{else}}Create/update the cluster + GPU-sim node pool (Phase 1){{end}}'
+    dir: '{{.ROOT_DIR}}'
+    deps: [init]
+    interactive: true # terraform prompts for approval
+    preconditions:
+      - sh: test "{{.CLOUD}}" != "local"
+        msg: '{{.TF_ONLY_MSG}}'
+      - sh: command -v {{.CLOUD_CLI}} >/dev/null 2>&1
+        msg: '{{.CLOUD_CLI}} not on PATH — required for {{.CLOUD}}.'
+      - sh: test -f {{.TF_DIR}}/terraform.tfvars
+        msg: |
+          {{.TF_DIR}}/terraform.tfvars missing. Create it:
+            cp {{.TF_DIR}}/terraform.tfvars.example {{.TF_DIR}}/terraform.tfvars
+      # GKE only: the scripts read GCP_PROJECT for get-credentials, and a cluster
+      # applied under one project but installed against another fails confusingly
+      # late. Catch it before anything is built.
+      - sh: test "{{.CLOUD}}" != "gke" || test -n "$GCP_PROJECT"
+        msg: 'GCP_PROJECT is not set — export it (or put it in .env) before applying GKE.'
+    cmds:
+      - . ./scripts/config.sh && terraform -chdir={{.TF_DIR}} apply {{.CLI_ARGS}}
+
+  output:
+    desc: '{{if eq .CLOUD "local"}}TERRAFORM ONLY — local has no infrastructure (use local:cluster){{else}}Show the Terraform outputs (cluster name, kubectl command, node label){{end}}'
+    dir: '{{.ROOT_DIR}}'
+    preconditions:
+      - sh: test "{{.CLOUD}}" != "local"
+        msg: '{{.TF_ONLY_MSG}}'
+    cmds:
+      - terraform -chdir={{.TF_DIR}} output
+
+  # ---- Phase 2: stacks ------------------------------------------------------
+  install:
+    desc: Deploy the observability, fake GPU and LLM simulation stacks (Phase 2)
+    dir: '{{.ROOT_DIR}}'
+    cmds:
+      - ./scripts/install.sh {{.CLOUD}}
+
+  verify:
+    desc: Run the acceptance checks (GPU + LLM metrics, dashboards, alerts firing)
+    dir: '{{.ROOT_DIR}}'
+    cmds:
+      - ./scripts/verify.sh {{.CLOUD}}
+
+  grafana:
+    desc: Open the GPU + LLM dashboards (holds a port-forward; Ctrl-C to stop)
+    dir: '{{.ROOT_DIR}}'
+    interactive: true # foreground port-forward, killed by Ctrl-C
+    cmds:
+      - ./scripts/grafana.sh {{.CLOUD}} {{.CLI_ARGS}}
+
+  prometheus:
+    desc: Open the Prometheus console — expression browser, targets, alerts (Ctrl-C to stop)
+    dir: '{{.ROOT_DIR}}'
+    interactive: true # foreground port-forward, killed by Ctrl-C
+    # Separate task rather than a flag on grafana: the two consoles answer different
+    # questions and are routinely wanted at the same time, and they hold independent
+    # port-forwards (3000 vs 9090) so running both is a supported combination.
+    cmds:
+      - ./scripts/prometheus.sh {{.CLOUD}} {{.CLI_ARGS}}
+
+  load:
+    desc: 'Drive a moving utilisation curve (task {{.CLOUD}}:load -- ramp|spikes)'
+    dir: '{{.ROOT_DIR}}'
+    interactive: true # long-running; walks the curve until Ctrl-C
+    # drive-load.sh acts on the CURRENT context by design, so assert it here rather
+    # than patching annotations into whatever cluster kubectl happens to point at.
+    preconditions:
+      - sh: test "$(kubectl config current-context 2>/dev/null)" = "{{.CTX}}"
+        msg: |
+          current-context is not {{.CTX}} — refusing to drive load at an unknown cluster.
+          Fix with: kubectl config use-context {{.CTX}}   (or run task {{.CLOUD}}:install)
+    cmds:
+      - ./scripts/drive-load.sh {{.CLI_ARGS | default "ramp"}}
+
+  llm-load:
+    desc: 'Drive a moving LLM load curve (task {{.CLOUD}}:llm-load -- ramp|burst|saturation|idle)'
+    dir: '{{.ROOT_DIR}}'
+    interactive: true # long-running; walks the curve until Ctrl-C
+    preconditions:
+      - sh: test "$(kubectl config current-context 2>/dev/null)" = "{{.CTX}}"
+        msg: |
+          current-context is not {{.CTX}} — refusing to drive load at an unknown cluster.
+          Fix with: kubectl config use-context {{.CTX}}   (or run task {{.CLOUD}}:install)
+      - sh: kubectl -n llm-sim get deploy llm-driven >/dev/null 2>&1
+        msg: |
+          The opt-in llm-driven simulator is not deployed. Apply it first:
+            kubectl apply -f manifests/llm/extras/
+    cmds:
+      - ./scripts/drive-llm-load.sh {{.CLI_ARGS | default "ramp"}}
+
+  # ---- teardown -------------------------------------------------------------
+  teardown:
+    desc: Remove the stacks, leave the cluster running
+    dir: '{{.ROOT_DIR}}'
+    cmds:
+      - ./scripts/teardown.sh {{.CLOUD}}
+
+  destroy:
+    desc: 'Remove the stacks AND the cluster ({{if eq .CLOUD "local"}}kind delete{{else}}terraform destroy{{end}})'
+    dir: '{{.ROOT_DIR}}'
+    interactive: true
+    # teardown.sh --destroy passes -auto-approve on the clouds (it must, to sequence the
+    # LB drain before destroy), so this prompt is the only confirmation you get there.
+    # Kept for local too: rebuilding is cheap but not free, and a surprise delete of a
+    # cluster someone was mid-demo on is the same annoyance either way.
+    prompt: 'Destroy the {{.CLOUD}} cluster{{if ne .CLOUD "local"}} and all its infrastructure{{end}}. Continue?'
+    cmds:
+      - ./scripts/teardown.sh {{.CLOUD}} --destroy

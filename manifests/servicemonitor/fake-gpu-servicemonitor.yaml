@@ -1,0 +1,27 @@
+# Wires Prometheus to the fake-gpu-operator's dcgm-exporter.
+#
+# ⚠️ FIRST check whether the chart already ships a ServiceMonitor:
+#     kubectl get servicemonitor -n gpu-operator
+#   If it does, DELETE this file (a duplicate causes conflicting scrape configs) and
+#   just rely on serviceMonitorSelectorNilUsesHelmValues:false picking the chart's up.
+#
+# ⚠️ Verify the Service labels + port name match your installed chart version:
+#     kubectl get svc -n gpu-operator --show-labels
+#   and adjust selector.matchLabels / endpoints.port below accordingly.
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: fake-dcgm-exporter
+  namespace: monitoring   # must match config.sh MONITORING_NS (install.sh guards drift)
+  labels:
+    release: kube-prometheus-stack   # harmless; picked up regardless due to Nil...=false
+spec:
+  namespaceSelector:
+    matchNames: [gpu-operator]       # must match config.sh FAKE_GPU_NS
+  selector:
+    matchLabels:
+      app: nvidia-dcgm-exporter      # <-- verify against `--show-labels`
+  endpoints:
+    - port: gpu-metrics              # <-- verify (often 'gpu-metrics' or 'metrics', :9400)
+      interval: 15s
+      path: /metrics

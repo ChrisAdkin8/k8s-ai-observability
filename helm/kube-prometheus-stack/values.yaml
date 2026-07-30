@@ -1,0 +1,55 @@
+# kube-prometheus-stack values — observability stack for the simulated GPUs.
+# Release: kube-prometheus-stack   Namespace: monitoring
+
+# --- Prometheus ---------------------------------------------------------------
+prometheus:
+  prometheusSpec:
+    # Ephemeral storage (emptyDir) is the Prometheus-Operator DEFAULT when no
+    # storageSpec is set. We keep it deliberately: it makes EKS and GKE symmetric and
+    # avoids the EKS EBS-CSI + IRSA requirement a persistent PVC would force.
+    # Trade-off: metrics do not survive a Prometheus pod restart (fine for a test rig).
+
+    # Pick up OUR ServiceMonitors / PrometheusRules even though they don't carry the
+    # chart's release label.
+    serviceMonitorSelectorNilUsesHelmValues: false
+    ruleSelectorNilUsesHelmValues: false
+    podMonitorSelectorNilUsesHelmValues: false
+    resources:
+      requests: { cpu: 250m, memory: 1Gi }
+      limits:   { memory: 2Gi }
+
+# --- Grafana ------------------------------------------------------------------
+grafana:
+  # admin password: chart generates a random one into secret
+  # <release>-grafana (key admin-password). Retrieve, don't hardcode.
+  service:
+    type: ClusterIP          # private by default — reach via `scripts/grafana.sh`
+  grafana.ini:
+    # Anonymous VIEW access. Safe only because the Service is ClusterIP: the sole way
+    # in is a port-forward, which already requires cluster RBAC. It removes the
+    # fetch-the-secret step from the read path (scripts/grafana.sh). If you ever change
+    # service.type to LoadBalancer/NodePort, DISABLE THIS FIRST — it would publish the
+    # dashboards to anyone who can reach the address.
+    auth.anonymous:
+      enabled: true
+      org_name: Main Org.    # must match Grafana's default org name exactly
+      org_role: Viewer       # read-only: no edit, no datasource or user admin
+    auth:
+      disable_login_form: false   # admin login still available for editing
+    users:
+      viewers_can_edit: false
+  sidecar:
+    dashboards:
+      enabled: true
+      label: grafana_dashboard
+      searchNamespace: ALL   # discover our dashboard ConfigMaps in any namespace
+  # The DCGM dashboard is shipped as a self-contained sidecar ConfigMap
+  # (manifests/dashboards/dcgm-configmap.yaml) — no grafana.com egress required, and
+  # verify.sh asserts that exact ConfigMap by name. To use the fuller upstream board
+  # 12239 instead, see manifests/dashboards/README.md. Prometheus is auto-provisioned as
+  # the default datasource, which the dashboard's datasource template variable resolves to.
+
+# Alertmanager kept default; for a test rig we only need alerts to reach 'firing' in
+# Prometheus, not to notify anywhere.
+alertmanager:
+  enabled: true
