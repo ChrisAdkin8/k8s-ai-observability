@@ -91,6 +91,15 @@ tasks:
     cmds:
       - python3 scripts/llm-sim.py --selftest
 
+  # The compose path's GPU producer, against tests/contracts/dcgm-surface.json —
+  # the same contract verify.sh check 3b holds the CLUSTER's exporter to. One file,
+  # two independent producers, both asserted; that is what makes it parity rather
+  # than self-consistency. Needs no docker, so it runs in the fast CI job.
+  compose-selftest:
+    desc: Check the compose GPU producer against the DCGM surface contract (no docker)
+    cmds:
+      - python3 compose/gpu-metrics-sim.py --selftest
+
   # Unit-tests every recording rule and alert in manifests/alerts/ with promtool:
   # thresholds on both sides of the boundary, the derived-series arithmetic, and
   # the alerts the live rig never drives. Run it before you push a change there.

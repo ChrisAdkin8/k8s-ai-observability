@@ -1,0 +1,49 @@
+{
+  "__doc__": [
+    "A DELIBERATELY WRONG DCGM contract, for the negative case in",
+    "compose/gpu-metrics-sim.py --selftest.",
+    "",
+    "WHY THIS FILE EXISTS. A checker that only ever runs against the real contract",
+    "is a checker nobody has watched fail. It can rot into one that accepts",
+    "anything — an over-broad match, a `problems` list that is built and never",
+    "returned, an exception swallowed into a pass — and the real run cannot reveal",
+    "that, because a checker that accepts everything also accepts the truth.",
+    "",
+    "So the selftest feeds this file and asserts the checker REJECTS it. Proving it",
+    "by hand-editing tests/contracts/dcgm-surface.json and reverting does not count:",
+    "nothing enforces the revert, and the next person finds a contract that has",
+    "quietly been wrong since whenever the experiment was abandoned.",
+    "",
+    "It is wrong in three independent ways, one per direction the checker has to",
+    "detect, so a rejection cannot come from whichever single case happens to be",
+    "implemented:",
+    "",
+    "  1. DCGM_FI_DEV_FB_FREE is MISSING     -> the producer emits a series the",
+    "                                           contract does not list",
+    "  2. DCGM_FI_DEV_SM_CLOCK is ADDED      -> the contract lists a series the",
+    "                                           producer does not emit. Chosen on",
+    "                                           purpose: SM_CLOCK is the series the",
+    "                                           fake exporter genuinely cannot emit,",
+    "                                           so this is the shape a real mistake",
+    "                                           would take.",
+    "  3. modelName is spelled model_name    -> a label-key rename, the drift that",
+    "                                           blanks a dashboard legend without",
+    "                                           blanking the panel",
+    "",
+    "Never point the compose simulator or verify.sh at this file."
+  ],
+
+  "series": [
+    "DCGM_FI_DEV_GPU_UTIL",
+    "DCGM_FI_DEV_FB_USED",
+    "DCGM_FI_DEV_SM_CLOCK"
+  ],
+
+  "labels": [
+    "Hostname",
+    "gpu",
+    "UUID",
+    "model_name",
+    "device"
+  ]
+}
