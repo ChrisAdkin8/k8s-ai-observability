@@ -1,0 +1,62 @@
+{
+  "__doc__": [
+    "THE DCGM EXPORTER SURFACE — one file, two independent producers, both asserted.",
+    "",
+    "This repo has two things that emit DCGM metrics, and until this file existed",
+    "nothing compared them:",
+    "",
+    "  * on Kubernetes, run-ai/fake-gpu-operator's status-exporter (chart 0.0.59)",
+    "  * outside it, compose/gpu-metrics-sim.py, which stands in for that exporter",
+    "    so the GPU board can be developed on a laptop",
+    "",
+    "The parity between them used to be prose in the compose simulator's header. A",
+    "chart bump that renamed a series or a label would fail the kind path loudly in",
+    "CI and let the compose path drift quietly, which is the wrong way round: the",
+    "compose path is the first command in the README.",
+    "",
+    "WHY THE TWO SIDES ARE ASSERTED DIFFERENTLY — and an exact match on the cluster",
+    "side fails on day one, so this asymmetry is a decision rather than an oversight.",
+    "",
+    "  compose  (gpu-metrics-sim.py --selftest)   EXACT equality.",
+    "      Nothing sits between the simulator and the assertion. It renders its own",
+    "      exposition, so the series set and the label-key set must match this file",
+    "      exactly — a name added here and not there is drift in either direction.",
+    "",
+    "  cluster  (verify.sh check 3b)              SUBSET.",
+    "      Series arriving through Prometheus carry labels the exporter never",
+    "      emitted — job, instance, namespace, pod, endpoint, service — because the",
+    "      ServiceMonitor's target labels are attached at scrape time. Consumer-pod",
+    "      labels arrive renamed to exported_*, since target labels win the",
+    "      collision (docs/observability.md). So the assertion is: every series",
+    "      named here is present, and every label key named here is present on it.",
+    "      Extra labels are expected and are not drift.",
+    "",
+    "THE THREE SERIES ARE THE WHOLE SURFACE, and that is a fact about the chart",
+    "rather than a choice. The status-exporter has no knob to emit more — no",
+    "container args, no metrics-config env var, nothing in `helm show values`.",
+    "DCGM_FI_DEV_GPU_TEMP and DCGM_FI_DEV_POWER_USAGE are synthesised from",
+    "utilisation by the recording rules in manifests/alerts/gpu-prometheusrule.yaml",
+    "and are therefore NOT part of this contract: they are derived, and verify.sh",
+    "check 4c is what asserts them. DCGM_FI_DEV_SM_CLOCK does not exist at all.",
+    "",
+    "Adding a series here without adding it to BOTH producers fails the compose",
+    "selftest in the fast CI job within seconds. That is the intended way to find out."
+  ],
+
+  "chart_version": "0.0.59",
+  "verified": "2026-07-31",
+
+  "series": [
+    "DCGM_FI_DEV_GPU_UTIL",
+    "DCGM_FI_DEV_FB_USED",
+    "DCGM_FI_DEV_FB_FREE"
+  ],
+
+  "labels": [
+    "Hostname",
+    "gpu",
+    "UUID",
+    "modelName",
+    "device"
+  ]
+}

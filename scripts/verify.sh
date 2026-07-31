@@ -1,7 +1,13 @@
 #!/usr/bin/env bash
-# verify.sh <eks|gke|local> — assert this repo's acceptance criteria: the GPU checks 1-5
-# (including 4b/4c/4d) and the LLM checks L1-L7. Both sets of numbers are cited elsewhere
-# in the repo and in commit history — do not renumber them.
+# verify.sh <eks|gke|local> [--byo] — assert this repo's acceptance criteria: the GPU
+# checks 1-5 (including 3b/4b/4c/4d) and the LLM checks L1-L7. Both sets of numbers are
+# cited elsewhere in the repo and in commit history — do not renumber them. New checks
+# get a letter suffix on the one they belong with, which is why 3b is 3b.
+#
+# --byo: the monitoring stack was NOT installed by this repo (see install.sh
+# --skip-monitoring). Everything about the simulators, scrapes, rules and dashboards
+# is still asserted; only the claims that follow from THIS repo's Helm values are
+# relaxed. See the BYO block below for exactly which, and why that is a short list.
 set -euo pipefail
 cd "$(dirname "${BASH_SOURCE[0]}")/.."
 source scripts/config.sh
@@ -52,6 +58,16 @@ promql_count() {
   prom_pf_ensure
   curl -sG "http://localhost:9090/api/v1/query" --data-urlencode "query=$1" \
     | python3 -c 'import sys,json; print(len(json.load(sys.stdin).get("data",{}).get("result",[])))' 2>/dev/null || echo 0
+}
+# The label KEYS on the first result series of a query, one per line (empty if the
+# query returns nothing). Used by check 3b, which asserts a label SET rather than a
+# series count — promql_count above cannot see inside the braces.
+promql_label_keys() {
+  prom_pf_ensure
+  curl -sG "http://localhost:9090/api/v1/query" --data-urlencode "query=$1" \
+    | python3 -c 'import sys,json
+r = json.load(sys.stdin).get("data", {}).get("result", [])
+print("\n".join(sorted(r[0].get("metric", {}))) if r else "")' 2>/dev/null || true
 }
 
 # How long checks 3 and 4c wait for the FIRST DCGM scrape to land, in 5s attempts.
@@ -106,6 +122,52 @@ for _ in $(seq 1 "$DCGM_POLL_ATTEMPTS"); do
 done
 [[ "${up:-0}" -gt 0 ]] && pass "DCGM scrape target up" || fail "no DCGM scrape target up (ServiceMonitor selector?)"
 [[ "${util:-0}" -gt 0 ]] && pass "DCGM_FI_DEV_GPU_UTIL returns $util series" || fail "DCGM_FI_DEV_GPU_UTIL empty"
+
+# 3b. The CLUSTER side of the DCGM surface contract — the same file
+#     compose/gpu-metrics-sim.py --selftest asserts against, so one committed
+#     artefact covers two independent producers of this surface. Without it, a
+#     chart bump that renames a series or a label fails here loudly and lets the
+#     compose path drift in silence.
+#
+#     ⚠️ A SUBSET, NOT AN EXACT MATCH, and an exact match would fail on day one.
+#     Series arriving through Prometheus carry labels the exporter never emitted —
+#     job, instance, namespace, pod, endpoint, service — attached from the
+#     ServiceMonitor's target at scrape time. The exporter's own pod/namespace
+#     labels arrive renamed to exported_* because target labels win the collision
+#     (docs/observability.md). So extra keys are expected and are not drift; what
+#     must hold is that every series and every label key the contract names is
+#     present. The contract file's header states both semantics.
+#
+#     Not polled: check 3 above has already waited out the first scrape, so
+#     anything missing here is missing rather than late.
+DCGM_CONTRACT="tests/contracts/dcgm-surface.json"
+if [[ ! -f "$DCGM_CONTRACT" ]]; then
+  fail "3b $DCGM_CONTRACT not found — the DCGM surface contract is what makes the compose and cluster producers comparable (run from the repo root)"
+else
+  contract_series="$(python3 -c 'import json,sys; print("\n".join(json.load(open(sys.argv[1]))["series"]))' "$DCGM_CONTRACT")"
+  contract_labels="$(python3 -c 'import json,sys; print("\n".join(json.load(open(sys.argv[1]))["labels"]))' "$DCGM_CONTRACT")"
+  surface_ok=1
+  while IFS= read -r cseries; do
+    [[ -n "$cseries" ]] || continue
+    keys="$(promql_label_keys "$cseries")"
+    if [[ -z "$keys" ]]; then
+      fail "3b contract series $cseries returns nothing — the fake exporter's surface has changed, or the chart pin moved (config.sh FAKE_GPU_CHART_VERSION)"
+      surface_ok=0
+      continue
+    fi
+    missing=""
+    while IFS= read -r clabel; do
+      [[ -n "$clabel" ]] || continue
+      printf '%s\n' "$keys" | grep -qx -- "$clabel" || missing="$missing $clabel"
+    done <<< "$contract_labels"
+    if [[ -n "$missing" ]]; then
+      fail "3b $cseries is missing contract label key(s):$missing — the dashboard legends and the recording-rule joins bind to these, so a rename blanks a legend without blanking the panel"
+      surface_ok=0
+    fi
+  done <<< "$contract_series"
+  [[ "$surface_ok" -eq 1 ]] \
+    && pass "3b cluster exporter satisfies the DCGM surface contract ($DCGM_CONTRACT)"
+fi
 
 # 4. OUR DCGM dashboard ConfigMap is present *by name* (not just any grafana_dashboard cm,
 #    of which the chart ships several) AND its core query returns data — the scriptable
