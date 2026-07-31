@@ -8,7 +8,11 @@ metadata:
   name: llm-sim
   namespace: monitoring        # must match config.sh MONITORING_NS
   labels:
-    release: kube-prometheus-stack   # harmless; picked up regardless due to Nil...=false
+    # ⚠️ Harmless only against THIS repo's values — see the fuller note in
+    # fake-gpu-servicemonitor.yaml. Upstream kube-prometheus-stack defaults the
+    # selector to release=<their release name>, where a mismatch is no scrape and no
+    # error. install.sh rewrites this to $RELEASE_LABEL at apply time.
+    release: kube-prometheus-stack
 spec:
   namespaceSelector:
     matchNames: [llm-sim]      # must match config.sh LLM_NS
