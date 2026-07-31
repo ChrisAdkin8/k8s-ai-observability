@@ -21,8 +21,9 @@ on:
     branches: [main]
   pull_request:
   workflow_dispatch:
-  # Weekly drift detection. The stack tracks two upstream Helm charts and a pinned
-  # kindest/node image; without this, upstream breakage is discovered by a stranger.
+  # Weekly drift detection. The stack tracks two upstream Helm charts, a pinned
+  # kindest/node image and vLLM's histogram bucket boundaries; without this,
+  # upstream breakage is discovered by a stranger.
   # NOTE: `schedule` fires only on the default branch, so this trigger cannot be
   # verified before merge — workflow_dispatch runs the same job to prove the code path.
   schedule:
@@ -100,6 +101,37 @@ jobs:
             echo "bash -n $f"
             bash -n "$f"
           done
+
+  # ---------------------------------------------------------------------------
+  # UPSTREAM drift, as opposed to the two jobs either side of it, which only ever
+  # check this repo against itself.
+  #
+  # This is the gap that let the vLLM metric names and bucket boundaries go two
+  # releases stale without a single red run: every existing check reads the
+  # simulator, and the simulator was consistent with itself. It was consistent
+  # with the wrong thing. No self-contained suite can catch that, because the
+  # fault is in a relationship to something outside the suite.
+  #
+  # SCHEDULE AND DISPATCH ONLY, deliberately. An upstream release is not a
+  # contributor's fault, and reddening someone's unrelated pull request because
+  # vLLM moved a bucket that morning trains people to ignore red. It also needs
+  # network egress to raw.githubusercontent.com, which a fork's runner may not
+  # have. Weekly is the right cadence: bucket drift is a correctness bug, but
+  # never an urgent one.
+  # ---------------------------------------------------------------------------
+  upstream-drift:
+    name: vLLM bucket drift
+    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+
+      # Exits 1 on drift and 2 when it could not check at all — the second is
+      # reported as its own thing rather than silently passing, because "we did
+      # not look" and "we looked and it was fine" are not the same result.
+      - name: vLLM histogram bucket boundaries
+        run: python3 scripts/check-vllm-buckets.py
 
   # ---------------------------------------------------------------------------
   # The real test: a kind cluster, both Helm releases, all the wiring, and every

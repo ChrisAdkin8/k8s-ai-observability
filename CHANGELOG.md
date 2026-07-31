@@ -50,10 +50,46 @@ Comparison links are at the foot of this file, one per released version.
   dashboard or alert of your own that references the two old names needs the same edit —
   `--vllm-surface both` below is the quickest way to find them.
 
-  ⚠️ **The histogram bucket boundaries were NOT re-verified against V1** and remain as
-  transcribed from v0.6.x. That is the more dangerous half and is stated plainly in
-  [docs/versions.md](docs/versions.md): a wrong metric name fails loudly, a wrong bucket
-  boundary returns a confident, plausible, wrong percentile.
+- ⚠️ **The histogram bucket boundaries had drifted too — and that was the more dangerous
+  half.** A wrong metric name fails loudly: the panel is blank and you go looking. A wrong
+  bucket boundary fails quietly, because `histogram_quantile()` still returns a confident,
+  plausible number that simply will not match real hardware.
+
+  All three lists were the v0.6.x layout. `TTFT_BUCKETS` was the one that actually broke:
+
+  ```
+  both:  0.001 0.005 0.01 0.02 0.04 0.06 0.08 0.1 0.25 0.5 0.75 1.0 2.5 5.0 7.5 10.0
+  v0.6:  │ 15   20   30   45   60   90  120
+  V1:    │ 20   40   80  160  640 2560
+  ```
+
+  Sixteen identical boundaries, then nothing in common — and the saturated tenant sits at
+  ~58s, inside the tail that had diverged. So the single number this rig exists to teach
+  you to read was the number it got wrong. **The reported p95 moves 59.25 → 78 with the
+  simulated latency completely unchanged**; only the resolution it is measured at moved.
+
+  `TPOT_BUCKETS` was a strict *prefix* of V1's, so it was never wrong at the operating
+  point — V1 only extended the tail. `E2E_BUCKETS` gained sub-second resolution
+  (`0.3/0.5/0.8`) that the old list, starting at `1.0`, did not have at all.
+
+  All three are now transcribed from `vllm/v1/metrics/loggers.py`. Knock-on changes, all
+  re-derived rather than adjusted until green:
+
+  - `tests/rules/llm-rules_test.yaml` fed `le="45.0"`/`le="60.0"`, boundaries V1 does not
+    have. The saturated case now places its mass in `(40, 80]` and expects `78`. The
+    steady tenant's boundaries (`0.08`, `0.1`) are identical in both layouts, so its three
+    expectations are untouched — which makes them the control.
+  - **The 2s `LLMHighTTFT` threshold survives, and is now pinned rather than assumed.** A
+    new test block covers the delicate case: `2` is not a boundary in either layout, so it
+    sits *inside* `(1.0, 2.5]`. A tenant in that bucket reports `2.425` and fires; one
+    bucket lower reports `0.9875` and does not.
+  - `verify.sh`'s L3b 120s bound still holds but no longer means what it did. 58s
+    quantises to `78` in `(40, 80]`; the next bucket up interpolates to `152`, so the
+    check jumps straight past 120 rather than degrading. It now reads "the queue wait has
+    not escaped `(40, 80]`", and says so.
+
+  ⚠️ **The screenshots in the README predate this** and show the saturated tenant at
+  `1.20 mins` rather than 78s. Noted in place rather than silently left to disagree.
 
 ### Added
 
@@ -65,6 +101,24 @@ Comparison links are at the foot of this file, one per released version.
   mapping lives, and `--selftest` now asserts the default emits v1 and *not* v0.
   Real vLLM only ever emits one surface — `both` is a rig affordance, not a fidelity
   claim.
+
+- **`scripts/check-vllm-buckets.py`, and a CI job that runs it weekly.** Fetches
+  `vllm/v1/metrics/loggers.py` and asserts each of the three bucket lists appears there
+  verbatim, reporting the exact point of divergence when one does not.
+
+  It exists because **nothing else in this repo could have caught either drift.** Every
+  test here reads the simulator, and the simulator was perfectly consistent with itself —
+  it was consistent with the wrong thing. A fault in a relationship to something *outside*
+  the suite needs a check that points outside it, which is the same reasoning behind the
+  existing weekly Helm-chart drift detection.
+
+  It does not model upstream's file structure, which would itself be a thing that drifts:
+  an `ast` walk pulls out every numeric list literal and looks for ours among them, so it
+  survives renames and code moving between functions, and fires only when the *numbers*
+  change. **Scheduled and dispatch only** — an upstream release is not a contributor's
+  fault, and reddening unrelated pull requests trains people to ignore red. Exits `0` in
+  sync, `1` on drift, `2` when it could not check at all, because "we did not look" and
+  "we looked and it was fine" are not the same result.
 
 - **A trimmed monitoring profile — `LITE=1`.**
   [`helm/kube-prometheus-stack/values-lite.yaml`](helm/kube-prometheus-stack/values-lite.yaml),

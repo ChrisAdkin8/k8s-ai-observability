@@ -30,11 +30,23 @@ tests:
   # healthy tenant into the saturated one and describe neither.
   #
   # steady:    every TTFT in (0.08, 0.1]  -> p95 = 0.08 + 0.02*0.95 = 0.099
-  # saturated: every TTFT in (45, 60]     -> p95 = 45   + 15  *0.95 = 59.25
+  # saturated: every TTFT in (40, 80]     -> p95 = 40   + 40  *0.95 = 78
   #
   # Those two straddle the 2s LLMHighTTFT threshold on purpose: it is the same
   # arrangement manifests/llm/10-profiles.yaml produces on a live cluster, so a
   # threshold change that silently caught the healthy tenant fails here first.
+  #
+  # ⚠️ THE SATURATED BUCKET CHANGED WITH THE V1 SYNC, and re-deriving it is the
+  # reason this file is worth having. It used to place mass in (45, 60] and
+  # expect 59.25. V1 has neither boundary — its TTFT tail is 20/40/80/160/...
+  # so the same ~58s latency now lands in (40, 80], a 40s-wide bucket rather
+  # than a 15s-wide one, and the reported p95 moves 59.25 -> 78 with the
+  # SIMULATED LATENCY COMPLETELY UNCHANGED. That gap is the whole argument for
+  # transcribing boundaries rather than inventing them: nothing about the
+  # modelled server moved, only the resolution it is measured at.
+  #
+  # The steady tenant's two boundaries (0.08, 0.1) are identical in v0 and V1,
+  # so its three expectations below are untouched — which is the control.
   # =========================================================================
   - interval: 30s
     name: TTFT p95 is per-tenant, and the alert catches only the saturated one
@@ -48,12 +60,14 @@ tests:
         values: '0+10x40'
       - series: 'vllm:time_to_first_token_seconds_bucket{model_name="sim-llama-3-8b-steady", le="2.5"}'
         values: '0+10x40'
-      - series: 'vllm:time_to_first_token_seconds_bucket{model_name="sim-llama-3-8b-steady", le="60.0"}'
+      - series: 'vllm:time_to_first_token_seconds_bucket{model_name="sim-llama-3-8b-steady", le="80.0"}'
         values: '0+10x40'
       - series: 'vllm:time_to_first_token_seconds_bucket{model_name="sim-llama-3-8b-steady", le="+Inf"}'
         values: '0+10x40'
 
-      # ---- saturated: all mass in (45, 60] --------------------------------
+      # ---- saturated: all mass in (40, 80] --------------------------------
+      # 40.0 and 80.0 are consecutive members of V1's TTFT_BUCKETS. The old
+      # 45.0/60.0 pair does not exist upstream at all.
       - series: 'vllm:time_to_first_token_seconds_bucket{model_name="sim-llama-3-8b-saturated", le="0.01"}'
         values: '0x40'
       - series: 'vllm:time_to_first_token_seconds_bucket{model_name="sim-llama-3-8b-saturated", le="0.08"}'
@@ -62,9 +76,9 @@ tests:
         values: '0x40'
       - series: 'vllm:time_to_first_token_seconds_bucket{model_name="sim-llama-3-8b-saturated", le="2.5"}'
         values: '0x40'
-      - series: 'vllm:time_to_first_token_seconds_bucket{model_name="sim-llama-3-8b-saturated", le="45.0"}'
+      - series: 'vllm:time_to_first_token_seconds_bucket{model_name="sim-llama-3-8b-saturated", le="40.0"}'
         values: '0x40'
-      - series: 'vllm:time_to_first_token_seconds_bucket{model_name="sim-llama-3-8b-saturated", le="60.0"}'
+      - series: 'vllm:time_to_first_token_seconds_bucket{model_name="sim-llama-3-8b-saturated", le="80.0"}'
         values: '0+10x40'
       - series: 'vllm:time_to_first_token_seconds_bucket{model_name="sim-llama-3-8b-saturated", le="+Inf"}'
         values: '0+10x40'
@@ -76,7 +90,7 @@ tests:
         eval_time: 10m
         exp_samples:
           - labels: 'llm:ttft:p95_5m{model_name="sim-llama-3-8b-saturated", source="simulated"}'
-            value: 59.25
+            value: 78
           - labels: 'llm:ttft:p95_5m{model_name="sim-llama-3-8b-steady", source="simulated"}'
             value: 0.099
 
@@ -112,7 +126,67 @@ tests:
               source: simulated
             exp_annotations:
               summary: "Model sim-llama-3-8b-saturated p95 time-to-first-token above 2s"
-              description: "p95 TTFT has been over 2s for 2m (59.25s). Requests are queueing faster than they can be served (simulated)."
+              description: "p95 TTFT has been over 2s for 2m (78.00s). Requests are queueing faster than they can be served (simulated)."
+
+  # =========================================================================
+  # THE 2s THRESHOLD, pinned against V1's boundaries specifically.
+  #
+  # The V1 sync moved TTFT's tail, so "does 2s still separate the tenants?"
+  # stopped being answerable by inspection and had to be checked. It does, and
+  # this block is why that is not taken on trust again.
+  #
+  # 2 is NOT a bucket boundary in either layout — V1 runs ... 0.75, 1.0, 2.5 ...
+  # so the threshold sits INSIDE (1.0, 2.5]. That is the interesting case: a
+  # tenant whose mass lands in that bucket reports a p95 of 2.425 and fires,
+  # while one bucket lower reports 0.9875 and does not. The block above proves
+  # the threshold works with three orders of magnitude of daylight either side;
+  # this one proves it works where it is actually delicate.
+  # =========================================================================
+  - interval: 30s
+    name: the 2s threshold separates correctly across the bucket it sits inside
+    input_series:
+      # over: all mass in (1.0, 2.5] -> p95 = 1.0 + 1.5*0.95 = 2.425
+      - series: 'vllm:time_to_first_token_seconds_bucket{model_name="sim-over", le="1.0"}'
+        values: '0x40'
+      - series: 'vllm:time_to_first_token_seconds_bucket{model_name="sim-over", le="2.5"}'
+        values: '0+10x40'
+      - series: 'vllm:time_to_first_token_seconds_bucket{model_name="sim-over", le="+Inf"}'
+        values: '0+10x40'
+      # under: all mass in (0.75, 1.0] -> p95 = 0.75 + 0.25*0.95 = 0.9875
+      - series: 'vllm:time_to_first_token_seconds_bucket{model_name="sim-under", le="0.75"}'
+        values: '0x40'
+      - series: 'vllm:time_to_first_token_seconds_bucket{model_name="sim-under", le="1.0"}'
+        values: '0+10x40'
+      - series: 'vllm:time_to_first_token_seconds_bucket{model_name="sim-under", le="2.5"}'
+        values: '0+10x40'
+      - series: 'vllm:time_to_first_token_seconds_bucket{model_name="sim-under", le="+Inf"}'
+        values: '0+10x40'
+
+    promql_expr_test:
+      - expr: llm:ttft:p95_5m
+        eval_time: 10m
+        exp_samples:
+          # NOT 2.425 — do not "tidy" this. 1.0 + 1.5*0.95 is 2.4250000000000003
+          # in IEEE 754 (0.95 has no exact binary representation), promtool
+          # compares exactly, and 2.425 fails. The steady tenant's 0.099 above
+          # happens to land exactly; this one does not. Both are the real value.
+          - labels: 'llm:ttft:p95_5m{model_name="sim-over", source="simulated"}'
+            value: 2.4250000000000003
+          - labels: 'llm:ttft:p95_5m{model_name="sim-under", source="simulated"}'
+            value: 0.9875
+
+    alert_rule_test:
+      # Exactly one: 2.425 > 2 fires, 0.9875 does not.
+      - eval_time: 10m
+        alertname: LLMHighTTFT
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+              model_name: sim-over
+              source: simulated
+            exp_annotations:
+              summary: "Model sim-over p95 time-to-first-token above 2s"
+              description: "p95 TTFT has been over 2s for 2m (2.43s). Requests are queueing faster than they can be served (simulated)."
 
   # =========================================================================
   # TPOT. Its own block because the bucket layout is the point: the rule file

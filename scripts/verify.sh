@@ -250,6 +250,15 @@ done
 # above the mean. The old 60s bound suited the previous model, whose synthetic
 # penalty of 0.05s per queued request implied a 20 rps service rate that the rest
 # of the model contradicted.
+#
+# ⚠️ WHAT THIS BOUND IS REALLY TESTING, since the V1 bucket sync. 58s lands in
+# V1's (40, 80] TTFT bucket, so the REPORTED p95 is quantised to
+# 40 + 40*0.95 = 78 for any true latency inside that band — comfortably under
+# 120. But the next bucket up is (80, 160], which interpolates to 152, so this
+# check does not degrade gracefully: it passes at 78 and then jumps straight past
+# 120 the moment the true p95 crosses 80s. Read it as "the queue wait has not
+# escaped the (40, 80] band", not as a 120s budget with 42s of headroom. If you
+# raise max_in_flight or cut capacity, re-derive it rather than nudging it up.
 llm_sane="$(promql_count 'count(llm:ttft:p95_5m < 120) == count(llmsim_profile_generation)')"
 [[ "${llm_sane:-0}" -gt 0 ]] && pass "L3b every running simulator has a sane p95 TTFT (<120s)" \
   || fail "L3b at least one tenant has p95 TTFT >= 120s or is missing a recording-rule series"

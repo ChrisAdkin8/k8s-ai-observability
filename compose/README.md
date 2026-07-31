@@ -46,9 +46,15 @@ is POSIX sh and awk, and runs in busybox.
 
 ```
 llm:ttft:p95_5m   sim-llama-3-8b-steady      0.099   ← under the 2s alert threshold
-llm:ttft:p95_5m   sim-llama-3-8b-saturated  81.5     ← over it, on purpose
+llm:ttft:p95_5m   sim-llama-3-8b-saturated  78      ← over it, on purpose
 firing            GPUHighUtilization  GPUHighMemoryUsage  LLMHighTTFT
 ```
+
+Both figures are bucket-quantised rather than noisy, which is why they are quotable at
+all: the steady tenant's latency sits in `(0.08, 0.1]` and the saturated one's ~58s queue
+wait in V1's `(40, 80]`, so `histogram_quantile` reports `0.08 + 0.02×0.95` and
+`40 + 40×0.95` respectively. The saturated figure read `81.5` before the V1 bucket sync,
+on boundaries vLLM no longer has — same simulated latency, different resolution.
 
 ## What is *not* shared
 

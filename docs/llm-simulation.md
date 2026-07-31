@@ -95,10 +95,16 @@ dashboard at it and every panel still bound to a v0 name is the set of panels yo
 engine upgrade will break. Real vLLM only ever emits one surface — `both` is a rig
 affordance, not a fidelity claim. Set it per pod with `LLM_SIM_VLLM_SURFACE`.
 
-> ⚠️ **The histogram bucket boundaries have not been re-verified against V1.** They
-> were transcribed from v0.6.x and are unchanged. If V1 moved a boundary, percentile
-> panels built here will read plausibly and transfer wrong — see
-> [versions.md](versions.md).
+**The bucket boundaries moved too**, and that mattered more than the names. V1 replaced
+TTFT's entire tail above 10s (`15/20/30/45/60/90/120` became `20/40/80/160/640/2560`),
+and the saturated tenant sits at ~58s — inside it. Same simulated latency, different
+reported p95, purely from the resolution it is measured at. All three lists are now
+transcribed from `vllm/v1/metrics/loggers.py` and
+[drift-checked weekly](versions.md#keeping-them-honest):
+
+```sh
+python3 scripts/check-vllm-buckets.py
+```
 
 > **No `source` label on `vllm:*` series.** The GPU side tags its synthesised metrics
 > `source="derived"`, but doing that here would break the transfer property: real vLLM emits
@@ -214,7 +220,7 @@ Three numbers interlock, and changing one means re-checking the others:
 |---|---|---|
 | `LLMHighTTFT` threshold | p95 > 2s for 2m | Above steady (~0.1s), below saturated (~60s) |
 | Steady p95 | ~0.1s | Must stay **below** the threshold or the healthy tenant alerts |
-| Saturated p95 | ~60s | Must stay **above** it, and under `verify.sh`'s 120s sanity bound. This is the real queue wait: `160 / 2.74 rps` by Little's Law, so it moves if you change `max_in_flight` or capacity |
+| Saturated p95 | ~78s | Must stay **above** it, and under `verify.sh`'s 120s sanity bound. The underlying wait is `160 / 2.74 rps` ≈ 58s by Little's Law, so it moves if you change `max_in_flight` or capacity — but the *reported* figure is quantised by V1's `(40, 80]` bucket to `40 + 40×0.95 = 78`, and will read 78 for any true latency inside that band |
 
 A malformed profile is never fatal: the simulator logs the problem, keeps the last good
 profile, and increments `llmsim_profile_reload_errors_total`.

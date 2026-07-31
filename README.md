@@ -51,9 +51,14 @@ Kubernetes. The compose stack reads those same dashboards, rules, simulator and 
 side](docs/llm-dashboard.png)
 
 Two tenants either side of the 2s alert threshold — the point of running two simulators.
-`sim-llama-3-8b-steady` answers in ~120 ms; `sim-llama-3-8b-saturated` sits at ~1.2 min
-with 16 requests running and 160 queued behind it. Every panel aggregates
+`sim-llama-3-8b-steady` answers in ~120 ms; `sim-llama-3-8b-saturated` reports a p95 of
+78s with 16 requests running and 160 queued behind it. Every panel aggregates
 `by (model_name)`, so the overloaded tenant is never averaged into the healthy one.
+
+> The screenshots above were captured before the vLLM V1 bucket sync, so the saturated
+> tenant reads `1.20 mins` rather than 78s. The simulated latency did not change — only
+> the histogram resolution it is reported at. See
+> [versions.md](docs/versions.md#keeping-them-honest).
 
 ## What transfers, and what doesn't
 

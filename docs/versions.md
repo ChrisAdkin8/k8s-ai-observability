@@ -11,7 +11,7 @@ in `scripts/config.sh` at install time.
 | kind node image (local) | `kind/gpu-sim.yaml` | `kindest/node:v1.36.1` — asserted to stay on the `K8S_VERSION` line |
 | kube-prometheus-stack chart | `scripts/config.sh` | `87.17.0` |
 | fake-gpu-operator chart | `scripts/config.sh` | `0.0.59` |
-| vLLM metric surface mirrored | `scripts/config.sh` (`LLM_VLLM_VERSION`) | `v1` — names only; **buckets still from v0.6.x**, see below |
+| vLLM metric surface mirrored | `scripts/config.sh` (`LLM_VLLM_VERSION`) | `v1` — names and buckets, drift-checked weekly, see below |
 | promtool (rule tests) | `.github/workflows/ci.yml` (`PROMETHEUS_VERSION`) | `3.7.3` — CI only; locally any promtool works |
 | LLM simulator base image | `manifests/llm/20-simulators.yaml` | `python:3.12-slim` |
 | DCGM dashboard | `manifests/dashboards/gpu-sim-dcgm.json` | shipped in-repo (grafana.com board 12239 is an optional swap-in) |
@@ -26,20 +26,54 @@ The vLLM version matters more than it looks: the simulator copies that release's
 bucket boundaries, and `histogram_quantile()` accuracy depends entirely on bucket placement.
 Change it and re-check `scripts/llm-sim.py`.
 
-**This pin is split, and the two halves are not equally solid.**
+**This pin has two halves, and both had drifted.** Releases `0.1.0` and `0.2.0` mirrored
+v0.6.x while the V1 engine had moved on.
 
-- **Metric names — V1, verified.** Two series were renamed when the V1 engine landed
+- **Metric names — V1.** Two series were renamed
   (`gpu_cache_usage_perc` → `kv_cache_usage_perc`,
-  `time_per_output_token_seconds` → `inter_token_latency_seconds`). Releases `0.1.0` and
-  `0.2.0` shipped the superseded spellings. `METRIC_SURFACES` in `scripts/llm-sim.py` is
-  the one place that mapping lives, and `--vllm-surface both` emits the old names
-  alongside — see [llm-simulation.md](llm-simulation.md#which-engines-names).
-- **Bucket boundaries — still v0.6.x, NOT re-verified.** `TTFT_BUCKETS`, `TPOT_BUCKETS`
-  and `E2E_BUCKETS` are as transcribed for v0.6.x. Nothing here proves V1 kept them.
+  `time_per_output_token_seconds` → `inter_token_latency_seconds`). `METRIC_SURFACES` in
+  `scripts/llm-sim.py` is the one place that mapping lives, and `--vllm-surface both`
+  emits the old names alongside — see
+  [llm-simulation.md](llm-simulation.md#which-engines-names).
+- **Bucket boundaries — V1.** `TTFT_BUCKETS`, `TPOT_BUCKETS` and `E2E_BUCKETS` are
+  transcribed verbatim from `vllm/v1/metrics/loggers.py`.
 
-That second bullet is the more dangerous of the two, and deliberately so stated. A wrong
+The second was the more dangerous, and it is worth being precise about why. A wrong
 metric *name* fails loudly — the panel is blank and you go looking. A wrong *bucket
 boundary* fails quietly: `histogram_quantile()` still returns a confident number, the
 panel still draws a plausible line, and the SLO you derive from it is wrong only once it
-meets real hardware. Re-check them against a live V1 `/metrics` dump before trusting a
-percentile built here.
+meets real hardware.
+
+TTFT is the one that had actually broken. Its first sixteen boundaries were identical in
+v0.6.x and V1, so nothing looked wrong — but V1 replaced the entire tail:
+
+```
+both:  0.001 0.005 0.01 0.02 0.04 0.06 0.08 0.1 0.25 0.5 0.75 1.0 2.5 5.0 7.5 10.0
+v0.6:  │ 15   20   30   45   60   90  120
+V1:    │ 20   40   80  160  640 2560
+```
+
+The saturated tenant sits at ~58s — inside that tail. Same simulated latency, different
+reported p95 (59.25 → 78), purely from the resolution it is measured at. `TPOT_BUCKETS`
+was a strict prefix of V1's and so was never wrong at the operating point; `E2E_BUCKETS`
+gained sub-second resolution (`0.3/0.5/0.8`) it previously had none of.
+
+## Keeping them honest
+
+`scripts/check-vllm-buckets.py` fetches `loggers.py` and asserts each of the three lists
+appears there verbatim. It runs weekly in CI beside the Helm-chart drift detection —
+**scheduled and dispatch only**, so an upstream release never reddens a contributor's
+pull request.
+
+It exists because nothing else could have caught this. Every other test in this repo
+reads the simulator, and the simulator was perfectly consistent with itself — it was
+consistent with the wrong thing. A fault in a relationship to something *outside* the
+suite needs a check that points outside it.
+
+```sh
+python3 scripts/check-vllm-buckets.py   # 0 in sync · 1 drift · 2 could not check
+```
+
+Drift there means updating `scripts/llm-sim.py` and then re-deriving the expected values
+in `tests/rules/llm-rules_test.yaml`, which are pinned to specific boundaries on purpose
+and will fail until you do.

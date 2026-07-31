@@ -55,28 +55,48 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 # dashboard or SLO tuned against made-up buckets silently fails to transfer to a
 # real deployment — which is the whole point of this simulator.
 #
-# Re-check them if you change LLM_VLLM_VERSION in scripts/config.sh.
+# SOURCE OF TRUTH: vllm/v1/metrics/loggers.py on vllm-project/vllm. These are
+# transcribed from it verbatim, in order. `scripts/check-vllm-buckets.py` diffs
+# them against that file and runs weekly in CI, because these MOVE — an upstream
+# PR to add finer-grained low-end latency buckets was open when they were last
+# transcribed. Do not hand-edit one without re-running that check.
+#
+# ⚠️ THESE WERE WRONG UNTIL THE V1 SYNC. Releases 0.1.0 and 0.2.0 carried the
+# v0.6.x layout, whose TTFT tail (15/20/30/45/60/90/120) V1 replaced entirely
+# with 20/40/80/160/640/2560. The first sixteen boundaries were identical, so
+# nothing looked wrong — and the saturated tenant sits at ~58s, squarely in the
+# tail that had diverged, which is precisely where this rig teaches you to read a
+# p95. A wrong boundary does not fail: it returns a confident, plausible, wrong
+# number. That is why the automated check exists rather than a note to re-check.
 # --------------------------------------------------------------------------
-# The upper bounds must cover a fully-queued tenant, or histogram_quantile lands
-# in the +Inf bucket and Prometheus reports the highest finite bound instead —
-# a p95 panel pinned flat at the top bucket, which reads as a plateau rather than
-# as "off the scale". Worst case here is a request arriving behind a full queue:
-#   (max_in_flight - max_concurrency) / capacity = 160 / 2.74 ~= 58s of wait,
-# plus generation, so TTFT needs ~2x that in headroom and e2e a little more.
+# V1's tail runs to 2560s, so the "must cover a fully-queued tenant" concern that
+# shaped the old custom tail is now upstream's problem and not ours: a request
+# arriving behind a full queue waits
+#   (max_in_flight - max_concurrency) / capacity = 160 / 2.74 ~= 58s,
+# which lands mid-range rather than anywhere near the top bucket.
 TTFT_BUCKETS = [0.001, 0.005, 0.01, 0.02, 0.04, 0.06, 0.08, 0.1,
                 0.25, 0.5, 0.75, 1.0, 2.5, 5.0, 7.5, 10.0,
-                15.0, 20.0, 30.0, 45.0, 60.0, 90.0, 120.0]
+                20.0, 40.0, 80.0, 160.0, 640.0, 2560.0]
 # ⚠️ p95 TPOT reads HIGH at this rig's operating point, and that is the buckets,
 # not the simulator. A full batch models ITL at base_itl x 1.5 = 0.0225s, which
-# lands inside the wide (0.025, 0.05] bucket, so histogram_quantile interpolates
-# across a 25ms gap and reports ~43ms: roughly double the modelled value. Real
-# vLLM has this same layout, so a real deployment reads high in the same way and
-# the boundaries must stay exactly as transcribed. Do not derive an ITL SLO from
-# the p95 panel at these latencies; it has no resolution between 25ms and 50ms.
+# lands inside the wide (0.01, 0.025] bucket, so histogram_quantile interpolates
+# across a 15ms gap and reports ~24ms. Real vLLM has this same layout, so a real
+# deployment reads high in the same way and the boundaries must stay exactly as
+# transcribed. Do not derive an ITL SLO from the p95 panel at these latencies.
+#
+# The v0.6.x list was a strict PREFIX of this one — V1 only extended the tail
+# (5.0 … 80.0) — so unlike TTFT this one was never wrong at the operating point.
 TPOT_BUCKETS = [0.01, 0.025, 0.05, 0.075, 0.1, 0.15, 0.2, 0.3,
-                0.4, 0.5, 0.75, 1.0, 2.5]
-E2E_BUCKETS = [1.0, 2.5, 5.0, 10.0, 15.0, 20.0, 30.0, 40.0, 50.0, 60.0,
-               90.0, 120.0, 180.0]
+                0.4, 0.5, 0.75, 1.0, 2.5, 5.0, 7.5, 10.0,
+                20.0, 40.0, 80.0]
+# Upstream calls this `request_latency_buckets` and shares it across several
+# request-scoped histograms. Note the resolution BELOW 1s (0.3/0.5/0.8), which
+# the v0.6.x list this repo shipped did not have at all — it started at 1.0, so
+# every healthy request fell in one bucket and no sub-second e2e percentile was
+# recoverable.
+E2E_BUCKETS = [0.3, 0.5, 0.8, 1.0, 1.5, 2.0, 2.5, 5.0, 10.0, 15.0,
+               20.0, 30.0, 40.0, 50.0, 60.0, 120.0, 240.0, 480.0,
+               960.0, 1920.0, 7680.0]
 
 # --------------------------------------------------------------------------
 # vLLM metric SURFACE.

@@ -64,11 +64,11 @@ FAKE_GPU_CHART_VERSION="0.0.59"       # verified 2026-07
 # METRIC_SURFACES in scripts/llm-sim.py is the single place that mapping lives;
 # `--vllm-surface both` emits the v0 aliases too, for upgrade testing.
 #
-# ⚠️ BUCKETS: NOT re-verified against V1. TTFT_BUCKETS/TPOT_BUCKETS/E2E_BUCKETS
-# in scripts/llm-sim.py were transcribed from v0.6.x and are still on those
-# values. If V1 moved any boundary, percentile panels will read plausibly and
-# transfer WRONG — the failure mode bucket drift always has. Re-check them
-# against a live V1 /metrics dump before trusting a p95 built here.
+# BUCKETS: V1, and verified rather than asserted. TTFT_BUCKETS/TPOT_BUCKETS/
+# E2E_BUCKETS in scripts/llm-sim.py are transcribed from vllm/v1/metrics/
+# loggers.py, and scripts/check-vllm-buckets.py diffs them against that file
+# weekly in CI. They had ALSO drifted — TTFT's whole tail above 10s — which is
+# why the check exists rather than a note telling you to re-check.
 LLM_VLLM_VERSION="v1"
 
 # model_name is an IDENTITY, not a label: the recording rules aggregate
