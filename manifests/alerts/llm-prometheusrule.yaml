@@ -83,6 +83,100 @@ spec:
                 (rate(vllm:prefix_cache_queries_total[5m])), 1e-9)
           labels: { source: simulated }
 
+        # ---- the request phase breakdown, as MEANS and not as quantiles ----
+        #
+        # queue -> prefill -> decode is where a request's time went, and these
+        # four rules are what the breakdown panel plots. ⚠️ FOUR, not three:
+        # llm:e2e:mean5m is the right-hand side of "does the breakdown add up",
+        # and without it that test cannot be written over the recorded rules at
+        # all. e2e is an existing series that never had a mean rule, so its
+        # absence does not announce itself.
+        #
+        # ⚠️ AND IT HAS TO BE A RULE RATHER THAN AN INLINED EXPRESSION, because
+        # of the source label. Recorded series here carry source="simulated" and
+        # raw vllm:* series do not, so combining three recorded means with an
+        # inlined rate(vllm:e2e_..._sum)/rate(..._count) matches NOTHING, and the
+        # obvious repair — on(model_name) — then drops source from the result.
+        # VERIFIED with promtool; the failure reads as an arithmetic bug:
+        #     exp: {model_name="m", source="simulated"} 0E+00
+        #     got: {model_name="m"}                     0E+00
+        # Recording all four with the same label set makes the comparison
+        # label-symmetric and needs no on() clause.
+        #
+        # ⚠️ MEANS, NOT p95s, and both reasons are measured.
+        #
+        # 1. Quantiles are not additive, so a p95 breakdown does not add up. On
+        #    the steady tenant, with perfect resolution and no bucket error:
+        #      p95:  0.000 + 0.094 + 7.379 = 7.473  vs p95(e2e) 7.468   NO
+        #      mean: 0.001 + 0.080 + 5.020 = 5.101  vs mean(e2e) 5.101  EXACT
+        #    A stacked breakdown whose segments do not sum to the total reads as
+        #    a bug in the rig, forever, to everyone who looks at it.
+        #
+        # 2. E2E_BUCKETS cannot resolve prefill at this operating point.
+        #    base_ttft_seconds is 0.08 and the first boundary is 0.3, so every
+        #    prefill observation lands in the first bucket and
+        #    histogram_quantile interpolates from zero across it — MEASURED at
+        #    ~3.03x on BOTH shipped tenants (0.095s reported as 0.285s). For
+        #    scale, the inter-token-latency caveat already on the board is a
+        #    1.08x effect.
+        #
+        # A histogram mean has NO bucket dependence at all — _sum and _count are
+        # exact — so it is immune to (2), and it is additive, so it is immune to
+        # (1). Do not "fix" (2) by adding a finer low-end bucket list: the
+        # boundaries are transcribed from upstream and are what makes a query
+        # built here transfer unchanged. Real vLLM reads exactly as high, which
+        # is why the caveat is documented on the catalog page instead.
+        #
+        # ⚠️ Clamped at an EPSILON, not at 1, for the same reason
+        # llm:prefix_cache:hit_ratio5m is: a low-traffic tenant can genuinely
+        # complete fewer than one request per second, and flooring at 1 would
+        # silently under-report the mean of precisely the deployments least
+        # likely to notice. An idle tenant reads 0/1e-9 = 0 — a flat line rather
+        # than a NaN. VERIFIED with promtool against a zero-traffic fixture.
+        - record: llm:queue:mean5m
+          expr: >-
+            sum by (model_name) (rate(vllm:request_queue_time_seconds_sum[5m]))
+            / clamp_min(sum by (model_name)
+                (rate(vllm:request_queue_time_seconds_count[5m])), 1e-9)
+          labels: { source: simulated }
+
+        - record: llm:prefill:mean5m
+          expr: >-
+            sum by (model_name) (rate(vllm:request_prefill_time_seconds_sum[5m]))
+            / clamp_min(sum by (model_name)
+                (rate(vllm:request_prefill_time_seconds_count[5m])), 1e-9)
+          labels: { source: simulated }
+
+        - record: llm:decode:mean5m
+          expr: >-
+            sum by (model_name) (rate(vllm:request_decode_time_seconds_sum[5m]))
+            / clamp_min(sum by (model_name)
+                (rate(vllm:request_decode_time_seconds_count[5m])), 1e-9)
+          labels: { source: simulated }
+
+        - record: llm:e2e:mean5m
+          expr: >-
+            sum by (model_name) (rate(vllm:e2e_request_latency_seconds_sum[5m]))
+            / clamp_min(sum by (model_name)
+                (rate(vllm:e2e_request_latency_seconds_count[5m])), 1e-9)
+          labels: { source: simulated }
+
+        # The one phase these buckets resolve tolerably — MEASURED at 1.26x on
+        # the steady tenant and 1.12x on the saturated one, against 3.03x for
+        # prefill.
+        #
+        # ⚠️ There is deliberately NO llm:prefill:p95_5m and NO llm:e2e:p95_5m
+        # here. Prefill is the 3.03x case above. e2e is WORSE than decode under
+        # saturation — 1.71x, 67.97s reported as 116.26s — and the saturated
+        # tenant is the one the board exists to show. A recorded series is
+        # exactly how a wrong number acquires an air of authority, so the two
+        # that cannot be read straight are not recorded at all.
+        - record: llm:decode:p95_5m
+          expr: >-
+            histogram_quantile(0.95, sum by (model_name, le)
+              (rate(vllm:request_decode_time_seconds_bucket[5m])))
+          labels: { source: simulated }
+
         - record: llm:tokens:generation_rate5m
           expr: sum by (model_name) (rate(vllm:generation_tokens_total[5m]))
           labels: { source: simulated }

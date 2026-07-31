@@ -520,6 +520,224 @@
           "refId": "A"
         }
       ]
+    },
+    {
+      "id": 11,
+      "type": "timeseries",
+      "title": "Request phase breakdown — where the time went — $model",
+      "description": "MEANS, not percentiles, and both reasons are measured. (1) Quantiles are not additive: on the steady tenant p95 queue+prefill+decode = 7.473s against a p95 e2e of 7.468s, while the means sum to 5.101s against a mean e2e of 5.101s exactly. A stacked breakdown whose segments do not sum to the total reads as a bug in the rig. (2) A histogram mean has no bucket dependence at all — _sum and _count are exact — whereas p95 prefill is overstated ~3x here because base_ttft_seconds is 0.08s and the first bucket boundary is 0.3s. ⚠️ That second effect TRANSFERS to real vLLM: these boundaries are upstream's, so a real deployment with sub-300ms prefill reads just as high. Do not build a prefill SLO on a p95 from these buckets. Stacked, and one panel per model (repeats on $model), because the stack is only meaningful within a tenant — summing queue across tenants describes nothing.",
+      "gridPos": {
+        "h": 9,
+        "w": 12,
+        "x": 0,
+        "y": 50
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "s",
+          "min": 0,
+          "custom": {
+            "fillOpacity": 40,
+            "lineWidth": 1,
+            "stacking": {
+              "mode": "normal",
+              "group": "A"
+            }
+          }
+        },
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byFrameRefID",
+              "options": "A"
+            },
+            "properties": [
+              {
+                "id": "color",
+                "value": {
+                  "mode": "fixed",
+                  "fixedColor": "orange"
+                }
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byFrameRefID",
+              "options": "B"
+            },
+            "properties": [
+              {
+                "id": "color",
+                "value": {
+                  "mode": "fixed",
+                  "fixedColor": "blue"
+                }
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byFrameRefID",
+              "options": "C"
+            },
+            "properties": [
+              {
+                "id": "color",
+                "value": {
+                  "mode": "fixed",
+                  "fixedColor": "green"
+                }
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byFrameRefID",
+              "options": "D"
+            },
+            "properties": [
+              {
+                "id": "custom.stacking",
+                "value": {
+                  "mode": "none"
+                }
+              },
+              {
+                "id": "custom.fillOpacity",
+                "value": 0
+              },
+              {
+                "id": "custom.lineWidth",
+                "value": 2
+              },
+              {
+                "id": "custom.lineStyle",
+                "value": {
+                  "fill": "dash",
+                  "dash": [
+                    10,
+                    10
+                  ]
+                }
+              },
+              {
+                "id": "color",
+                "value": {
+                  "mode": "fixed",
+                  "fixedColor": "text"
+                }
+              }
+            ]
+          }
+        ]
+      },
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "bottom",
+          "calcs": [
+            "last",
+            "mean"
+          ]
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "none"
+        }
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "expr": "llm:queue:mean5m{model_name=~\"$model\"}",
+          "legendFormat": "queue (waiting)",
+          "refId": "A"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "expr": "llm:prefill:mean5m{model_name=~\"$model\"}",
+          "legendFormat": "prefill",
+          "refId": "B"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "expr": "llm:decode:mean5m{model_name=~\"$model\"}",
+          "legendFormat": "decode",
+          "refId": "C"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "expr": "llm:e2e:mean5m{model_name=~\"$model\"}",
+          "legendFormat": "end to end (total)",
+          "refId": "D"
+        }
+      ],
+      "repeat": "model",
+      "repeatDirection": "h",
+      "maxPerRow": 2
+    },
+    {
+      "id": 12,
+      "type": "timeseries",
+      "title": "Decode latency — p95",
+      "description": "The ONE phase these buckets resolve tolerably: measured 1.26x overstated on the steady tenant and 1.12x on the saturated one. There is deliberately no prefill p95 panel (3.03x — every observation lands in the first bucket) and no e2e p95 panel (1.71x under saturation, the worst of the three, on the tenant this board exists to show). Use the breakdown to the left for those; a mean carries no bucket dependence. Read alongside the inter-token latency caveat — same cause, same transfer to real vLLM.",
+      "gridPos": {
+        "h": 9,
+        "w": 12,
+        "x": 12,
+        "y": 50
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "s",
+          "min": 0,
+          "custom": {
+            "fillOpacity": 8
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "bottom",
+          "calcs": [
+            "last",
+            "max"
+          ]
+        }
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "expr": "llm:decode:p95_5m{model_name=~\"$model\"}",
+          "legendFormat": "{{model_name}}",
+          "refId": "A"
+        }
+      ]
     }
   ]
 }
