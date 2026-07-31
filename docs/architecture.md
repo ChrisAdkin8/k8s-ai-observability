@@ -90,12 +90,26 @@ What the stack deliberately *omits* is as load-bearing as what it contains:
 
 | What's absent | Why |
 |--|--|
-| container image build or registry | the simulator is stdlib-only Python mounted into a stock image, so there is nothing to build, push, or keep patched |
 | `pip install` / Python deps | a hard constraint: `python3 scripts/llm-sim.py --selftest` runs anywhere, no venv |
 | GPU hardware, drivers, quota or model weights | the whole point; CPU-only nodes on both clouds |
 | dashboards clicked into Grafana | boards are ConfigMaps, so a re-install reproduces them exactly |
 | grafana.com egress at install time | both dashboards ship in-repo; the cluster needs no reachability to render them |
 | managed/cloud Prometheus | one self-hosted stack keeps EKS and GKE byte-identical above the node pool |
+
+**A container image build for the simulator was in that table and has been removed from
+it.** Its reasoning — stdlib-only Python mounted into a stock image, so there is nothing
+to build, push or keep patched — described how the *rig* runs the simulator, and remains
+true of that path: `install.sh` builds the `llm-sim-script` ConfigMap from
+`scripts/llm-sim.py`, the compose stack mounts the same file, and neither needs a build
+step. The omission is no longer claimed because it says nothing about how the simulator
+reaches anyone who has not cloned this repo, which is the case a published image exists to
+serve.
+
+**No image is published yet** — this is a scope decision, not a shipped artefact. When one
+lands it must be *derived* from `scripts/llm-sim.py` in the same way `dist/` and the
+dashboard ConfigMaps are, never committed beside it; a drifted copy of the simulator would
+be undetectable from outside, which is exactly what
+[`tests/contracts/`](../tests/contracts/) exists to prevent for the DCGM surface.
 
 ## Components
 

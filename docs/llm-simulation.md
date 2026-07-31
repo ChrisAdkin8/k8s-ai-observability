@@ -371,11 +371,26 @@ injected clock, so it is deterministic and finishes instantly.
 ## Security note
 
 The simulator runs a script mounted from a ConfigMap, so **anyone who can write ConfigMaps
-in `llm-sim` can run code in that pod**. That is an accepted trade for keeping this repo
-build-free and registry-free — the alternative is a container image and a pipeline to
-publish it. The pods themselves run non-root with a read-only root filesystem and all
-capabilities dropped. The same reasoning is applied to Grafana's anonymous access in
-`helm/kube-prometheus-stack/values.yaml`.
+in `llm-sim` can run code in that pod**. The pods themselves run non-root with a read-only
+root filesystem and all capabilities dropped. The same reasoning is applied to Grafana's
+anonymous access in `helm/kube-prometheus-stack/values.yaml`.
+
+⚠️ **The justification for that trade has narrowed, and this note says so rather than
+letting it read as settled.** It used to be "the alternative is a container image and a
+pipeline to publish it", with the image ruled out of scope. A published image is now **in
+scope** (`CONTRIBUTING.md`), so the alternative is no longer hypothetical.
+
+The trade is still taken, on its own merits rather than by default: mounting the file is
+what lets `--selftest` and `--print` run it with no build step, what keeps the compose path
+reading the same bytes the cluster does, and what makes an edit reach a pod in seconds
+instead of a tag bump. An image-based Deployment pins a **tag**, so a local edit would stop
+reaching the cluster silently — the pod would still be Running. That is the failure the
+checksum annotation in `install.sh` was added to prevent, and it would come back one layer
+up.
+
+So the expected shape is both: the ConfigMap mount for the rig, an image for anyone
+consuming the simulator from outside it. If that ever changes, this paragraph is what has
+to change with it.
 
 ## Troubleshooting
 

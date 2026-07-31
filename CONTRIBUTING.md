@@ -128,9 +128,26 @@ does is noise, one that says why the obvious alternative was wrong is not.
 Worth knowing before you propose one of these — each is a considered omission, with the
 reasoning in [docs/architecture.md](docs/architecture.md):
 
-- A container image build or registry for the simulator. It is stdlib-only Python mounted
-  into a stock image on purpose, so there is nothing to build, push or patch.
 - `pip install` / any Python dependency. `python3 scripts/llm-sim.py --selftest` must run
   anywhere, with no venv.
 - Real GPU hardware, drivers, quota or model weights.
 - Dashboards clicked into Grafana rather than shipped as files.
+
+**A published container image for the simulator used to be on this list, and is not any
+more.** The rule it rested on — "stdlib-only Python mounted into a stock image, so there
+is nothing to build, push or patch" — was reasoning about how *this rig* runs the
+simulator, and it still holds there: `install.sh` builds the ConfigMap from
+`scripts/llm-sim.py`, the compose path mounts the same file, and `--selftest` runs it
+directly with no build step. None of that changes.
+
+What the rule did not cover is how *anyone else* consumes it. As a file inside this repo,
+`llm-sim.py` cannot be pointed at someone's own vLLM dashboards without cloning; as a
+published image it can. "Nothing to build, push or patch" stops being free at that point
+— the cost moves to them.
+
+⚠️ **The `pip install` bullet above is a separate rule and is unaffected.** The image
+would ship the same stdlib-only file. The two are usually stated in one breath; only one
+of them was reversed.
+
+Scope decision only — **no image is published yet**, and the build must derive from
+`scripts/llm-sim.py` rather than committing a second copy of it.
