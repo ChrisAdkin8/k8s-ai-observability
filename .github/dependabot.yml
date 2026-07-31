@@ -1,0 +1,36 @@
+# Keeps the SHA-pinned actions in workflows/ci.yml current.
+#
+# WHY IT IS NEEDED. ci.yml pins every action by full commit SHA rather than by tag,
+# which is the right call — a tag is mutable and `@v5` is a promise someone else can
+# rewrite. The cost is that a SHA pin never moves on its own, so it rots silently, and
+# this repo already has a live instance: `actions/upload-artifact` resolves to a build
+# targeting Node 20, which the runner now force-runs on Node 24 and warns about on
+# every single run. That warning IS the pin ageing.
+#
+# WHAT THIS DOES NOT COVER, and cannot. The two Helm charts are pinned in
+# scripts/config.sh as shell variables:
+#
+#     KPS_CHART_VERSION="87.17.0"
+#     FAKE_GPU_CHART_VERSION="0.0.59"
+#
+# Dependabot has no ecosystem that reads shell. Those stay manual, deliberately — the
+# comment above FAKE_GPU_CHART_VERSION lists three things to re-verify before bumping
+# it, none of which an automated PR could check. The weekly CI cron detects that
+# upstream has moved; a human still has to decide. Same split as the vLLM bucket
+# boundaries, which scripts/check-vllm-buckets.py detects and does not fix.
+version: 2
+updates:
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+      # Monday, a few hours after the 04:17 UTC upstream-drift cron, so the two kinds
+      # of "something upstream moved" land together rather than on different days.
+      day: monday
+    commit-message:
+      prefix: ci
+    labels:
+      - dependencies
+    # One PR per action. Grouping them would make a single red run ambiguous about
+    # which bump caused it, and there are only three.
+    open-pull-requests-limit: 5

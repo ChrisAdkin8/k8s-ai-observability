@@ -138,7 +138,17 @@ jobs:
   # acceptance check.
   # ---------------------------------------------------------------------------
   stack:
-    name: full stack on kind
+    # The matrix value is in the name deliberately: these become two separate required
+    # status checks ("full stack on kind (full)" / "(lite)"), so a ruleset can require
+    # both and a red lite leg cannot hide behind a green full one.
+    name: full stack on kind (${{ matrix.profile }})
+    strategy:
+      # NOT fail-fast. If lite breaks while full passes, that difference IS the signal
+      # — cancelling the healthy leg to save four minutes would throw away the
+      # comparison that tells you which profile is at fault.
+      fail-fast: false
+      matrix:
+        profile: [full, lite]
     runs-on: ubuntu-latest
     # Derived from the repo's OWN timeouts, not guessed:
     #   install.sh:40  helm kube-prometheus-stack  --wait --timeout 15m
@@ -164,6 +174,16 @@ jobs:
     # collapsed to a boolean here and tested via the env context below.
     env:
       HAVE_DOCKERHUB: ${{ secrets.DOCKERHUB_USERNAME != '' && secrets.DOCKERHUB_TOKEN != '' }}
+      # scripts/config.sh does LITE="${LITE:-0}", and :- treats empty as unset, so the
+      # 'full' leg passing '' is exactly equivalent to not setting it at all.
+      #
+      # ⚠️ WHAT THIS LEG DOES AND DOES NOT PROVE. It proves the trimmed stack FUNCTIONS:
+      # Prometheus starts, the rules evaluate, the sidecar imports both boards, and
+      # every acceptance check still passes with Alertmanager, kube-state-metrics and
+      # node-exporter absent. It proves NOTHING about the 3 GiB floor — this runner has
+      # ~16 GB, so nothing here is under memory pressure. That claim needs a constrained
+      # local run (colima --memory 4) and is stated as unverified in values-lite.yaml.
+      LITE: ${{ matrix.profile == 'lite' && '1' || '' }}
     steps:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
 
@@ -320,7 +340,11 @@ jobs:
         if: always() && steps.up.outcome != 'skipped'
         uses: actions/upload-artifact@330a01c490aca151604b8cf639adc76d48f6c5d4 # v5
         with:
-          name: diagnostics-${{ github.run_id }}-${{ github.run_attempt }}
+          # ⚠️ matrix.profile is REQUIRED here. Both legs upload on failure, and two
+          # artifacts of the same name in one run collide — you would get one bundle
+          # and no way to tell which profile produced it, on the run where that is the
+          # only question that matters.
+          name: diagnostics-${{ matrix.profile }}-${{ github.run_id }}-${{ github.run_attempt }}
           path: /tmp/diag
           retention-days: 14
           if-no-files-found: warn

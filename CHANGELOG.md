@@ -23,6 +23,47 @@ Comparison links are at the foot of this file, one per released version.
 
 ## [Unreleased]
 
+### Added
+
+- **`CONTRIBUTING.md`.** The repo's invariants were already documented — scattered across
+  `config.sh`, `manifests/dashboards/README.md`, `architecture.md` and several file
+  headers. A contributor had to find them first. This collects the ones that, if broken,
+  produce **a green install with something silently wrong** into one table: the
+  filename-is-the-uid contract, the three-way naming invariant, what to re-verify before
+  bumping either pinned chart, and what to re-derive after touching a bucket list. Also
+  the traps that cost real debugging time here, including the architecture-dependent
+  `histogram_quantile` result, and what is deliberately out of scope.
+
+- **A `lite` leg in CI.** The `stack` job is now a matrix over `full` and `lite`, so the
+  trimmed profile is exercised on every push rather than verified once by hand and left
+  to rot at the next chart bump. `fail-fast: false` — if lite breaks while full passes,
+  that difference is the signal.
+
+  ⚠️ It proves the trimmed stack **functions**, not that it fits 3 GiB: the runner has
+  ~16 GB and nothing there is under memory pressure. The sizing claim still needs a
+  constrained local run and is still marked unverified.
+
+- **`.github/dependabot.yml`** for the SHA-pinned actions. Pinning by SHA is right, but a
+  SHA pin never moves on its own — and this repo has a live instance, with
+  `actions/upload-artifact` warning on every run that it targets Node 20. It cannot cover
+  the two Helm chart pins, which live in shell variables and stay a deliberate manual
+  decision; the file says so and says why.
+
+- **Publishing metadata for both dashboards**, ready to paste, plus a machine-checkable
+  portability check in `manifests/dashboards/README.md`. The three properties that make an
+  upload safe (`id` null, no fixed datasource uid, a `prometheus` datasource variable) are
+  now verifiable in one command rather than asserted in prose — a panel edited in the
+  Grafana UI can quietly reintroduce a fixed uid.
+
+### Changed
+
+- **Repository settings** (not in the tree, recorded here because nothing else would show
+  it): Dependabot vulnerability alerts and automated security fixes enabled; GitHub
+  Releases backfilled for `v0.1.0` and `v0.2.0`, which existed only as bare tags; and a
+  ruleset on `main` blocking force-pushes and deletion and requiring both CI jobs. The
+  ruleset carries an **admin bypass**, so direct pushes by the owner still work — it gates
+  contributions, not the maintainer.
+
 ### Fixed
 
 - **`verify.sh` checks 3 and 4c could fail on a slow runner**, and did — on a commit that

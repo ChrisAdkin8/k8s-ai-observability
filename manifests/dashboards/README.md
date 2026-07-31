@@ -11,10 +11,10 @@ Two boards, each a plain `.json` file — **one artefact, used three ways**:
 Because there is only one copy, those three cannot disagree. Nothing is ever clicked
 into place, and no egress to grafana.com is needed at install time.
 
-| Board | File | uid | Covers |
-|-------|------|-----|--------|
-| GPU Simulation — DCGM Overview | `gpu-sim-dcgm.json` | `gpu-sim-dcgm` | GPU util / memory / temp / power |
-| LLM Simulation — vLLM Serving Overview | `llm-sim-overview.json` | `llm-sim-overview` | First-token latency, throughput, queue depth, KV cache |
+| Board | File | uid | grafana.com id | Covers |
+|-------|------|-----|--|--------|
+| GPU Simulation — DCGM Overview | `gpu-sim-dcgm.json` | `gpu-sim-dcgm` | _not yet published_ | GPU util / memory / temp / power |
+| LLM Simulation — vLLM Serving Overview | `llm-sim-overview.json` | `llm-sim-overview` | _not yet published_ | First-token latency, throughput, queue depth, KV cache |
 
 **The filename is the uid.** `install.sh` derives the ConfigMap name from it
 (`<uid>-dashboard`), and `scripts/config.sh` builds the `/d/<uid>` deep link that
@@ -69,10 +69,48 @@ dcgm-exporter emits directly (here they are recording rules), and the LLM board'
 variable is `label_values(vllm:num_requests_running, model_name)`, which real vLLM
 answers.
 
-To publish: sign in at [grafana.com](https://grafana.com), go to your org's **Dashboards**
-and upload the `.json`. It needs a name, a description, and the datasource it expects
-(Prometheus). You get a numeric dashboard id back — add it to the table at the top of this
-file so the two stay connected.
+Re-check that before each upload, rather than trusting this paragraph — the three properties
+are machine-checkable and a panel edited in the Grafana UI can quietly reintroduce a fixed
+datasource uid:
+
+```sh
+python3 - <<'EOF'
+import json, glob, re
+for f in sorted(glob.glob("manifests/dashboards/*.json")):
+    d, raw = json.load(open(f)), open(f).read()
+    uids = set(re.findall(r'"uid"\s*:\s*"([^"$][^"]*)"', raw)) - {d.get("uid","")}
+    tv = [v for v in d.get("templating", {}).get("list", []) if v.get("type") == "datasource"]
+    print(f, "| id null:", d.get("id") is None,
+          "| ds var:", bool(tv) and tv[0].get("query") == "prometheus",
+          "| fixed uids:", sorted(uids) or "none")
+EOF
+```
+
+### The upload
+
+Sign in at [grafana.com](https://grafana.com) → your org → **Dashboards** → upload the
+`.json`. There is **no API for this** that does not require your org credentials, so it is
+a manual step by nature. Each needs a name, a description and the datasource it expects
+(Prometheus). Ready to paste:
+
+**`gpu-sim-dcgm.json`** — *GPU Simulation — DCGM Overview*
+
+> Utilisation, memory, temperature and power across simulated NVIDIA GPUs, from
+> DCGM-format metrics. Works against a real `dcgm-exporter` unchanged. Temperature and
+> power are recording rules here rather than exporter output — import the rules from
+> https://github.com/ChrisAdkin8/k8s-ai-observability or those two panels stay blank
+> against a simulated source. Binds to a Prometheus datasource variable, so it resolves
+> to whatever you already have.
+
+**`llm-sim-overview.json`** — *LLM Simulation — vLLM Serving Overview*
+
+> Time to first token, inter-token latency, throughput, queue depth and KV-cache usage for
+> vLLM, broken out `by (model_name)` so a saturated tenant is never averaged into a healthy
+> one. Uses the **V1** engine's metric names (`vllm:kv_cache_usage_perc`,
+> `vllm:inter_token_latency_seconds`). Binds to a Prometheus datasource variable.
+
+You get a numeric dashboard id back — **put it in the table at the top of this file**, and
+in the README, so the published board and this repo stay connected.
 
 **If you republish after editing**, upload a new revision rather than a new dashboard, so
 the id people have imported keeps working.

@@ -1,0 +1,103 @@
+# Contributing
+
+Issues and pull requests are welcome. This file exists because the repo has a handful of
+invariants that are **not** guessable from the code, and every one of them, if broken,
+produces a *green install with something silently wrong* rather than an error. They are
+documented where they apply; this collects them so you do not have to find them first.
+
+## Before you push
+
+```sh
+task selftest      # simulator exposition — no cluster, ~1s
+task rule-tests    # promtool over every alert and recording rule — needs promtool, ~2s
+```
+
+Both run in CI as the `fast` job, so a failure here is a failure there. The full stack
+job takes ~6 minutes and stands up a real kind cluster; you do not need to run it locally
+to open a PR, but `task local:up` does exactly what CI does if you want to.
+
+If you changed shell, `bash -n scripts/*.sh` is the third thing CI checks.
+
+## The invariants
+
+**Break any of these and the install still goes green.** That is why they have assertions
+rather than comments, and why the assertions run before anything is created.
+
+| If you change… | You must also… | Enforced by |
+|--|--|--|
+| A dashboard **filename** in `manifests/dashboards/` | change the `uid` inside it to match, or neither | `assert_dashboard_contract` fails the install |
+| The node-pool label or name | keep `terraform/modules/contract`, `scripts/config.sh` and `helm/fake-gpu-operator/values.yaml` in step | `assert_gpu_contract`, `assert_terraform_contract`, `assert_kind_contract` |
+| A namespace in `scripts/config.sh` | change the static manifests to match | `assert_manifest_namespaces` |
+| `LLM_STEADY_MODEL` / `LLM_SATURATED_MODEL` | change the profile ConfigMaps, and keep them distinct | `assert_llm_contract` |
+| `FAKE_GPU_CHART_VERSION` | re-verify the three bullets above it in `config.sh` — the exporter's three series, the ServiceMonitor's selector, and the labels the dashboards and rules join on | **nothing.** A bad bump is green with blank panels |
+| `LLM_VLLM_VERSION`, or any bucket list | run `python3 scripts/check-vllm-buckets.py`, then re-derive the expected values in `tests/rules/llm-rules_test.yaml` | the drift check, weekly in CI |
+| `K8S_VERSION` | move `kind/gpu-sim.yaml`'s node image onto the same minor | `assert_kind_contract` |
+
+The three-way naming invariant is the one to read first if you are touching Terraform or
+the fake operator: [docs/architecture.md](docs/architecture.md#the-naming-invariant-read-before-editing).
+
+## Things that have bitten us
+
+Each of these cost real debugging time and is documented inline where it applies. They
+are listed here because none of them is discoverable until it happens to you.
+
+- **A renamed upstream metric does not fail — it stops matching.** Two vLLM series were
+  renamed by the V1 engine and this repo shipped the old spellings for two releases with
+  every test green, because every test reads the simulator and the simulator agreed with
+  itself. If you touch anything under `vllm:`, the question is not "do the tests pass" but
+  "does this match a real deployment". `scripts/check-vllm-buckets.py` is the only thing
+  here that points upstream.
+- **A promtool expected percentile can be architecture-dependent.** `histogram_quantile`
+  returned `2.4250000000000003` on arm64 and `2.425` on amd64 for the same input; promtool
+  compares exactly, so the test passed locally and went red in CI. If you add or change an
+  expected value, verify it on amd64 too —
+  [tests/](tests/#-check-a-new-expected-value-on-amd64-before-committing-it) has a
+  one-command recipe and the list of values known green on both.
+- **The fake `nvidia-smi` is injected by the device plugin's `Allocate()` response**, not
+  a mutating webhook. The injected env and mounts are invisible in the pod spec, and
+  running `nvidia-smi` in the container panics — it is not a fidelity check.
+- **`kubectl port-forward` does not survive a long idle.** Anything that polls for minutes
+  and then talks to Grafana must re-establish it; `verify.sh` does, and the comment there
+  explains what the failure looks like if you forget.
+
+## Editing dashboards
+
+Edit in Grafana, then **Dashboard settings → JSON Model**, and copy it back over the file
+in `manifests/dashboards/`. Keep the `uid` unchanged. A change made only in the Grafana UI
+is reverted on the next install, because the ConfigMap is rebuilt from the file every
+time — see [manifests/dashboards/](manifests/dashboards/).
+
+## Docs
+
+Prose lives close to what it describes, and there is a lot of it. If you change behaviour,
+the doc most likely to go stale is the one in the same directory — plus
+[docs/versions.md](docs/versions.md) if you moved a pinned version, and
+[CHANGELOG.md](CHANGELOG.md) always.
+
+The changelog is [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) format, and its
+header explains what MAJOR/MINOR/PATCH mean *for a rig rather than a library* — "breaking"
+is about a cluster you already have. New entries go under `[Unreleased]`.
+
+Entries here explain **why**, not just what. That is the house style throughout the repo,
+and it is the reason the comments are worth reading: a comment that says what the line
+does is noise, one that says why the obvious alternative was wrong is not.
+
+## Commits and PRs
+
+- One logical change per commit. If two things are genuinely independent, they are two
+  commits, even when they arrive together.
+- Say why in the body, not just what. The diff already says what.
+- CI must be green. The `fast` job is seconds; the two full-stack legs are ~6 minutes each
+  and run in parallel.
+
+## What is deliberately out of scope
+
+Worth knowing before you propose one of these — each is a considered omission, with the
+reasoning in [docs/architecture.md](docs/architecture.md):
+
+- A container image build or registry for the simulator. It is stdlib-only Python mounted
+  into a stock image on purpose, so there is nothing to build, push or patch.
+- `pip install` / any Python dependency. `python3 scripts/llm-sim.py --selftest` must run
+  anywhere, with no venv.
+- Real GPU hardware, drivers, quota or model weights.
+- Dashboards clicked into Grafana rather than shipped as files.
