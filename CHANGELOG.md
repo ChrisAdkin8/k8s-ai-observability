@@ -49,11 +49,39 @@ Comparison links are at the foot of this file, one per released version.
   the two Helm chart pins, which live in shell variables and stay a deliberate manual
   decision; the file says so and says why.
 
-- **Publishing metadata for both dashboards**, ready to paste, plus a machine-checkable
-  portability check in `manifests/dashboards/README.md`. The three properties that make an
-  upload safe (`id` null, no fixed datasource uid, a `prometheus` datasource variable) are
-  now verifiable in one command rather than asserted in prose — a panel edited in the
-  Grafana UI can quietly reintroduce a fixed uid.
+- **Publishing metadata for both dashboards**, ready to paste, in
+  `manifests/dashboards/README.md`.
+
+- **`scripts/dashboard-publish.py` and `task dashboards`**, deriving the grafana.com
+  upload into a gitignored `dist/`.
+
+  The boards were documented as uploadable as-is. They are not: the catalog rejects them
+  with *"Old dashboard JSON format. Read about Importing & Sharing with Grafana 2.x or
+  3.0."* The cause is the design working correctly. Every panel binds to a
+  `datasource`-type template variable, which is right in-cluster — the sidecar provisions
+  the board and the variable resolves to whatever Prometheus is there. The catalog wants
+  the opposite: the `__inputs` block Grafana 3.0 introduced, so it can prompt the importer.
+
+  Grafana's own **Export for sharing externally** does not bridge this, and the reason is
+  worth recording because it inverts the obvious intuition: that exporter works by
+  rewriting a *concrete* datasource uid into a placeholder. A datasource variable has
+  already abstracted the uid away, so it finds nothing to rewrite and emits no `__inputs`
+  at all. **The cleaner the repo file, the more certainly the catalog rejects it.**
+
+  The script adds `__inputs` and `__requires`, repoints every `${datasource}` reference at
+  `${DS_PROMETHEUS}` — 22 of them on the LLM board, several inside query-variable
+  definitions that are easy to miss by hand — and drops the now-redundant variable.
+  `__requires` collects panel plugins from the file rather than hardcoding them, so a new
+  panel type cannot be silently omitted.
+
+  `dist/` is gitignored on the same terms as `compose/.generated/`: one source of truth,
+  several derived forms, none committed.
+
+  It also absorbs the portability check that was a copy-paste snippet in
+  `manifests/dashboards/README.md`. Rather than reporting the three properties, it **fails
+  and emits nothing** when a panel carries a hardcoded datasource uid — what editing in
+  the Grafana UI and pasting the JSON Model back produces. Running it inside the thing
+  that consumes the result means it cannot be skipped.
 
 ### Changed
 
