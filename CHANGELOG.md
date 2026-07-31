@@ -23,7 +23,26 @@ Comparison links are at the foot of this file, one per released version.
 
 ## [Unreleased]
 
-_Nothing yet._
+### Fixed
+
+- **`verify.sh` checks 3 and 4c could fail on a slow runner**, and did — on a commit that
+  changed only two markdown files, which is what made it obviously a timing fault rather
+  than a real one. Check 3 gave up waiting for the first DCGM scrape at 60s;
+  `DCGM_FI_DEV_GPU_TEMP` — a recording rule that *cannot exist* without the metric check 3
+  had just declared missing — passed 13 seconds later. The run took 8m34s against a
+  typical 5m.
+
+  Both now poll for 120s, and share one `DCGM_POLL_ATTEMPTS` constant rather than two
+  matching literals and a comment asking future editors to keep them aligned. That
+  coupling is not cosmetic: 4c asserts something *derived* from what 3 asserts, so if 3
+  has the shorter window a slow runner reports "the input is missing but the value
+  computed from it is present" — which reads as a ServiceMonitor selector fault when it
+  is nothing of the kind.
+
+  Still bounded, deliberately: a genuine selector mismatch never resolves, so these must
+  fail rather than hang. 120s is ~8 scrape intervals at the 15s the ServiceMonitors set.
+  Check 4d keeps its own 60s and says why — by the time it runs, the metric is known to
+  exist, so it is budgeting annotation propagation, not a first scrape.
 
 ## [0.3.0] — 2026-07-31
 

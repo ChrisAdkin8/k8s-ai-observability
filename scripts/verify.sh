@@ -54,6 +54,25 @@ promql_count() {
     | python3 -c 'import sys,json; print(len(json.load(sys.stdin).get("data",{}).get("result",[])))' 2>/dev/null || echo 0
 }
 
+# How long checks 3 and 4c wait for the FIRST DCGM scrape to land, in 5s attempts.
+#
+# ONE constant because those two must move together, and a comment saying so was not
+# enough — 4c asserts a recording rule DERIVED from the metric 3 asserts, so if 3's
+# window is the shorter of the two, a slow runner produces the contradictory result
+# "the input is missing but the thing computed from it is present". That is confusing
+# in exactly the wrong direction: it reads as a selector fault when it is a timing one.
+#
+# RAISED FROM 12 (60s) after a real CI failure on a docs-only commit. Check 3 gave up
+# at 60s and DCGM_FI_DEV_GPU_TEMP — which cannot exist without DCGM_FI_DEV_GPU_UTIL —
+# passed 13 seconds later. The run took 8m34s against a typical 5m, so the runner was
+# slow rather than the stack broken. 60s was already a deliberate choice (see check 3)
+# and simply had no margin on a bad day.
+#
+# Still bounded, and that is the point: a genuine ServiceMonitor selector mismatch
+# never resolves, so this must fail rather than hang. 120s is ~8 scrape intervals at
+# the 15s the ServiceMonitors set — generous for a first scrape, still quick to fail.
+DCGM_POLL_ATTEMPTS=24
+
 echo "Verifying $TARGET (context: $CTX)"
 
 # 1. a node advertises nvidia.com/gpu allocatable > 0
@@ -76,10 +95,10 @@ running="$("${KUBECTL[@]}" get pods -l app.kubernetes.io/part-of=gpu-sim-workloa
 #    DCGM_FI_DEV_GPU_UTIL both read empty here, while the series DERIVED from that same metric
 #    passed 60s later. A derived series cannot exist without its input, so the only reading is
 #    that this check ran before the first scrape landed, not that anything was broken.
-#    Same 60s ceiling as 4c: long enough for a 15s scrape interval, short enough to still fail
-#    a genuine selector mismatch rather than hang.
+#    Shares DCGM_POLL_ATTEMPTS with 4c — see the constant for why they are one value and
+#    why it was raised from 60s to 120s.
 up=0; util=0
-for _ in $(seq 1 12); do
+for _ in $(seq 1 "$DCGM_POLL_ATTEMPTS"); do
   up="$(promql_count 'up{job=~".*dcgm.*"} == 1')"
   util="$(promql_count 'DCGM_FI_DEV_GPU_UTIL')"
   [[ "${up:-0}" -gt 0 && "${util:-0}" -gt 0 ]] && break
@@ -108,13 +127,13 @@ fi
 #     is still one tick away. A single-shot check would flake right after install.
 for m in DCGM_FI_DEV_GPU_TEMP DCGM_FI_DEV_POWER_USAGE; do
   n=0
-  for _ in $(seq 1 12); do
+  for _ in $(seq 1 "$DCGM_POLL_ATTEMPTS"); do
     n="$(promql_count "$m")"
     [[ "${n:-0}" -gt 0 ]] && break
     sleep 5
   done
   [[ "${n:-0}" -gt 0 ]] && pass "derived series $m returns $n series (recording rule live)" \
-    || fail "$m empty after 60s → dashboard temp/power panel blank (are the recording rules in manifests/alerts/ applied?)"
+    || fail "$m empty after $((DCGM_POLL_ATTEMPTS * 5))s → dashboard temp/power panel blank (are the recording rules in manifests/alerts/ applied?)"
 done
 
 # 4b. The advertised access path itself: fetch the board by UID over an UNAUTHENTICATED
@@ -172,6 +191,11 @@ grafana_uid_check "$DASHBOARD_UID" "GPU" "$(grafana_dashboard_url)"
 #     every check green with flat-zero panels. Assert the 'busy' workload's band (85-99)
 #     is really reaching the metric.
 #     Polled: the pod must be scheduled, admitted and scraped first.
+#     DELIBERATELY NOT on DCGM_POLL_ATTEMPTS, though it polls the same metric. By the
+#     time this runs, check 3 has already established that DCGM_FI_DEV_GPU_UTIL exists,
+#     so this 60s is measuring something else entirely: whether the ANNOTATION is
+#     reaching the exporter. Sharing the constant would tie an annotation-propagation
+#     budget to a first-scrape one and make both harder to reason about.
 util_hi=0
 for _ in $(seq 1 12); do
   util_hi="$(promql_count 'max(DCGM_FI_DEV_GPU_UTIL) > 80')"

@@ -146,7 +146,10 @@ jobs:
     #   install.sh:64  helm fake-gpu-operator      --wait --timeout 15m
     #   install.sh:80  rollout status per DaemonSet --timeout=5m x N  (N unbounded in source)
     #   install.sh:98  llm-steady + llm-saturated  3m each
-    #   verify.sh      polling loops                ~16m  (36x10s is the longest)
+    #   verify.sh      polling loops                ~20m  (36x10s is the longest)
+    #                  ^ was ~16m; checks 3 and 4c went 60s -> 120s each (three loops,
+    #                    so +3m worst case) after a slow runner missed the first DCGM
+    #                    scrape inside 60s. Still far under the cap below.
     # MEASURED: N=3 (device-plugin, mig-faker, nvidia-dcgm-exporter), so the worst case
     # is ~75 min. Every rollout wait is `|| true`, so a partially-broken cluster does
     # NOT fail fast — it walks every timeout, then fails in verify.sh. A cap below the
