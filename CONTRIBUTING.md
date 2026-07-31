@@ -70,6 +70,28 @@ are listed here because none of them is discoverable until it happens to you.
 - **`kubectl port-forward` does not survive a long idle.** Anything that polls for minutes
   and then talks to Grafana must re-establish it; `verify.sh` does, and the comment there
   explains what the failure looks like if you forget.
+- **A check on a series that appears asynchronously must poll — this has bitten us four
+  times.** Nothing here is ready when the object that produces it reports itself created.
+  A recording rule does not exist until its next evaluation (30s); a scrape target is
+  registered before it is first scraped; the exporter's `exported_pod` label only appears
+  after it re-reads topology *and* Prometheus scrapes it again. Assert any of those once
+  and you get a confident, specific, wrong failure — `verify.sh` check 3 reported the DCGM
+  target missing while 4c found a series *derived from it*, and the compose leg reported
+  the rules unloaded while their input sat at 8 series.
+
+  The counterintuitive part, and the reason these read as real faults rather than flakes:
+  **they get worse as the machine gets faster.** A quicker start means the assertion runs
+  sooner, with less of the producer's warm-up already elapsed. So a change that only
+  speeds something up can turn a passing check red, and a green local run proves nothing
+  about a fast runner.
+
+  Anything waiting on the DCGM producer polls on `DCGM_POLL_ATTEMPTS` rather than its own
+  literal — checks 3, 4c and L4b share it because they wait on the same thing, and two
+  matching constants with a comment asking future editors to keep them aligned is not a
+  coupling, it is a wish. Keep it **bounded**: a rule that was never applied never appears,
+  and that has to fail rather than hang. Check 4d deliberately keeps its own shorter window
+  and says why — by the time it runs the metric is known to exist, so it is budgeting
+  annotation propagation, not a first scrape.
 
 ## Editing dashboards
 
