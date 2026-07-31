@@ -25,6 +25,55 @@ Comparison links are at the foot of this file, one per released version.
 
 ### Added
 
+- **The request phase breakdown: `vllm:request_prefill_time_seconds`,
+  `vllm:request_decode_time_seconds` and `vllm:request_inference_time_seconds`.** The
+  board could say how long a request took and not what it was *doing*. TTFT and queue time
+  covered the waiting half; the serving half had no series behind it at all, so there was
+  nothing to build a prefill-versus-decode panel against — the first thing anyone working
+  on disaggregated serving looks for.
+
+  **Additive, so nothing is re-derived.** These are three new series and four new recording
+  rules; no existing metric, rule, threshold, profile or expected value moved. Upgrading
+  needs no action beyond re-running `install.sh` (which now rolls the simulator pods on a
+  script change — see *Fixed*, below).
+
+  This is **extraction, not modelling**. Every term already existed inside the simulator:
+  prefill was assigned in `_admit()`, and decode was the `gen_tokens * itl` product
+  `finish_at` was already formed from. They are now stored on the request and observed at
+  the same point TTFT, e2e and queue time are observed. No invented numbers — that is the
+  bar, and it is why the other 22 absent upstream metrics stay absent.
+
+  All three reuse `E2E_BUCKETS`. Verified against `vllm/v1/metrics/loggers.py`: upstream
+  declares one `request_latency_buckets` list and passes it to all five request-scoped
+  histograms, so no bucket constant was added and the weekly drift check's existing entry
+  already watches these boundaries on behalf of every one. That check's reported gap falls
+  from 25 to 22, with all three matched rather than reported as drift.
+
+- **A phase breakdown panel and a decode-p95 panel on the LLM board (dashboard 25620),
+  plus four recording rules: `llm:queue:mean5m`, `llm:prefill:mean5m`, `llm:decode:mean5m`
+  and `llm:e2e:mean5m`.** Both panels are appended below the existing ten rather than
+  reflowing them, so an existing user's muscle memory survives.
+
+  ⚠️ **The breakdown is MEANS rather than percentiles, and that is load-bearing.** Two
+  measured reasons. Quantiles are not additive — on the steady tenant p95
+  queue+prefill+decode is 7.473s against a p95 e2e of 7.468s, while the means sum to
+  5.101s against 5.101s exactly — and a stack whose segments do not reach the total reads
+  as a bug in the rig forever. And these buckets cannot resolve prefill at this operating
+  point: the first boundary is 0.3s against a modelled 0.08s, so every observation lands
+  in the first bucket and `histogram_quantile` interpolates from zero across it, **3.03x**
+  overstated on both tenants. A histogram mean has no bucket dependence at all.
+
+  ⚠️ **That second effect transfers to real vLLM** — the boundaries are upstream's, so a
+  real deployment with sub-300ms prefill reads exactly as high. It is documented on the
+  catalog page beside the existing inter-token-latency caveat (which is a 1.08x effect, for
+  scale). **Do not build a prefill SLO on a p95 from these buckets.** The one recorded
+  percentile is scoped to decode, the only phase these buckets resolve tolerably.
+
+  `llm:e2e:mean5m` exists because the breakdown is asserted to **add up** — as a permanent
+  promtool test and again on a live cluster by `verify.sh` **L8**, which also asserts all
+  three histograms are receiving observations. An untested design decision is one that gets
+  reverted by someone who does not know why it was made.
+
 - **A docs-only change no longer stands up two kind clusters and a compose stack.** A
   `changes` job diffs the push or the whole PR and gates the expensive jobs on the result:
   ~13 minutes down to seconds. Verified safe first — nothing under `scripts/`, `compose/`,

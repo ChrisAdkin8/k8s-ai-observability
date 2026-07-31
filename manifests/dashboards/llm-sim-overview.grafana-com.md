@@ -20,6 +20,8 @@ The first panel is the whole design: two tenants either side of the 2s alert thr
 | Profile generation | `llmsim_profile_generation` | simulator-only |
 | Prefix cache hit ratio | `llm:prefix_cache:hit_ratio5m` | fraction 0–1 - plot the ratio, never either counter |
 | Simulated GPU attribution | `llmsim_gpu_binding_info` joined to `DCGM_FI_DEV_GPU_UTIL` | simulator-only |
+| Request phase breakdown | `llm:queue:mean5m`, `llm:prefill:mean5m`, `llm:decode:mean5m`, `llm:e2e:mean5m` | **repeats per model**, stacked; **means, not percentiles** - read the caveat below |
+| Decode latency - p95 | `llm:decode:p95_5m` | the only phase these buckets resolve; there is deliberately no prefill or e2e p95 |
 
 **Running vs waiting repeats per model rather than sharing one panel**, because the two tenants operate at different scales: a saturated tenant queues ~160 against a running batch of 16, and on one shared axis the running series flattens to nothing. Waiting is on the right axis for the same reason. A healthy tenant should sit near zero waiting; a plateau means arrival has exceeded capacity.
 
@@ -31,8 +33,8 @@ Unlike a pure `vllm:*` board, **five panels read recording rules rather than raw
 
 | Tier | Series | Against real vLLM |
 |--|--|--|
-| vLLM V1 | `vllm:num_requests_running`, `_waiting`, `kv_cache_usage_perc`, `prompt_tokens_total`, `generation_tokens_total`, `request_success_total`, `prefix_cache_queries_total`, `prefix_cache_hits_total`, and the `time_to_first_token_seconds` / `inter_token_latency_seconds` histograms | emitted directly - nothing to do |
-| recording rules | `llm:ttft:p95_5m`, `llm:tpot:p95_5m`, `llm:tokens:generation_rate5m`, `llm:tokens:prompt_rate5m`, `llm:prefix_cache:hit_ratio5m`, `llm:tokens_per_watt:5m` | **you must apply these** (below), or inline the expressions into the panels |
+| vLLM V1 | `vllm:num_requests_running`, `_waiting`, `kv_cache_usage_perc`, `prompt_tokens_total`, `generation_tokens_total`, `request_success_total`, `prefix_cache_queries_total`, `prefix_cache_hits_total`, and the `time_to_first_token_seconds` / `inter_token_latency_seconds` / `e2e_request_latency_seconds` / `request_queue_time_seconds` / `request_prefill_time_seconds` / `request_decode_time_seconds` histograms | emitted directly - nothing to do |
+| recording rules | `llm:ttft:p95_5m`, `llm:tpot:p95_5m`, `llm:decode:p95_5m`, `llm:tokens:generation_rate5m`, `llm:tokens:prompt_rate5m`, `llm:prefix_cache:hit_ratio5m`, `llm:tokens_per_watt:5m`, and the four phase means `llm:queue:mean5m` / `llm:prefill:mean5m` / `llm:decode:mean5m` / `llm:e2e:mean5m` | **you must apply these** (below), or inline the expressions into the panels |
 | simulator-only | `llmsim_profile_generation`, `llmsim_requests_rejected_total`, `llmsim_gpu_binding_info` | never emitted by vLLM - those panels stay blank, see [trimming](#trimming-it-for-a-real-deployment) |
 
 ⚠️ **The two prefix-cache counters are V1-only.** On an older engine they do not exist at all - v0 published a single gauge instead - so that panel is blank rather than wrong. See [V1 metric names](#-v1-metric-names---check-yours-before-blaming-the-board).
@@ -52,7 +54,23 @@ Quantiles are recorded once rather than repeated in every panel and alert, so a 
   expr: sum by (model_name) (rate(vllm:prompt_tokens_total[5m]))
 - record: llm:prefix_cache:hit_ratio5m
   expr: sum by (model_name) (rate(vllm:prefix_cache_hits_total[5m])) / clamp_min(sum by (model_name) (rate(vllm:prefix_cache_queries_total[5m])), 1e-9)
+
+# The request phase breakdown. MEANS - see the caveat below for why not p95s.
+- record: llm:queue:mean5m
+  expr: sum by (model_name) (rate(vllm:request_queue_time_seconds_sum[5m])) / clamp_min(sum by (model_name) (rate(vllm:request_queue_time_seconds_count[5m])), 1e-9)
+- record: llm:prefill:mean5m
+  expr: sum by (model_name) (rate(vllm:request_prefill_time_seconds_sum[5m])) / clamp_min(sum by (model_name) (rate(vllm:request_prefill_time_seconds_count[5m])), 1e-9)
+- record: llm:decode:mean5m
+  expr: sum by (model_name) (rate(vllm:request_decode_time_seconds_sum[5m])) / clamp_min(sum by (model_name) (rate(vllm:request_decode_time_seconds_count[5m])), 1e-9)
+- record: llm:e2e:mean5m
+  expr: sum by (model_name) (rate(vllm:e2e_request_latency_seconds_sum[5m])) / clamp_min(sum by (model_name) (rate(vllm:e2e_request_latency_seconds_count[5m])), 1e-9)
+# Decode is the ONE phase these buckets resolve tolerably. There is deliberately
+# no prefill p95 (3.03x overstated) and no e2e p95 (1.71x under saturation).
+- record: llm:decode:p95_5m
+  expr: histogram_quantile(0.95, sum by (model_name, le) (rate(vllm:request_decode_time_seconds_bucket[5m])))
 ```
+
+⚠️ **`llm:e2e:mean5m` looks redundant and is not.** It is the right-hand side of *does the breakdown add up*, and the three phase means only mean something against it. It also has to be a **rule** rather than an inlined `rate(_sum)/rate(_count)` if you carry a `source`-style label on your recorded series: mixing a labelled left-hand side with an unlabelled right-hand side matches nothing, and the obvious repair (`on(model_name)`) then drops the label from the result - right arithmetic, wrong labels, reading as an arithmetic bug.
 
 **⚠️ Aggregate `by (model_name)`, not globally.** A global quantile merges every tenant into one number that describes none of them, and hides the degraded one - which is the tenant the alert exists to catch. The `p50` and `p99` variants are in the source file if you want them.
 
@@ -85,6 +103,35 @@ Nothing errors when this is wrong - that is the problem. A renamed metric fails 
 | `vllm:gpu_prefix_cache_hit_rate` (gauge, already a ratio) | `rate(vllm:prefix_cache_hits_total[5m]) / rate(vllm:prefix_cache_queries_total[5m])` |
 
 If you are on an older engine, point that panel at the gauge directly and drop the recording rule - there is nothing to take a ratio of.
+
+## Read the phase breakdown as MEANS - and never build a prefill SLO on a p95
+
+The breakdown panel plots `_sum / _count` per phase rather than percentiles. That is not a shortcut, and swapping it back to `histogram_quantile` breaks the panel in two independent ways - **both measured, and the second one transfers to your deployment.**
+
+**1. Quantiles are not additive, so a p95 breakdown does not add up.** Measured on the steady tenant with *perfect* resolution, no bucket error involved at all:
+
+```
+p95:   queue 0.000 + prefill 0.094 + decode 7.379 = 7.473   vs p95(e2e) 7.468   DOES NOT ADD UP
+mean:  queue 0.001 + prefill 0.080 + decode 5.020 = 5.101   vs mean(e2e) 5.101  ADDS UP EXACTLY
+```
+
+Expectation is linear; the 95th percentile is not. A stacked breakdown whose segments do not reach the total reads as a bug in the rig, forever, to everyone who looks at it.
+
+**2. ⚠️ These buckets cannot resolve prefill, and that is upstream's layout rather than this rig's.** The first `request_latency_buckets` boundary is `0.3`, and modelled prefill here is 0.08s - so *every* prefill observation lands in the first bucket and `histogram_quantile` interpolates from zero across it. Measured over ~1000 completed requests on each shipped tenant:
+
+| | steady | saturated |
+|--|--|--|
+| prefill | **3.03x** (0.095s reported as 0.285s) | **3.03x** |
+| decode | 1.26x | 1.12x |
+| e2e | 1.25x | **1.71x** (67.97s reported as 116.26s) |
+
+For scale, the inter-token latency caveat below - which has its own section on this page - is a **1.08x** effect. Prefill is three times worse than that, on both tenants.
+
+**This transfers.** Real vLLM declares these same boundaries, so a real deployment with sub-300ms prefill reads exactly as high. It is not a simulation artefact you can ignore. **Do not derive a prefill SLO from a p95 over these buckets**, and do not "fix" it by substituting a finer low-end bucket list - the boundaries are what make a query built here work unchanged against your engine.
+
+A histogram **mean** carries no bucket dependence at all (`_sum` and `_count` are exact), so it is immune to the second problem, and it is additive, so it is immune to the first. That is why the breakdown is means.
+
+The one recorded percentile is `llm:decode:p95_5m`, scoped to decode because it is the only phase these buckets resolve tolerably (1.12x-1.26x). There is deliberately **no** `llm:prefill:p95_5m` and **no** `llm:e2e:p95_5m` - a recorded series is exactly how a wrong number acquires an air of authority, and e2e is the worst of the three on the saturated tenant, which is the tenant this board exists to show.
 
 ## Read the inter-token latency panel carefully
 
