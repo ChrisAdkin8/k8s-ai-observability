@@ -219,11 +219,11 @@ tests:
   # =========================================================================
   # TPOT. Its own block because the bucket layout is the point: the rule file
   # warns that p95 TPOT reads HIGH at this rig's operating point because the
-  # (0.025, 0.05] bucket is 25ms wide. Pinning that here stops someone
+  # (0.01, 0.025] bucket is 15ms wide. Pinning that here stops someone
   # "fixing" the apparent inflation by changing the quantile or the buckets.
   # =========================================================================
   - interval: 30s
-    name: TPOT p95 interpolates across the wide 25-50ms bucket, as documented
+    name: TPOT p95 interpolates across the wide 10-25ms bucket, as documented
     input_series:
       # Modelled ITL under a full batch is ~0.0225s — inside (0.01, 0.025].
       - series: 'vllm:inter_token_latency_seconds_bucket{model_name="sim-llama-3-8b-steady", le="0.01"}'

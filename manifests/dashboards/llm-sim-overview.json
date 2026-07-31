@@ -112,7 +112,7 @@
       "id": 4,
       "type": "timeseries",
       "title": "Inter-token latency — p95",
-      "description": "vllm:inter_token_latency_seconds. Degrades mildly with concurrency, unlike TTFT which is dominated by queueing. NOTE: p95 here reads high because of bucket resolution, not load. A full batch models ITL at 22.5ms, which falls inside the wide (25ms, 50ms] bucket, so histogram_quantile interpolates and reports ~43ms. Real vLLM uses the same bucket boundaries, so do not set an ITL SLO from this number.",
+      "description": "vllm:inter_token_latency_seconds. Degrades mildly with concurrency, unlike TTFT which is dominated by queueing. NOTE: p95 here reads high because of bucket resolution, not load. A full batch models ITL at 22.5ms, which falls inside the wide (10ms, 25ms] bucket, so histogram_quantile interpolates across a 15ms gap and reports ~24ms. Real vLLM uses the same bucket boundaries, so do not set an ITL SLO from this number.",
       "gridPos": {
         "h": 9,
         "w": 12,
