@@ -410,8 +410,23 @@ class Request:
     # than recomputed: ttft is BUILT from them in _admit(), so
     # `ttft == queue_time + prefill` is an identity by construction, and
     # --selftest asserts it as one.
+    #
+    # decode and inference are the same move one level out. Upstream's phase
+    # vocabulary is queue -> prefill -> decode, with inference = prefill + decode
+    # ("time spent in RUNNING phase"), and every one of those terms was already
+    # computed here — decode as `gen_tokens * itl` inside the finish_at
+    # expression. Storing them makes `inference == prefill + decode` exact by
+    # ASSIGNMENT rather than merely true in algebra, which is what lets
+    # --selftest assert it with == instead of a tolerance.
+    #
+    # ⚠️ __slots__, so a new field MUST be declared here before it is assigned.
+    # Without it the assignment in _admit() raises
+    #   AttributeError: 'Request' object has no attribute 'decode' and no
+    #   __dict__ for setting new attributes
+    # which reads like a typo rather than a missing declaration.
     __slots__ = ("arrived", "prompt_tokens", "gen_tokens",
-                 "ttft", "queue_time", "prefill", "itl", "finish_at", "reason")
+                 "ttft", "queue_time", "prefill", "decode", "inference",
+                 "itl", "finish_at", "reason")
 
 
 class Simulator:
@@ -460,6 +475,27 @@ class Simulator:
         # Transcribing a second copy would add a list to drift, in the one repo
         # that refuses second copies.
         self.h_queue = Histogram(E2E_BUCKETS)
+        # The three phase histograms, on the SAME list, for the same reason.
+        # VERIFIED against vllm/v1/metrics/loggers.py on 2026-07-31: upstream
+        # declares `request_latency_buckets` once at :889 and passes it to ALL
+        # FIVE request-scoped histograms — e2e, queue, inference, prefill and
+        # decode. E2E_BUCKETS is that list, so the comment above is now
+        # load-bearing for five metrics rather than two, and check-vllm-buckets.py
+        # still watches these boundaries on behalf of all of them.
+        #
+        # ⚠️ Prefill is UNRESOLVED at this rig's operating point and that is
+        # upstream's layout, not a modelling fault: base_ttft_seconds is 0.08s and
+        # the first boundary here is 0.3, so every prefill observation lands in
+        # the first bucket and histogram_quantile interpolates from zero across
+        # it — a measured ~3x overstatement on both shipped tenants. The
+        # BREAKDOWN PANEL IS BUILT FROM MEANS, which carry no bucket dependence
+        # (_sum and _count are exact) and are additive where quantiles are not.
+        # Do not "fix" this with a finer low-end bucket list: the boundaries are
+        # what make a query built here transfer unchanged to real vLLM, which has
+        # exactly the same blind spot.
+        self.h_prefill = Histogram(E2E_BUCKETS)
+        self.h_decode = Histogram(E2E_BUCKETS)
+        self.h_inference = Histogram(E2E_BUCKETS)
 
         self.profile_generation = 1
         self.profile_reload_errors = 0
@@ -593,7 +629,34 @@ class Simulator:
             self._prefix_cache_carry = want - whole
             self.prefix_cache_hits_total += whole * block
             req.reason = self._pick_reason()
-            req.finish_at = self.now + prefill + req.gen_tokens * req.itl
+
+            # The phase decomposition, ASSIGNED rather than re-derived at
+            # observation time. Decode is the product finish_at was already
+            # formed from; naming it here and building finish_at out of the
+            # named terms keeps ONE expression for the quantity.
+            #
+            # ⚠️ Assigned HERE and not beside req.prefill above, because req.itl
+            # is not set until a few lines further down — `req.gen_tokens *
+            # req.itl` is unavailable at the point prefill is stored.
+            #
+            # ⚠️ And finish_at is rewritten in terms of them deliberately.
+            # Leaving it as `prefill + req.gen_tokens * req.itl` beside a
+            # separate req.decode would be two spellings of one quantity, which
+            # is how they drift apart the next time itl changes — invisibly,
+            # since both evaluate identically until one is edited. It is also
+            # what makes `inference == prefill + decode` hold BIT-EXACTLY: the
+            # sum is evaluated once and stored, exactly as ttft is.
+            #
+            # ⚠️ `self.now + req.prefill + req.decode` and NOT
+            # `self.now + req.inference`. They are algebraically the same and
+            # associate differently — (now+prefill)+decode against
+            # now+(prefill+decode) — which is not bit-identical in IEEE 754.
+            # This spelling is the one the original expression used, so the
+            # simulated clock is unchanged to the last bit, and it is the
+            # association the e2e tolerance in --selftest was measured against.
+            req.decode = req.gen_tokens * req.itl
+            req.inference = req.prefill + req.decode
+            req.finish_at = self.now + req.prefill + req.decode
             self.running.append(req)
 
     def _complete_one(self):
@@ -614,7 +677,16 @@ class Simulator:
         # depth, from a second clock reading — breaks the identity the selftest
         # asserts, and does so without failing anything else.
         self.h_queue.observe(req.queue_time)
-        self.observations += 4
+        # The three phases, observed at the same point and from the same stored
+        # terms — never re-derived here. queue + inference is e2e and
+        # prefill + decode is inference, so a value computed at observation time
+        # rather than read off the request is a second expression for a quantity
+        # that already has one, and --selftest's identity block would stop
+        # meaning anything.
+        self.h_prefill.observe(req.prefill)
+        self.h_decode.observe(req.decode)
+        self.h_inference.observe(req.inference)
+        self.observations += 7
 
     # -- derived gauges ---------------------------------------------------
     def kv_cache_usage(self):
@@ -693,6 +765,35 @@ class Simulator:
         # same name, so there is nothing to alias.
         out += self.h_queue.render("vllm:request_queue_time_seconds", model,
                                    "Histogram of time spent in WAITING phase for request.")
+
+        # The phase breakdown. VERIFIED at tag v0.6.6 that all three exist there
+        # under IDENTICAL spellings alongside request_queue_time_seconds, so
+        # there is nothing for METRIC_SURFACES to map and nothing for
+        # METRIC_RESHAPES to reshape — an unmapped metric renders on every
+        # surface, which is the correct behaviour. The question is mandatory for
+        # each new metric, not interesting; the answer is recorded so nobody has
+        # to guess.
+        #
+        # ⚠️ THREE STRING LITERALS. DO NOT FACTOR THESE INTO A LOOP over
+        # ("prefill", "decode", "inference") with an f-string name. It emits
+        # identical metrics and blinds scripts/check-vllm-buckets.py, which
+        # discovers what this repo emits by AST-walking for string literals
+        # matching `vllm:[A-Za-z0-9_]+`. MEASURED against the real checker: the
+        # only literal a loop leaves is the f-string's constant head,
+        # `vllm:request_`, so the three names vanish from the matched set AND a
+        # name upstream does not declare appears as DRIFT — exit 1, and the
+        # weekly job goes red pointing at a checker that is working correctly.
+        #
+        # This is not the "no second copies" rule in reverse: that rule is about
+        # one VALUE living in two places where they can drift. Three distinct
+        # names are three distinct values. What repeats is a call shape, and a
+        # repeated call shape is not a copy of anything.
+        out += self.h_inference.render("vllm:request_inference_time_seconds", model,
+                                       "Histogram of time spent in RUNNING phase for request.")
+        out += self.h_prefill.render("vllm:request_prefill_time_seconds", model,
+                                     "Histogram of time spent in PREFILL phase for request.")
+        out += self.h_decode.render("vllm:request_decode_time_seconds", model,
+                                    "Histogram of time spent in DECODE phase for request.")
 
         # --- this rig's own series (safe to label freely) ------------------
         gauge("llmsim_profile_generation", self.profile_generation,
@@ -889,6 +990,9 @@ def selftest():
     check(sim.h_ttft.count > 0, "requests completed and TTFT was observed")
     check(sim.h_queue.count == sim.h_ttft.count,
           "queue time is observed once per completion, alongside TTFT")
+    check(sim.h_prefill.count == sim.h_decode.count == sim.h_inference.count
+          == sim.h_ttft.count,
+          "each phase is observed exactly once per completion, alongside TTFT")
     check(sim.prefix_cache_queries_total > 0,
           "prefix cache queries advance (every prompt token is looked up)")
     check(monotonic_ok, "counters never decrease across steps")
@@ -896,7 +1000,9 @@ def selftest():
     # Buckets cumulative and non-decreasing, with a +Inf that equals _count.
     hist_ok, inf_ok, sum_ok = True, True, True
     for hist, name in ((sim.h_ttft, "ttft"), (sim.h_tpot, "tpot"),
-                       (sim.h_e2e, "e2e"), (sim.h_queue, "queue")):
+                       (sim.h_e2e, "e2e"), (sim.h_queue, "queue"),
+                       (sim.h_prefill, "prefill"), (sim.h_decode, "decode"),
+                       (sim.h_inference, "inference")):
         running = 0
         prev = -1
         for i in range(len(hist.bounds)):
@@ -982,6 +1088,30 @@ def selftest():
     check(all(emits(bt, n) for n in (v0_pc,) + v1_pc),
           "surface 'both' emits all three prefix-cache series")
 
+    # ⚠️ The phase histograms must appear on EVERY surface, and no entry may have
+    # been added to either surface table for them. VERIFIED against
+    # vllm/engine/metrics.py at tag v0.6.6: all three exist there under identical
+    # spellings, so there is no rename to map and no reshape to express — an
+    # unmapped metric renders unconditionally, which is exactly right.
+    #
+    # Asserted rather than assumed, because "renders unconditionally" is a
+    # property of render() that someone could break while adding a fourth
+    # metric, and because a well-meaning surface-table entry would be invisible:
+    # it would emit the same names on v1 and silently drop or alias them on v0.
+    PHASE_METRICS = ("vllm:request_prefill_time_seconds",
+                     "vllm:request_decode_time_seconds",
+                     "vllm:request_inference_time_seconds")
+    for label, rendered in (("v1", text), ("v0", ot), ("both", bt)):
+        check(all(emits(rendered, n) for n in PHASE_METRICS),
+              f"surface {label!r} emits all three request phase histograms")
+    mapped = set()
+    for side in METRIC_SURFACES.values():
+        mapped |= set(side)
+    for v0_side, v1_side in METRIC_RESHAPES.values():
+        mapped |= set(v0_side) | set(v1_side)
+    check(not (set(PHASE_METRICS) & mapped),
+          "no METRIC_SURFACES or METRIC_RESHAPES entry was added for the phases")
+
     # Duplicated families under 'both' must still each carry exactly one TYPE,
     # or Prometheus rejects the whole scrape.
     btypes = [ln.split()[2] for ln in bt.splitlines() if ln.startswith("# TYPE ")]
@@ -1013,14 +1143,53 @@ def selftest():
     class Recording(Simulator):
         def _complete_one(self):
             req = min(self.running, key=lambda r: r.finish_at)
-            seen.append((req.ttft, req.queue_time, req.prefill))
+            seen.append((req.ttft, req.queue_time, req.prefill,
+                         req.decode, req.inference, self.now - req.arrived))
             super()._complete_one()
 
     rec = Recording(validate_profile(dict(DEFAULT_PROFILE, seed=99)), 0.0)
     for step in range(1, 61):
         rec.advance_to(step * 5.0)
-    check(bool(seen) and all(abs(t - (q + f)) < 1e-9 for t, q, f in seen),
+    check(bool(seen) and all(abs(t - (q + f)) < 1e-9 for t, q, f, _, _, _ in seen),
           f"ttft == queue_time + prefill for all {len(seen)} completed requests")
+
+    # --- the phase breakdown, and the two identities are NOT equally exact ----
+    # Upstream's own documentation strings give the decomposition:
+    #     queue     = time spent in WAITING phase
+    #     inference = time spent in RUNNING phase
+    #     prefill   = time spent in PREFILL phase
+    #     decode    = time spent in DECODE phase
+    # so inference = prefill + decode and e2e = queue + inference. Both hold
+    # algebraically here. Only ONE of them survives an ==, and asserting the
+    # other with == fails on ~93% of perfectly correct requests.
+    #
+    # BIT-EXACT, because req.inference IS `req.prefill + req.decode` — one
+    # expression, evaluated once in _admit() and stored. Exactness comes from the
+    # ASSIGNMENT, not from the algebra, which is the same reason the ttft
+    # assertion above holds and the reason W1.3 refuses to re-derive these at
+    # observation time. A tolerance here would hide a real re-derivation.
+    check(bool(seen) and all(i == f + d for _, _, f, d, i, _ in seen),
+          f"inference == prefill + decode EXACTLY for all {len(seen)} requests")
+
+    # NOT bit-exact, and the residual is float REASSOCIATION rather than a wiring
+    # fault. e2e is read off the clock as (admit + prefill + decode) - arrived,
+    # while this identity computes (admit - arrived) + prefill + decode. Those
+    # are not bit-identical in IEEE 754.
+    #
+    # MEASURED over 1538 completed requests across three seeds: the clock itself
+    # is exact (self.now == req.finish_at, 1538/1538), a bit-exact comparison
+    # here passes on only 107/1538 (7%), and the worst absolute error is 5.24e-14.
+    # abs_tol=1e-9 is five orders of margin over that — and a genuine wiring
+    # fault (observing ttft into the queue histogram, re-deriving decode from a
+    # second clock reading) moves this by MILLISECONDS, twelve orders clear.
+    #
+    # ⚠️ This is not the tolerance-on-a-statistic this repo objects to elsewhere.
+    # That objection is to comparing a p95 against a p95 with a tolerance, which
+    # can pass while the wiring is wrong. This is an identity whose only error
+    # term is bounded at ~1e-14. Do not "fix" the simulator to chase the residual.
+    check(bool(seen) and all(math.isclose(e, q + i, rel_tol=0, abs_tol=1e-9)
+                             for _, q, _, _, i, e in seen),
+          f"e2e == queue_time + inference within 1e-9 for all {len(seen)} requests")
 
     # --- prefix cache: the rate is emitted, and it changes NO latency -----
     def drive(rate, seed=4242):
