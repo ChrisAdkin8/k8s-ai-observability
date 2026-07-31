@@ -8,16 +8,22 @@ documented where they apply; this collects them so you do not have to find them 
 ## Before you push
 
 ```sh
-task selftest      # simulator exposition — no cluster, ~1s
-task rule-tests    # promtool over every alert and recording rule — needs promtool, ~2s
-task drift-test    # the drift check's matching rules, against a fixture — no network, ~1s
+task selftest          # simulator exposition — no cluster, ~1s
+task compose-selftest  # the compose GPU producer vs the DCGM surface contract — no docker, ~1s
+task rule-tests        # promtool over every alert and recording rule — needs promtool, ~2s
+task drift-test        # the drift check's matching rules, against a fixture — no network, ~1s
 ```
 
-All three run in CI as the `fast` job, so a failure here is a failure there. The full stack
+All four run in CI as the `fast` job, so a failure here is a failure there. The full stack
 job takes ~6 minutes and stands up a real kind cluster; you do not need to run it locally
 to open a PR, but `task local:up` does exactly what CI does if you want to.
 
-If you changed shell, `bash -n scripts/*.sh` is the third thing CI checks.
+If you changed shell, `bash -n scripts/*.sh` is the next thing CI checks; every `*.py` in
+the repo goes through `python3 -m py_compile` beside it, so a syntax error in the release
+tooling no longer waits until someone tries to cut a release.
+
+There is also a `compose` job that stands the no-Kubernetes stack up and asserts it
+through Prometheus and Grafana. It needs docker, not kind, and takes about a minute.
 
 ## The invariants
 
@@ -33,6 +39,8 @@ rather than comments, and why the assertions run before anything is created.
 | `FAKE_GPU_CHART_VERSION` | re-verify the three bullets above it in `config.sh` — the exporter's three series, the ServiceMonitor's selector, and the labels the dashboards and rules join on | **nothing.** A bad bump is green with blank panels |
 | `LLM_VLLM_VERSION`, any bucket list, or any `vllm:` name emitted | run `python3 scripts/check-vllm-buckets.py`, then re-derive the expected values in `tests/rules/llm-rules_test.yaml` | the drift check, weekly in CI |
 | `K8S_VERSION` | move `kind/gpu-sim.yaml`'s node image onto the same minor | `assert_kind_contract` |
+| The DCGM series or labels either producer emits | update `tests/contracts/dcgm-surface.json` and **both** producers — `compose/gpu-metrics-sim.py` and whatever the chart pin gives you | `gpu-metrics-sim.py --selftest` (exact match, in `fast`) and `verify.sh` check 3b (subset, on a cluster) |
+| The `release:` label or the sidecar label on anything in `manifests/` | leave them alone — `install.sh` rewrites both at apply time from `RELEASE_LABEL` and `GRAFANA_DASHBOARD_LABEL` | **nothing.** A wrong selector is silent: no scrape, no rules, empty boards |
 
 The three-way naming invariant is the one to read first if you are touching Terraform or
 the fake operator: [docs/architecture.md](docs/architecture.md#the-naming-invariant-read-before-editing).

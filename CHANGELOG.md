@@ -25,6 +25,118 @@ Comparison links are at the foot of this file, one per released version.
 
 ### Added
 
+- **A supported installation mode: `./scripts/install.sh <target> --skip-monitoring`,
+  for a cluster that already runs Prometheus.**
+
+  ⚠️ **This changes what a cluster looks like after install** — on that path nothing
+  installs `kube-prometheus-stack`, and the simulators, rules, dashboards and workloads
+  land beside whatever monitoring stack is already there.
+
+  Both boards are published, so people arrive from the catalog with their own Prometheus,
+  import 25619, find four panels blank for want of the `llm:*` recording rules — and their
+  only route was a script that installs a second monitoring stack over the top of theirs.
+  Nobody with a production stack will do that, which made it the single biggest structural
+  blocker to using any of this.
+
+  Three variables carry the mode, and **all three fail silently when wrong**: no scrape, no
+  rule evaluation, empty boards, every object reporting itself as successfully created.
+
+  | | Default | If it is wrong |
+  |--|--|--|
+  | `KPS_RELEASE` | `kube-prometheus-stack` | `grafana.sh` / `prometheus.sh` port-forward to a Service that does not exist |
+  | `RELEASE_LABEL` | follows `KPS_RELEASE` | your Prometheus never adopts the two ServiceMonitors or the two PrometheusRules |
+  | `GRAFANA_DASHBOARD_LABEL` / `_VALUE` | `grafana_dashboard=1` | the sidecar never imports either board |
+
+  `KPS_RELEASE` was a plain assignment in `config.sh`, so the environment was silently
+  overwritten at source time — setting it did nothing at all. It is a `:-` default now,
+  which is the whole story in one line: all four scripts source that file.
+
+  The `release:` label is rewritten at apply time with `kubectl label --local` rather than
+  templated, so the manifests stay the single source of truth. The comments on both
+  ServiceMonitors used to call that label "harmless; picked up regardless" — true of *this
+  repo's* `values.yaml`, which sets the three `SelectorNilUsesHelmValues` flags `false`.
+  Upstream defaults them `true`, where the selector is `release=<their release>`. Both
+  comments now say which half they were relying on, and a BYO user is told both available
+  fixes, since setting those values `false` is often not theirs to change.
+
+  `install.sh` refuses up front if the `monitoring` namespace or the Prometheus Operator
+  CRDs are absent, **creating nothing**, and the message names the exact `helm install`
+  rather than leaving `kubectl` to report "CRD not found" and send people looking for a
+  broken manifest. `LITE=1` warns that it is ignored on this path — it is an overlay on
+  the values of the install being skipped, and a flag that silently does nothing is what
+  this repo writes assertions against.
+
+- **`./scripts/verify.sh <target> --byo`**, and `task <prefix>:install -- --skip-monitoring`
+  / `:verify -- --byo` now that both tasks pass `CLI_ARGS` through. Without the
+  passthrough the flag was accepted from the front door and **silently dropped**.
+
+  The mode relaxes exactly one claim: anonymous Grafana access, which follows from this
+  repo's Helm values rather than from anything it installed, so `401`/`403` becomes a SKIP.
+  Everything about the simulators, scrapes, rules and dashboards is still asserted —
+  skipping those would make `--byo` prove nothing on the install that most needs proof,
+  since they are precisely what a wrong selector label breaks. **A `404` on a board stays
+  fatal**, and says so in BYO terms: Grafana having never heard of it means the sidecar
+  never imported the ConfigMap, which is the most likely way a BYO install appears broken.
+
+- **A DCGM surface contract, asserted from both producers**
+  (`tests/contracts/dcgm-surface.json`).
+
+  The compose path has a second implementation of the fake exporter's surface and nothing
+  compared it against the first — the parity was prose in `gpu-metrics-sim.py`'s header.
+  A chart bump renaming a series or a label would fail the kind path loudly in CI and let
+  the compose path drift in silence, which is backwards: `docker compose up -d` is the
+  first command in the README.
+
+  | Side | Assertion | Why |
+  |--|--|--|
+  | `compose/gpu-metrics-sim.py --selftest` | **exact** equality | nothing sits between the producer and the check |
+  | `verify.sh` check 3b | **subset** | scraped series carry `job`, `instance`, `namespace`, `pod`, `endpoint`, `service` from the target, and the exporter's own pod labels arrive as `exported_*` — an exact match would fail on day one |
+
+  Both semantics are in the contract file's header so the asymmetry reads as a decision.
+  The selftest parses the **rendered exposition** rather than the module's constants:
+  asserting the constants would only prove the file is self-consistent, and the thing that
+  has to be right is what a Prometheus scrapes, label spelling included.
+
+  ⚠️ The negative case is a permanent test, not an experiment. `--selftest` feeds
+  `tests/fixtures/dcgm-surface-wrong.json` — wrong in three independent ways, one per
+  direction the checker must detect — and asserts each fault is named in the rejection. A
+  checker that only ever runs against the truth is one nobody has watched fail, and one
+  that accepts everything also accepts the truth. Proving it by editing the real contract
+  and reverting does not count: nothing enforces the revert.
+
+  `render()` in the compose producer now takes the clock as a parameter, defaulting to wall
+  time, for the same reason `llm-sim.py`'s does — it lets the selftest demand byte-identical
+  output across two renders instead of comparing sine samples with a tolerance, which is
+  also how it asserts that a scrape moves nothing.
+
+- **CI covers the compose path**, in a `compose` job that needs docker rather than kind and
+  takes about a minute. It is not a cheaper duplicate of the kind job: it exercises
+  Prometheus loading the rules `scripts/extract.sh` unwraps out of `manifests/alerts/`,
+  Grafana provisioning both boards off disk instead of through the sidecar, and the
+  compose-only GPU producer. A break in any of those showed up nowhere before.
+
+  It asserts through Prometheus rather than by curling the simulators — the simulator
+  containers publish no ports, and querying proves the scrape works, which raw exposition
+  would not. An **empty** target list fails too, since "nothing is down" is otherwise
+  satisfied by nothing being scraped.
+
+- **`python3 -m py_compile` over every `*.py` in the repo**, in the `fast` job. Until now
+  the only Python CI executed was `llm-sim.py` via its selftest, so `dashboard-publish.py`,
+  `check-vllm-buckets.py`, `gpu-metrics-sim.py` and the `docs/` scripts could ship a
+  `SyntaxError` green — and two of those are release tooling, where the first person to
+  find out is whoever is trying to cut a release.
+
+### Fixed
+
+- **The inter-token-latency caveat was wrong by roughly 2x, on a published board.** It said
+  a full batch's 22.5 ms ITL falls in the `(25ms, 50ms]` bucket and reports ~43 ms. It
+  falls in `(10ms, 25ms]` — `TPOT_BUCKETS` starts `[0.01, 0.025, 0.05, …]` — so the
+  interpolation spans a 15 ms gap and reports ~24 ms, which is what `scripts/llm-sim.py`
+  and the promtool expectation have said since the V1 bucket sync. The catalog page was
+  written afterwards and copied the pre-correction numbers, and so did the panel
+  `description` inside `llm-sim-overview.json` — the tooltip a grafana.com visitor reads,
+  on a board whose entire point is that the caveat transfers to real hardware.
+
 - **Three more vLLM series: `vllm:prefix_cache_queries_total`,
   `vllm:prefix_cache_hits_total` and `vllm:request_queue_time_seconds`.**
 
