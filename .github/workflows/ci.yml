@@ -295,17 +295,39 @@ jobs:
 
       # No healthchecks in compose.yaml, so readiness is polled rather than waited on.
       # Bounded: a stack that never comes up must fail rather than hang until the cap.
+      #
+      # 180s, raised from 60s after a real miss. The two do NOT come up together:
+      # Prometheus was serving at 19:20:15 while Grafana was still running its first-run
+      # SQLite migrations at 19:21:15 — a full minute behind, on a healthy stack with
+      # every container Up and nothing in the logs. 60s was tuned to the fast path and
+      # a loaded runner walked straight past it.
+      #
+      # Raising a poll ceiling costs nothing on a healthy run, because the loop exits
+      # the second both endpoints answer. It stays bounded: a stack that genuinely
+      # never comes up still fails rather than hanging.
       - name: Wait for Prometheus and Grafana
         run: |
           set -euo pipefail
-          for i in $(seq 1 60); do
-            if curl -sf "http://localhost:${PROMETHEUS_PORT}/-/ready" >/dev/null \
-               && curl -sf "http://localhost:${GRAFANA_PORT}/api/health" >/dev/null; then
-              echo "ready after ${i}s"; exit 0
+          # `if`, not `a || b && c`: under `set -e` a failing curl at the end of such a
+          # chain is the line's exit status and would abort the step on the first poll,
+          # before anything has had a chance to come up. A failed condition inside `if`
+          # is not an error.
+          prom="" graf=""
+          for i in $(seq 1 180); do
+            if [ -z "$prom" ] && curl -sf "http://localhost:${PROMETHEUS_PORT}/-/ready" >/dev/null; then
+              prom="$i"
+            fi
+            if [ -z "$graf" ] && curl -sf "http://localhost:${GRAFANA_PORT}/api/health" >/dev/null; then
+              graf="$i"
+            fi
+            if [ -n "$prom" ] && [ -n "$graf" ]; then
+              echo "ready after ${i}s (prometheus ${prom}s, grafana ${graf}s)"; exit 0
             fi
             sleep 1
           done
-          echo "Prometheus and/or Grafana never became ready" >&2
+          # Name WHICH one, so the next failure is diagnosable from the summary rather
+          # than by downloading the log bundle — that cost a round trip this time.
+          echo "not ready after 180s: prometheus=${prom:-NEVER} grafana=${graf:-NEVER}" >&2
           exit 1
 
       # ⚠️ ASSERTED THROUGH PROMETHEUS, NOT BY CURLING THE SIMULATORS. Only Prometheus
