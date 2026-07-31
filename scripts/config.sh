@@ -64,11 +64,18 @@ FAKE_GPU_CHART_VERSION="0.0.59"       # verified 2026-07
 # METRIC_SURFACES in scripts/llm-sim.py is the single place that mapping lives;
 # `--vllm-surface both` emits the v0 aliases too, for upgrade testing.
 #
+# One V1 change was NOT a rename, and METRIC_RESHAPES beside it holds that one:
+#     vllm:gpu_prefix_cache_hit_rate (gauge of a ratio)
+#       -> vllm:prefix_cache_queries_total + vllm:prefix_cache_hits_total
+# The shape changed, so the repair is rate(hits)/rate(queries) and not a
+# substituted name — which is why it is the best upgrade rehearsal here.
+#
 # BUCKETS: V1, and verified rather than asserted. TTFT_BUCKETS/TPOT_BUCKETS/
 # E2E_BUCKETS in scripts/llm-sim.py are transcribed from vllm/v1/metrics/
 # loggers.py, and scripts/check-vllm-buckets.py diffs them against that file
-# weekly in CI. They had ALSO drifted — TTFT's whole tail above 10s — which is
-# why the check exists rather than a note telling you to re-check.
+# weekly in CI — along with the metric SET, in both directions. They had ALSO
+# drifted — TTFT's whole tail above 10s — which is why the check exists rather
+# than a note telling you to re-check.
 LLM_VLLM_VERSION="v1"
 
 # model_name is an IDENTITY, not a label: the recording rules aggregate

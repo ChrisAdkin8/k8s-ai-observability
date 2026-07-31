@@ -188,7 +188,7 @@ port-forward and opens both:
 
 - <http://localhost:3000/d/gpu-sim-dcgm> for utilisation, memory, temperature and power
 - <http://localhost:3000/d/llm-sim-overview> for first-token latency, throughput, queue
-  depth and KV cache
+  depth, KV cache and prefix-cache reuse
 
 Viewing needs no login: anonymous access is `Viewer`-only. To edit, log in as `admin`; the
 script prints the generated password. Use `GRAFANA_PORT=3001` if 3000 is taken, and
