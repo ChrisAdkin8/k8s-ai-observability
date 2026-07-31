@@ -292,8 +292,8 @@ those claims honest, and the CI legs that stop the alternative paths rotting.
   decision; the file says so and says why.
 
 - **Both dashboards are published to the grafana.com catalog**: the GPU board is
-  [25618](https://grafana.com/grafana/dashboards/25618) and the vLLM board is
-  [25620](https://grafana.com/grafana/dashboards/25620). They can now be imported by id
+  [25618](https://grafana.com/grafana/dashboards/25618-gpu-simulation-dcgm-overview/) and the vLLM board is
+  [25620](https://grafana.com/grafana/dashboards/25620-llm-simulation-vllm-serving-overview/). They can now be imported by id
   into any Grafana, without cloning this repo.
 
   The ids are recorded in three places on purpose, and all three are the ones the repo
