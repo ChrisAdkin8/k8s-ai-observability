@@ -72,6 +72,18 @@ jobs:
       - name: LLM simulator selftest
         run: python3 scripts/llm-sim.py --selftest
 
+      # The compose path's GPU producer against tests/contracts/dcgm-surface.json —
+      # the same contract verify.sh check 3b holds the CLUSTER's exporter to. One
+      # file, two independent producers: that is what makes it parity rather than
+      # self-consistency, and why a fake-gpu-operator chart bump that renames a
+      # series or a label can no longer fail the kind path loudly while the compose
+      # path drifts in silence.
+      #
+      # Needs no docker, so the claim is checked in milliseconds on every push
+      # instead of only when someone brings the compose stack up.
+      - name: Compose GPU producer vs the DCGM surface contract
+        run: python3 compose/gpu-metrics-sim.py --selftest
+
       # The MATCHING RULES of the weekly drift check, against a committed fixture
       # rather than against upstream. The drift job below runs on a schedule and
       # needs network; this needs neither, and it covers the one piece of
@@ -112,6 +124,26 @@ jobs:
             bash -n "$f"
           done
 
+      # The Python equivalent of the loop above, and it closes a real gap: until now
+      # the ONLY Python this workflow executed was scripts/llm-sim.py, via its
+      # selftest. dashboard-publish.py, check-vllm-buckets.py, gpu-metrics-sim.py and
+      # the docs/ scripts could all ship a SyntaxError and go green — and two of them
+      # are release tooling, where the first person to find out is whoever is trying
+      # to cut a release.
+      #
+      # py_compile is the parse-only counterpart to `bash -n`; it is not a linter, for
+      # the same reason shellcheck is deferred above.
+      - name: Python syntax
+        run: |
+          set -euo pipefail
+          # find, not a glob: the files live in scripts/, compose/ and docs/. dist/ is
+          # generated and .git/ is not ours.
+          files=$(find . -name '*.py' -not -path './.git/*' -not -path './dist/*' | sort)
+          test -n "$files"   # an empty list would pass vacuously
+          echo "$files"
+          # shellcheck disable=SC2086
+          python3 -m py_compile $files
+
   # ---------------------------------------------------------------------------
   # UPSTREAM drift, as opposed to the two jobs either side of it, which only ever
   # check this repo against itself.
@@ -148,6 +180,173 @@ jobs:
       # not look" and "we looked and it was fine" are not the same result.
       - name: vLLM bucket boundaries and metric set
         run: python3 scripts/check-vllm-buckets.py
+
+  # ---------------------------------------------------------------------------
+  # The path with no Kubernetes at all — and the FIRST command in the README, which
+  # until now had no CI coverage whatsoever. Docker only: no kind, no helm, no task.
+  #
+  # It is not a cheaper duplicate of the `stack` job. It exercises a different set of
+  # artefacts reading the same sources: Prometheus loading the rules unwrapped out of
+  # manifests/alerts/ by scripts/extract.sh, Grafana provisioning the boards straight
+  # off disk instead of through the sidecar, and the compose-only GPU producer. A
+  # break in extract.sh, in the provisioning files, or in either board's JSON shows up
+  # here and nowhere else.
+  # ---------------------------------------------------------------------------
+  compose:
+    name: compose stack (no Kubernetes)
+    runs-on: ubuntu-latest
+    # Generous against a measured ~1 minute. Nothing here waits on a Helm release; the
+    # budget is image pulls plus the readiness poll below.
+    timeout-minutes: 10
+    env:
+      # Same collapse-to-boolean as the stack job: the `secrets` context is not
+      # available in a step-level `if`.
+      HAVE_DOCKERHUB: ${{ secrets.DOCKERHUB_USERNAME != '' && secrets.DOCKERHUB_TOKEN != '' }}
+      # Five of the six images here come from Docker Hub, so the login below matters
+      # more for this job than for any other.
+      PROMETHEUS_PORT: 9090
+      GRAFANA_PORT: 3000
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+
+      # Gated exactly as the stack job's is — fork PRs never receive secrets, and an
+      # ungated login fails every external contribution.
+      - name: Log in to Docker Hub (skipped without secrets)
+        if: env.HAVE_DOCKERHUB == 'true'
+        uses: docker/login-action@c94ce9fb468520275223c153574b00df6fe4bcc9 # v3
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+
+      - name: docker compose up
+        id: up
+        working-directory: compose
+        run: docker compose up -d
+
+      # No healthchecks in compose.yaml, so readiness is polled rather than waited on.
+      # Bounded: a stack that never comes up must fail rather than hang until the cap.
+      - name: Wait for Prometheus and Grafana
+        run: |
+          set -euo pipefail
+          for i in $(seq 1 60); do
+            if curl -sf "http://localhost:${PROMETHEUS_PORT}/-/ready" >/dev/null \
+               && curl -sf "http://localhost:${GRAFANA_PORT}/api/health" >/dev/null; then
+              echo "ready after ${i}s"; exit 0
+            fi
+            sleep 1
+          done
+          echo "Prometheus and/or Grafana never became ready" >&2
+          exit 1
+
+      # ⚠️ ASSERTED THROUGH PROMETHEUS, NOT BY CURLING THE SIMULATORS. Only Prometheus
+      # and Grafana publish ports (compose.yaml) — the three simulator containers
+      # publish none, so `curl` from the runner cannot reach them at all. Querying
+      # instead is not a workaround, it is the better assertion: it proves the scrape
+      # works, which curling raw exposition would not.
+      #
+      # One series per producer, and the rate() on the LLM side is deliberate: a
+      # counter that exists and never moves is the failure a presence check misses.
+      - name: Assert both producers through Prometheus
+        run: |
+          set -euo pipefail
+          q() {
+            curl -sfG "http://localhost:${PROMETHEUS_PORT}/api/v1/query" \
+              --data-urlencode "query=$1" \
+              | python3 -c 'import sys,json; print(len(json.load(sys.stdin).get("data",{}).get("result",[])))'
+          }
+          # The rules evaluate every 30s and rate() needs two samples in the window,
+          # so give the first evaluations time to land before asserting.
+          for i in $(seq 1 40); do
+            gpu=$(q 'DCGM_FI_DEV_GPU_UTIL' || echo 0)
+            llm=$(q 'rate(vllm:generation_tokens_total[1m]) > 0' || echo 0)
+            [ "$gpu" -gt 0 ] && [ "$llm" -gt 0 ] && break
+            sleep 3
+          done
+          echo "DCGM_FI_DEV_GPU_UTIL series: $gpu"
+          echo "advancing vllm token counters: $llm"
+          [ "$gpu" -gt 0 ] || { echo "the GPU producer is not being scraped" >&2; exit 1; }
+          [ "$llm" -gt 0 ] || { echo "the LLM producers are not advancing" >&2; exit 1; }
+
+          # The derived series prove Prometheus really loaded the rules that
+          # scripts/extract.sh unwrapped out of manifests/alerts/. Without them the
+          # GPU board's lower half is blank — the same coupling verify.sh check 4c
+          # asserts on the cluster.
+          for m in DCGM_FI_DEV_GPU_TEMP DCGM_FI_DEV_POWER_USAGE llm:ttft:p95_5m; do
+            n=$(q "$m" || echo 0)
+            echo "derived $m: $n series"
+            [ "$n" -gt 0 ] || { echo "$m empty — were the rules extracted and loaded?" >&2; exit 1; }
+          done
+
+      - name: Assert every scrape target is up
+        run: |
+          set -euo pipefail
+          curl -sf "http://localhost:${PROMETHEUS_PORT}/api/v1/targets" -o /tmp/targets.json
+          # The heredoc body is indented to the block scalar's own margin: YAML strips
+          # that prefix, so python receives it at column 0. Un-indenting it here would
+          # end the block instead.
+          python3 - <<'PY'
+          import json, sys
+          active = json.load(open("/tmp/targets.json"))["data"]["activeTargets"]
+          bad = [(t["labels"].get("job"), t["scrapeUrl"], t["health"], t.get("lastError", ""))
+                 for t in active if t["health"] != "up"]
+          print(f"{len(active)} active target(s), {len(bad)} not up")
+          for job, url, health, err in bad:
+              print(f"  {job} {url} {health} {err}")
+          # No active targets at all is a failure too: an empty list would otherwise
+          # satisfy "nothing is down".
+          sys.exit(1 if (bad or not active) else 0)
+          PY
+
+      # Mirrors verify.sh check 4b / L5: fetch each board BY UID over an
+      # UNAUTHENTICATED request. That is the check which catches a dashboard that
+      # exists on disk but was never actually loaded — here by Grafana provisioning
+      # rather than by the sidecar, which is the difference this job exists to cover.
+      - name: Assert both boards anonymously by uid
+        run: |
+          set -euo pipefail
+          for uid in gpu-sim-dcgm llm-sim-overview; do
+            code=$(curl -s -o /dev/null -w '%{http_code}' \
+              "http://localhost:${GRAFANA_PORT}/api/dashboards/uid/${uid}")
+            echo "$uid -> $code"
+            case "$code" in
+              200) ;;
+              401|403) echo "anonymous Viewer is not enabled (compose.yaml)" >&2; exit 1 ;;
+              404) echo "no board with uid $uid — provisioning did not load it" >&2; exit 1 ;;
+              *)   echo "Grafana unreachable (http $code)" >&2; exit 1 ;;
+            esac
+          done
+
+      # always(), for the same reason the stack job's diagnostics are: a cancelled or
+      # timed-out run is the one whose logs you need. Guarded on `up` so a run
+      # superseded before the stack existed does not upload an empty bundle.
+      - name: Collect compose logs
+        if: always() && steps.up.outcome != 'skipped'
+        working-directory: compose
+        run: |
+          mkdir -p /tmp/compose-diag
+          docker compose ps -a       > /tmp/compose-diag/ps.txt   2>&1 || true
+          docker compose logs --no-color --tail=400 \
+                                     > /tmp/compose-diag/logs.txt 2>&1 || true
+          # The extracted rules and profiles: if `generate` failed, everything
+          # downstream is blank and this is where it shows.
+          ls -laR .generated         > /tmp/compose-diag/generated.txt 2>&1 || true
+          cp /tmp/targets.json /tmp/compose-diag/ 2>/dev/null || true
+
+      - name: Upload compose diagnostics
+        if: always() && steps.up.outcome != 'skipped'
+        uses: actions/upload-artifact@330a01c490aca151604b8cf639adc76d48f6c5d4 # v5
+        with:
+          name: compose-diagnostics-${{ github.run_id }}-${{ github.run_attempt }}
+          path: /tmp/compose-diag
+          retention-days: 14
+          if-no-files-found: warn
+
+      # -v, so the extracted rules and Prometheus' TSDB do not survive into a rerun on
+      # a reused runner and make a broken `generate` look like it worked.
+      - name: docker compose down
+        if: always()
+        working-directory: compose
+        run: docker compose down -v --remove-orphans || true
 
   # ---------------------------------------------------------------------------
   # The real test: a kind cluster, both Helm releases, all the wiring, and every
