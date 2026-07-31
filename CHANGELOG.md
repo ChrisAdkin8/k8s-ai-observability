@@ -39,6 +39,34 @@ Comparison links are at the foot of this file, one per released version.
 
 ### Fixed
 
+- **`install.sh` rebuilt the simulator ConfigMap without rolling the pods, so an UPGRADE
+  kept running the old script.** The 0.4.0 note below says to restart the simulator
+  Deployments "(or let `install.sh` roll them)" — the second half was not true until now.
+
+  A running pod serves the code it started with. kubelet eventually syncs the projected
+  volume, but the Python process read `llm_sim.py` once at exec time and never looks
+  again; and because only the ConfigMap's *contents* changed, nothing in the Deployment
+  moved, so `kubectl apply` reported `unchanged` and no rollout happened. **The install
+  went green while the cluster kept emitting the previous metric surface** — the
+  silent-success failure this repo writes assertions against.
+
+  Invisible on a fresh install, because there the first pods already have the current
+  file, which is exactly why CI never caught it: CI always builds a new cluster. It
+  surfaced as `verify.sh` L7 failing on an existing cluster with both prefix-cache
+  counters absent while the ConfigMap plainly contained them.
+
+  Fixed with a checksum annotation on the pod template, whose important property is that
+  it is a **no-op when nothing changed** — a re-install with an unmodified script rolls
+  nothing. An unconditional `rollout restart` would churn both tenants every install and
+  reset the queue the saturated profile spends minutes building, briefly breaking the very
+  checks this exists to keep passing. The Deployments are discovered by what they **mount**
+  rather than by name, so the opt-in `llm-driven` tenant is covered too; hardcoding the two
+  shipped names would have left extras users with the same bug, still silent.
+
+  `python3` is now declared in `install.sh`'s `require_tools`. It was already a hard
+  dependency via the dashboard JSON check, where a missing interpreter surfaced as
+  "`<board>` is not valid JSON" — an error that sends you to inspect a file that is fine.
+
 - **The first version of that gate blocked docs-only PRs outright**, which is the exact
   failure it was written to prevent. A job-level `if:` on the `stack` **matrix** meant that
   when it skipped, GitHub did not interpolate the job name — the check reported as the
