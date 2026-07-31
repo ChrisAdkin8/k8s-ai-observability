@@ -35,10 +35,14 @@ case "${2:-}" in
      exit 1 ;;
 esac
 
+# python3 is listed explicitly because this script genuinely needs it — the dashboard
+# JSON check in assert_dashboard_contract and the simulator checksum in [5/5] both
+# shell out to it. Without it here, a missing python3 surfaces as
+# "<board> is not valid JSON", which sends you to inspect a file that is fine.
 case "$TARGET" in
-  eks)   require_tools terraform aws ;;
-  gke)   require_tools terraform gcloud ;;
-  local) require_tools kind ;;
+  eks)   require_tools terraform aws python3 ;;
+  gke)   require_tools terraform gcloud python3 ;;
+  local) require_tools kind python3 ;;
   *)     echo "target must be eks|gke|local" >&2; exit 1 ;;
 esac
 
@@ -191,8 +195,58 @@ echo "==> [5/5] simulated LLM serving stack"
 # Applied AFTER the GPU stack so llm-steady's optional nvidia.com/gpu request is
 # satisfiable. If no simulated GPU is free it still runs, just unbound.
 "${KUBECTL[@]}" apply -f manifests/llm/
-"${KUBECTL[@]}" -n "$LLM_NS" rollout status deploy/llm-steady --timeout=3m || true
-"${KUBECTL[@]}" -n "$LLM_NS" rollout status deploy/llm-saturated --timeout=3m || true
+
+# ⚠️ REBUILDING THE ConfigMap ABOVE IS NOT ENOUGH TO GET THE NEW SCRIPT RUNNING.
+#
+# A running pod keeps serving the code it started with: kubelet does eventually sync
+# the projected volume, but the Python process read llm_sim.py once at exec time and
+# never looks again. Nothing in the Deployment changes when only the ConfigMap's
+# contents do, so `kubectl apply` reports everything "unchanged" and no rollout
+# happens. The install goes green and the cluster keeps emitting the OLD metric
+# surface — which is the silent-success failure this repo writes assertions against,
+# and it is invisible on a FRESH install because there the first pods already have
+# the current file. That is why CI never caught it: CI always builds a new cluster.
+#
+# It cost a real diagnosis: after the prefix-cache series landed, verify.sh's L7
+# failed on an existing cluster with both counters absent while the ConfigMap plainly
+# contained them.
+#
+# The fix is the standard checksum-annotation trick, and its important property is
+# that it is a NO-OP when nothing changed: the pod template only differs when the
+# hash does, so a re-install with an unmodified script rolls nothing. An
+# unconditional `rollout restart` here would churn the tenants on every install and
+# reset the queue the saturated profile spends minutes building — which briefly
+# breaks the very checks this is meant to keep passing.
+#
+# Discovered by what they MOUNT rather than by name, so the opt-in llm-driven
+# Deployment in manifests/llm/extras/ is covered too. Hardcoding llm-steady and
+# llm-saturated would leave anyone using the extras with exactly this bug, still
+# silent.
+script_sha="$(python3 -c 'import hashlib,sys; print(hashlib.sha256(open(sys.argv[1],"rb").read()).hexdigest()[:16])' scripts/llm-sim.py)"
+llm_deploys="$("${KUBECTL[@]}" -n "$LLM_NS" get deploy -o json 2>/dev/null | python3 -c '
+import json, sys
+try:
+    items = json.load(sys.stdin).get("items", [])
+except (ValueError, OSError):
+    sys.exit(0)
+for d in items:
+    vols = d["spec"]["template"]["spec"].get("volumes") or []
+    if any((v.get("configMap") or {}).get("name") == "llm-sim-script" for v in vols):
+        print(d["metadata"]["name"])
+' || true)"
+
+for d in $llm_deploys; do
+  "${KUBECTL[@]}" -n "$LLM_NS" patch deploy "$d" --type=merge \
+    -p "{\"spec\":{\"template\":{\"metadata\":{\"annotations\":{\"k8s-ai-observability/llm-sim-sha256\":\"$script_sha\"}}}}}" \
+    >/dev/null
+done
+[[ -n "$llm_deploys" ]] && echo "    simulator script sha256=$script_sha (pods roll only if this moved)"
+
+# Waits on the same discovered list, so an extras tenant is not silently skipped.
+# Non-fatal as before: a simulator that cannot schedule is verify.sh's to report.
+for d in $llm_deploys; do
+  "${KUBECTL[@]}" -n "$LLM_NS" rollout status "deploy/$d" --timeout=3m || true
+done
 
 byo_env=""; byo_verify=""
 if [[ "$SKIP_MONITORING" == "1" ]]; then
