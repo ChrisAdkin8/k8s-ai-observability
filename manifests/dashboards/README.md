@@ -6,7 +6,8 @@ Two boards, each a plain `.json` file — **one artefact, used three ways**:
 |--|--|
 | Kubernetes | `scripts/install.sh` wraps each file in a ConfigMap labelled `grafana_dashboard=1`, which the kube-prometheus-stack sidecar imports |
 | [The compose path](../../compose/) | Grafana provisioning mounts this directory directly |
-| grafana.com / any Grafana | import the file as-is — **Dashboards → New → Import → Upload JSON** |
+| Any running Grafana | import the file as-is — **Dashboards → New → Import → Upload JSON** |
+| grafana.com catalog | **not** as-is: `task dashboards` derives the upload into `dist/` — see [Publishing](#publishing-to-grafanacom) |
 
 Because there is only one copy, those three cannot disagree. Nothing is ever clicked
 into place, and no egress to grafana.com is needed at install time.
@@ -55,43 +56,46 @@ open, pick the Prometheus datasource in the dashboard's variable dropdown once.
 
 ## Publishing to grafana.com
 
-Both boards are portable and have been checked against a Grafana whose only datasource
-was named and uid'd differently from anything here:
+**⚠️ The files in this directory cannot be uploaded to the catalog as-is.** They bind
+every panel to a `datasource`-type template variable, which is right in-cluster — the
+sidecar provisions the board and the variable resolves to whatever Prometheus is there.
+The catalog wants the opposite: the `__inputs` block Grafana 3.0 introduced, so it can
+prompt the importer. Upload a file without it and you get:
 
-- `id` is `null` — required, or the upload is treated as an update to someone else's board
-- no hardcoded datasource uid anywhere; every panel binds to `${datasource}`
-- that variable is a `datasource`-type variable with `query: prometheus`, so it resolves
-  to whatever Prometheus the importer already has
+> Warning: Old dashboard JSON format. Read about Importing & Sharing with Grafana 2.x or 3.0
 
-They also work against **real** hardware, which is the point: the GPU board's temperature
-and power panels read `DCGM_FI_DEV_GPU_TEMP` / `_POWER_USAGE`, which a genuine
-dcgm-exporter emits directly (here they are recording rules), and the LLM board's `model`
-variable is `label_values(vllm:num_requests_running, model_name)`, which real vLLM
-answers.
+Grafana's own **Export for sharing externally** does not fix this, and the reason is worth
+knowing: that exporter rewrites a *concrete* datasource uid into a placeholder. A
+datasource variable has already abstracted the uid away, so there is nothing to rewrite
+and no `__inputs` is emitted. The cleaner the file, the more certainly it is rejected.
 
-Re-check that before each upload, rather than trusting this paragraph — the three properties
-are machine-checkable and a panel edited in the Grafana UI can quietly reintroduce a fixed
-datasource uid:
+So derive the upload instead:
 
 ```sh
-python3 - <<'EOF'
-import json, glob, re
-for f in sorted(glob.glob("manifests/dashboards/*.json")):
-    d, raw = json.load(open(f)), open(f).read()
-    uids = set(re.findall(r'"uid"\s*:\s*"([^"$][^"]*)"', raw)) - {d.get("uid","")}
-    tv = [v for v in d.get("templating", {}).get("list", []) if v.get("type") == "datasource"]
-    print(f, "| id null:", d.get("id") is None,
-          "| ds var:", bool(tv) and tv[0].get("query") == "prometheus",
-          "| fixed uids:", sorted(uids) or "none")
-EOF
+task dashboards          # or: python3 scripts/dashboard-publish.py
 ```
+
+That writes `dist/grafana-com/*.json`, adding `__inputs` and `__requires`, repointing every
+`${datasource}` reference at `${DS_PROMETHEUS}` — 22 of them on the LLM board — and
+dropping the now-redundant variable. `dist/` is generated and gitignored, on the same
+terms as the ConfigMaps: one source of truth, several derived forms.
+
+It also **fails rather than emitting a broken upload** if any panel carries a hardcoded
+datasource uid, which is what a board edited in the Grafana UI and pasted back will do.
+That check used to be a snippet in this file; running it inside the thing that consumes
+the result means it cannot be skipped.
+
+Both boards also work against **real** hardware, which is the point: the GPU board's
+temperature and power panels read `DCGM_FI_DEV_GPU_TEMP` / `_POWER_USAGE`, which a genuine
+dcgm-exporter emits directly (here they are recording rules), and the LLM board's `model`
+variable is `label_values(vllm:num_requests_running, model_name)`, which real vLLM answers.
 
 ### The upload
 
-Sign in at [grafana.com](https://grafana.com) → your org → **Dashboards** → upload the
-`.json`. There is **no API for this** that does not require your org credentials, so it is
-a manual step by nature. Each needs a name, a description and the datasource it expects
-(Prometheus). Ready to paste:
+Sign in at [grafana.com](https://grafana.com) → your org → **Dashboards** → upload the file
+**from `dist/grafana-com/`**. There is **no API for this** that does not require your org
+credentials, so it is a manual step by nature. Each needs a name, a description and the
+datasource it expects (Prometheus). Ready to paste:
 
 **`gpu-sim-dcgm.json`** — *GPU Simulation — DCGM Overview*
 
@@ -99,15 +103,14 @@ a manual step by nature. Each needs a name, a description and the datasource it 
 > DCGM-format metrics. Works against a real `dcgm-exporter` unchanged. Temperature and
 > power are recording rules here rather than exporter output — import the rules from
 > https://github.com/ChrisAdkin8/k8s-ai-observability or those two panels stay blank
-> against a simulated source. Binds to a Prometheus datasource variable, so it resolves
-> to whatever you already have.
+> against a simulated source. Prompts for your Prometheus datasource on import.
 
 **`llm-sim-overview.json`** — *LLM Simulation — vLLM Serving Overview*
 
 > Time to first token, inter-token latency, throughput, queue depth and KV-cache usage for
 > vLLM, broken out `by (model_name)` so a saturated tenant is never averaged into a healthy
 > one. Uses the **V1** engine's metric names (`vllm:kv_cache_usage_perc`,
-> `vllm:inter_token_latency_seconds`). Binds to a Prometheus datasource variable.
+> `vllm:inter_token_latency_seconds`). Prompts for your Prometheus datasource on import.
 
 You get a numeric dashboard id back — **put it in the table at the top of this file**, and
 in the README, so the published board and this repo stay connected.

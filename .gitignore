@@ -54,6 +54,11 @@ prompt-*.md
 # edited by hand and never committed: manifests/ stays the single source of truth.
 compose/.generated/
 
+# Derived from manifests/dashboards/*.json by scripts/dashboard-publish.py for the
+# grafana.com upload. Same rule as above — committing it would put a second copy of
+# each board in the repo, which is the drift the single-artefact design avoids.
+dist/
+
 # OS / editor cruft
 .DS_Store
 *.swp
