@@ -47,7 +47,7 @@ See [compose/](compose/) for what it deliberately cannot cover.
   ever clicked into place, so a re-install reproduces them exactly. Both are published on
   grafana.com, so you can import them by id into a Grafana you already run:
   [25618](https://grafana.com/grafana/dashboards/25618) (GPU) and
-  [25619](https://grafana.com/grafana/dashboards/25619) (vLLM).
+  [25620](https://grafana.com/grafana/dashboards/25620) (vLLM).
 - **An acceptance suite** ([`scripts/verify.sh`](scripts/verify.sh)) that asserts metrics
   are flowing, both boards render, and the alerts actually reach `firing`.
 - **A path for clusters that already run Prometheus.** If you imported one of the boards

@@ -1,6 +1,6 @@
 # Dashboards
 
-Two boards, each a plain `.json` file — **one artefact, used three ways**:
+Two boards, each a plain `.json` file — **one artefact, used four ways**:
 
 | Used by | How |
 |--|--|
@@ -9,13 +9,14 @@ Two boards, each a plain `.json` file — **one artefact, used three ways**:
 | Any running Grafana | import the file as-is — **Dashboards → New → Import → Upload JSON** |
 | grafana.com catalog | **not** as-is: `task dashboards` derives the upload into `dist/` — see [Publishing](#publishing-to-grafanacom) |
 
-Because there is only one copy, those three cannot disagree. Nothing is ever clicked
+Because there is only one copy, those four cannot disagree — the catalog upload is
+derived from the same file rather than maintained beside it. Nothing is ever clicked
 into place, and no egress to grafana.com is needed at install time.
 
 | Board | File | uid | grafana.com id | Covers |
 |-------|------|-----|--|--------|
 | GPU Simulation — DCGM Overview | `gpu-sim-dcgm.json` | `gpu-sim-dcgm` | [25618](https://grafana.com/grafana/dashboards/25618) | GPU util / memory / temp / power |
-| LLM Simulation — vLLM Serving Overview | `llm-sim-overview.json` | `llm-sim-overview` | [25619](https://grafana.com/grafana/dashboards/25619) | First-token latency, throughput, queue depth, KV cache, prefix-cache reuse |
+| LLM Simulation — vLLM Serving Overview | `llm-sim-overview.json` | `llm-sim-overview` | [25620](https://grafana.com/grafana/dashboards/25620) | First-token latency, throughput, queue depth, KV cache, prefix-cache reuse |
 
 **The filename is the uid.** `install.sh` derives the ConfigMap name from it
 (`<uid>-dashboard`), and `scripts/config.sh` builds the `/d/<uid>` deep link that
@@ -123,9 +124,9 @@ It carries more weight than the GPU one, because this board is the one that does
 import-and-go: five panels read `llm:*` recording rules and two more are simulator-only,
 so the catalog page has to say which, and give the rules inline.
 
-⚠️ **25619 has an unpublished revision.** The prefix-cache panel is in the repo file and in
+⚠️ **25620 has an unpublished revision.** The prefix-cache panel is in the repo file and in
 `dist/`, and the catalog still serves the board without it. Re-submit as a **new revision
-of 25619**, never as a new dashboard: a second upload mints a second id, and everyone who
+of 25620**, never as a new dashboard: a second upload mints a second id, and everyone who
 already imported the first silently stops receiving fixes.
 
 A logo each, 512×512, is in [`docs/logos/`](../../docs/logos/) — `gpu-sim-dcgm.png` and
