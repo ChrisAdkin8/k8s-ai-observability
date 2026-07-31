@@ -23,6 +23,16 @@ Comparison links are at the foot of this file, one per released version.
 
 ## [Unreleased]
 
+## [0.4.0] — 2026-07-31
+
+**This release exists because both dashboards got published.** Once 25618 and 25619 were
+in the grafana.com catalog, people arrived with a Prometheus of their own, imported a
+board, and found panels blank for want of the `llm:*` recording rules — with no route
+forward that did not involve installing a second monitoring stack over their existing one.
+`--skip-monitoring` and `verify --byo` are that route. Everything else here is the
+supporting cast: the metric families the boards now claim, the drift checks that keep
+those claims honest, and the CI legs that stop the alternative paths rotting.
+
 ### Added
 
 - **A supported installation mode: `./scripts/install.sh <target> --skip-monitoring`,
@@ -690,7 +700,8 @@ Initial public release. Build and test GPU and LLM observability without a GPU.
   a GPU, running the advertised `task local:up` end to end including every acceptance
   check, with a diagnostics bundle on failure and weekly upstream-drift detection.
 
-[Unreleased]: https://github.com/ChrisAdkin8/k8s-ai-observability/compare/v0.3.0...HEAD
+[Unreleased]: https://github.com/ChrisAdkin8/k8s-ai-observability/compare/v0.4.0...HEAD
+[0.4.0]: https://github.com/ChrisAdkin8/k8s-ai-observability/compare/v0.3.0...v0.4.0
 [0.3.0]: https://github.com/ChrisAdkin8/k8s-ai-observability/compare/v0.2.0...v0.3.0
 [0.2.0]: https://github.com/ChrisAdkin8/k8s-ai-observability/compare/v0.1.0...v0.2.0
 [0.1.0]: https://github.com/ChrisAdkin8/k8s-ai-observability/releases/tag/v0.1.0
