@@ -60,10 +60,11 @@ gained sub-second resolution (`0.3/0.5/0.8`) it previously had none of.
 
 ## Keeping them honest
 
-`scripts/check-vllm-buckets.py` fetches `loggers.py` and asserts each of the three lists
-appears there verbatim. It runs weekly in CI beside the Helm-chart drift detection —
-**scheduled and dispatch only**, so an upstream release never reddens a contributor's
-pull request.
+`scripts/check-vllm-buckets.py` fetches `loggers.py` and checks **both** halves of the
+surface: each of the three bucket lists still appears there verbatim, and every `vllm:`
+name this repo emits is still declared upstream. It runs weekly in CI beside the
+Helm-chart drift detection — **scheduled and dispatch only**, so an upstream release
+never reddens a contributor's pull request.
 
 It exists because nothing else could have caught this. Every other test in this repo
 reads the simulator, and the simulator was perfectly consistent with itself — it was
@@ -74,6 +75,30 @@ suite needs a check that points outside it.
 python3 scripts/check-vllm-buckets.py   # 0 in sync · 1 drift · 2 could not check
 ```
 
-Drift there means updating `scripts/llm-sim.py` and then re-deriving the expected values
+The two directions are **not** treated alike, and the asymmetry is the point:
+
+| | Means | Exit |
+|--|--|--|
+| We emit a name upstream no longer declares | drift — the rename case that cost two releases | **1** |
+| Upstream declares a name we do not emit | a gap, printed in full | **0** |
+
+Upstream declares around 40 `vllm:` metrics and this simulator emits 10 of them, so the
+gap list is long by design. Reddening a weekly run for each metric vLLM adds would train
+everyone to ignore it; printing the list keeps the distance visible, which is the thing
+that was previously invisible. It is also the list to pick from when closing one.
+
+The `_total` rule is the subtle part. Upstream declares counters *without* the suffix and
+the Prometheus client appends it at exposition time — so our `vllm:prompt_tokens_total`
+and upstream's `vllm:prompt_tokens` are one metric — but `vllm:iteration_tokens_total` is
+declared *with* it, as a histogram. A blanket strip would report "in sync" on a name with
+no upstream counterpart at all, which the real run cannot reveal because it prints a
+plausible answer either way. So the rule is unit-tested against a committed fixture,
+`tests/fixtures/upstream-vllm-metric-names.txt`, on every push:
+
+```sh
+python3 scripts/check-vllm-buckets.py --selftest   # no network
+```
+
+Drift means updating `scripts/llm-sim.py` and then re-deriving the expected values
 in `tests/rules/llm-rules_test.yaml`, which are pinned to specific boundaries on purpose
 and will fail until you do.

@@ -25,6 +25,47 @@ Comparison links are at the foot of this file, one per released version.
 
 ### Added
 
+- **The weekly drift check now watches the metric SET, not just the bucket boundaries**
+  (`scripts/check-vllm-buckets.py`). It ast-walks both files for string literals beginning
+  `vllm:` and compares the sets, in the same structure-blind way the bucket check already
+  worked.
+
+  Buckets were only ever the narrower half of the risk that created that file. Two vLLM
+  metrics were *renamed* by the V1 engine and this repo shipped the old spellings for two
+  releases with every test green — a name we emit that upstream has dropped is a panel
+  that goes blank against a real deployment, which is the same silent failure one level
+  up. The check now covers it.
+
+  The two directions are deliberately not treated alike:
+
+  | | Means | Exit |
+  |--|--|--|
+  | We emit a name upstream no longer declares | drift — the case that cost two releases | **1** |
+  | Upstream declares a name we do not emit | a gap, printed in full | **0** |
+
+  Upstream declares ~38 `vllm:` metrics and this simulator emits 10, so the gap list is
+  long by design and printing it is the point: it makes the distance **visible instead of
+  silent**, which is what stops it growing back. Reddening a scheduled run every time vLLM
+  adds a metric would just train everyone to ignore the job.
+
+  ⚠️ The `_total` rule is the subtle part and it is now unit-tested rather than trusted.
+  Upstream declares counters *without* the suffix and the Prometheus client appends it at
+  exposition time, so our `vllm:prompt_tokens_total` is upstream's `vllm:prompt_tokens` —
+  but `vllm:iteration_tokens_total` is declared *with* it, as a histogram. A blanket strip
+  reports "in sync" on a name with no upstream counterpart at all, and the real run cannot
+  reveal that because it prints a plausible answer either way. So the matching runs against
+  a committed fixture (`tests/fixtures/upstream-vllm-metric-names.txt`) in the `fast` CI
+  job, on every push, with no network:
+
+  ```sh
+  task drift-test    # python3 scripts/check-vllm-buckets.py --selftest
+  ```
+
+  The file keeps its name. It is cited by `Taskfile.yml`, `ci.yml`, `CONTRIBUTING.md`,
+  `docs/versions.md` and `docs/llm-simulation.md`, and renaming it to touch five files
+  buys a better noun and nothing else — the docstring is the specification. The CI job is
+  renamed, since a job name costs nothing to move.
+
 - **`CONTRIBUTING.md`.** The repo's invariants were already documented — scattered across
   `config.sh`, `manifests/dashboards/README.md`, `architecture.md` and several file
   headers. A contributor had to find them first. This collects the ones that, if broken,

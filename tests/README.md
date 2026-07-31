@@ -6,6 +6,7 @@ Everything here runs in **seconds, with no cluster and no network**.
 |--|--|
 | `task rule-tests` (or `./scripts/rule-tests.sh`) | every recording rule and alert in `manifests/alerts/` |
 | `task selftest` (or `python3 scripts/llm-sim.py --selftest`) | the simulator's Prometheus exposition — bucket monotonicity, `+Inf` consistency, `HELP`/`TYPE`, and that rendering `/metrics` observes nothing |
+| `task drift-test` (or `python3 scripts/check-vllm-buckets.py --selftest`) | the matching rules of the weekly upstream drift check, against a fixture |
 
 `scripts/verify.sh` is the third check and a different kind of thing: it asserts the
 whole path end to end against a running cluster, and takes about six minutes because
@@ -28,6 +29,7 @@ thing to ship alongside that claim.
 ```
 tests/rules/gpu-rules_test.yaml    # promtool tests for gpu-prometheusrule.yaml
 tests/rules/llm-rules_test.yaml    # promtool tests for llm-prometheusrule.yaml
+tests/fixtures/                    # committed inputs for the two Python selftests
 ```
 
 `scripts/rule-tests.sh` extracts the `spec:` block from each PrometheusRule custom
@@ -56,6 +58,15 @@ Then check the test can fail: change the threshold or a coefficient in
 `manifests/alerts/`, re-run, confirm it goes red, and put it back. Two limitations are
 already documented inline where they apply — the `clamp_min` divide-by-zero guard and
 the `rate()` window are both invisible to these tests, and the comments say why.
+
+## Fixtures
+
+`tests/fixtures/` holds committed inputs for the Python selftests. They exist to pin a
+case the thing being tested cannot demonstrate by running.
+
+| File | Pins |
+|--|--|
+| `upstream-vllm-metric-names.txt` | a **stubbed** upstream metric set for `check-vllm-buckets.py --selftest`. Never update it to track upstream — the real file is the moving thing the drift check watches, and testing against it would make the test drift with its own input |
 
 ## promtool
 
