@@ -32,6 +32,28 @@ observes into the metrics exactly as an instrumented server would. Serving
 /metrics is a pure read: it never advances a counter or observes a sample.
 That matters because `curl`-ing the endpoint during development, and kubelet's
 readiness probe, must not perturb what Prometheus sees.
+
+PREFIX CACHING HAS NO LATENCY EFFECT HERE, BY CONSTRUCTION
+----------------------------------------------------------
+`prefix_cache_hit_rate` moves the two prefix-cache counters and NOTHING else.
+On real hardware a cache hit skips recomputation and shortens TTFT. It cannot
+here, because prefill is FLAT rather than token-proportional:
+
+    prefill = p["base_ttft_seconds"] * self._jitter()          # _admit()
+
+There is no per-token work for a cached block to remove, so any speedup would
+have to be invented. Making prefill token-proportional is a genuine modelling
+change rather than a tweak, and it re-derives, in this order:
+`service = base_ttft + gen_mean * itl` in capacity_rps(), the 2.74 rps capacity
+figure, both shipped profiles in manifests/llm/10-profiles.yaml, the
+LLMHighTTFT 2s threshold, verify.sh's L3b bound, and every expected value in
+tests/rules/llm-rules_test.yaml.
+
+An honest zero beats a fabricated speedup, and a panel built against these
+counters still transfers: what a real deployment plots is the RATIO, and the
+ratio is right whether or not the latency here responds to it. --selftest
+asserts TTFT is byte-identical across hit rates, so that nobody "fixes" the
+flat-prefill model without re-deriving the arithmetic above.
 """
 
 from __future__ import annotations
@@ -129,15 +151,65 @@ METRIC_SURFACES = {
     "inter_token":    ("vllm:time_per_output_token_seconds", "vllm:inter_token_latency_seconds"),
 }
 
+# ⚠️ A RESHAPE, not a rename — and it is the sharpest upgrade-rehearsal case
+# this repo has. VERIFIED against vllm/engine/metrics.py at tag v0.6.6: v0
+# exposed prefix caching as a GAUGE OF A RATIO, vllm:gpu_prefix_cache_hit_rate.
+# V1 replaced it with TWO COUNTERS, vllm:prefix_cache_queries and
+# vllm:prefix_cache_hits.
+#
+# A panel bound to the v0 gauge cannot be repaired by substituting a name: the
+# replacement has to be rate(hits)/rate(queries). Neither of the two renames
+# above makes that point, which is why this one is worth emitting under `both`.
+#
+# Same positional (v0, v1) convention as METRIC_SURFACES, but each side is a
+# TUPLE of names — a 1:1 map cannot say "one gauge becomes two counters", and
+# special-casing it in render() would put branching in the one path where the
+# no-observation-on-scrape rule is easiest to break. scripts/check-vllm-buckets.py
+# reads the v0 side of BOTH tables to keep deliberate aliases out of its drift
+# report.
+#
+# The cpu_ variant is deliberately skipped. Nothing here models CPU KV offload
+# and V1 dropped it entirely — which is precisely why gpu_ stopped
+# distinguishing anything, the same reasoning already recorded for
+# gpu_cache_usage_perc in manifests/alerts/llm-prometheusrule.yaml.
+METRIC_RESHAPES = {
+    #  logical name     v0                                    v1
+    "prefix_cache": (("vllm:gpu_prefix_cache_hit_rate",),
+                     ("vllm:prefix_cache_queries_total",
+                      "vllm:prefix_cache_hits_total")),
+}
+
+# What each prefix-cache name carries: (renderer, reading, HELP). A table rather
+# than three branches in render(), so that path stays a loop over names.
+PREFIX_CACHE_SERIES = {
+    "vllm:prefix_cache_queries_total": (
+        "counter", "queries", "Prefix cache queries, in terms of number of "
+                              "queried tokens."),
+    "vllm:prefix_cache_hits_total": (
+        "counter", "hits", "Prefix cache hits, in terms of number of cached "
+                           "tokens."),
+    "vllm:gpu_prefix_cache_hit_rate": (
+        "gauge", "ratio", "GPU prefix cache hit rate, 0 to 1. Superseded: the "
+                          "V1 engine replaced this gauge with two counters."),
+}
+
 
 def surface_names(key, surface):
-    """Every name `key` is emitted under, for the chosen surface."""
-    v0, v1 = METRIC_SURFACES[key]
+    """Every name `key` is emitted under, for the chosen surface.
+
+    Reads whichever table holds `key`. METRIC_SURFACES entries carry one name
+    per side and METRIC_RESHAPES entries carry several; normalising here is what
+    lets render() and --selftest stay indifferent to which kind a metric is.
+    """
+    if key in METRIC_SURFACES:
+        v0, v1 = [(name,) for name in METRIC_SURFACES[key]]
+    else:
+        v0, v1 = METRIC_RESHAPES[key]
     if surface == V0:
-        return [v0]
+        return list(v0)
     if surface == V1:
-        return [v1]
-    return [v1, v0]          # v1 first: it is what a current deployment emits
+        return list(v1)
+    return list(v1) + list(v0)   # v1 first: it is what a current deployment emits
 
 
 # Memory safety. The profile is operator-editable, so the ceiling cannot depend
@@ -162,6 +234,21 @@ DEFAULT_PROFILE = {
     "base_ttft_seconds": 0.08,
     "base_itl_seconds": 0.015,
     "kv_cache_tokens_capacity": 32768,
+    # Prefix caching. 0.0 by default because a hit rate is a property of the
+    # WORKLOAD — how much prompt prefix successive requests share — not of the
+    # server, so there is no defensible number to default to. The shipped
+    # profiles set it; manifests/llm/10-profiles.yaml says where those two
+    # numbers come from, which is not the same place capacity_rps comes from.
+    #
+    # 0.0 means a cache that is consulted and always misses, NOT one that is
+    # switched off: queries still advance, hits stay at zero, and both series
+    # are still emitted. An absent series and a zero one are different things to
+    # a panel.
+    "prefix_cache_hit_rate": 0.0,
+    # vLLM's KV block size. Hits are quantised to whole blocks upstream — a
+    # partial trailing block is not cacheable — so they are here too. 16 is
+    # vLLM's default.
+    "kv_block_tokens": 16,
     "finish_reasons": {"stop": 0.90, "length": 0.09, "abort": 0.01},
     "seed": None,
 }
@@ -207,6 +294,16 @@ def validate_profile(raw):
 
     if not isinstance(p.get("model_name"), str) or not p["model_name"]:
         raise ProfileError("model_name must be a non-empty string")
+
+    rate = p.get("prefix_cache_hit_rate")
+    if not isinstance(rate, (int, float)) or not 0.0 <= rate <= 1.0:
+        raise ProfileError(f"'prefix_cache_hit_rate' must be a number in 0.0-1.0, "
+                           f"got {rate!r}")
+    p["prefix_cache_hit_rate"] = float(rate)
+
+    block = p.get("kv_block_tokens")
+    if not isinstance(block, int) or block <= 0:
+        raise ProfileError(f"'kv_block_tokens' must be a positive integer, got {block!r}")
 
     for key in ("prompt_tokens", "generation_tokens"):
         d = p.get(key)
@@ -309,8 +406,12 @@ class Histogram:
 # The simulation
 # --------------------------------------------------------------------------
 class Request:
+    # queue_time and prefill are the two terms of ttft, kept separately rather
+    # than recomputed: ttft is BUILT from them in _admit(), so
+    # `ttft == queue_time + prefill` is an identity by construction, and
+    # --selftest asserts it as one.
     __slots__ = ("arrived", "prompt_tokens", "gen_tokens",
-                 "ttft", "itl", "finish_at", "reason")
+                 "ttft", "queue_time", "prefill", "itl", "finish_at", "reason")
 
 
 class Simulator:
@@ -340,10 +441,25 @@ class Simulator:
         self.success_total = {r: 0 for r in profile["finish_reasons"]}
         self.rejected_total = 0
         self.preemptions_total = 0
+        self.prefix_cache_queries_total = 0
+        self.prefix_cache_hits_total = 0
+        # Fractional hits carried between requests, so the emitted ratio is the
+        # number the profile asked for. See _admit().
+        self._prefix_cache_carry = 0.0
 
         self.h_ttft = Histogram(TTFT_BUCKETS)
         self.h_tpot = Histogram(TPOT_BUCKETS)
         self.h_e2e = Histogram(E2E_BUCKETS)
+        # ⚠️ E2E_BUCKETS, not a fourth constant. VERIFIED against
+        # vllm/v1/metrics/loggers.py on 2026-07-31: upstream declares ONE
+        # `request_latency_buckets` list and passes it to BOTH
+        # vllm:e2e_request_latency_seconds and vllm:request_queue_time_seconds,
+        # and E2E_BUCKETS is that list, all 21 values. So the correct boundaries
+        # are already in this file, and check-vllm-buckets.py's existing
+        # E2E_BUCKETS entry already watches them on behalf of both histograms.
+        # Transcribing a second copy would add a list to drift, in the one repo
+        # that refuses second copies.
+        self.h_queue = Histogram(E2E_BUCKETS)
 
         self.profile_generation = 1
         self.profile_reload_errors = 0
@@ -439,13 +555,43 @@ class Simulator:
             #   (max_concurrency / arrival_rate - service) / penalty
             # throughput drops below arrival and the queue can never drain, which
             # pinned every profile at max_in_flight regardless of its arrival rate.
+            # ⚠️ FLAT, not token-proportional. This is the reason a prefix-cache
+            # hit changes no latency in this model — see the file header before
+            # changing it.
             prefill = p["base_ttft_seconds"] * self._jitter()
 
             # Reported TTFT still includes the wait — that is what vLLM measures —
-            # but taken from the clock rather than modelled from queue depth.
-            req.ttft = (self.now - req.arrived) + prefill
+            # but taken from the clock rather than modelled from queue depth. The
+            # wait is kept as its own term rather than being recovered by
+            # subtraction later: vllm:request_queue_time_seconds observes exactly
+            # this number, so TTFT = queue_time + prefill is an identity here and
+            # not an approximation of one.
+            req.queue_time = self.now - req.arrived
+            req.prefill = prefill
+            req.ttft = req.queue_time + prefill
             req.itl = (p["base_itl_seconds"]
                        * (1.0 + CONGESTION_AT_FULL_LOAD * load) * self._jitter())
+
+            # Prefix cache, counted in TOKENS and quantised to whole KV blocks.
+            #
+            # ⚠️ TOKENS, not requests, and that distinction is the whole point of
+            # modelling it at all. A per-request counter gives a ratio that does
+            # not respond to prompt length, so a panel built here would behave
+            # differently against a real deployment — which defeats the purpose.
+            #
+            # Deterministic rather than per-block Bernoulli, so --selftest is
+            # reproducible without depending on the profile's `seed`. A plain
+            # floor() would bias the ratio DOWN by half a block on every request
+            # — at 512 tokens that is ~1.5 percentage points, enough for a
+            # profile asking for 0.15 to plot at 0.134 and read as a bug — so the
+            # fraction is carried to the next request instead.
+            block = p["kv_block_tokens"]
+            self.prefix_cache_queries_total += req.prompt_tokens
+            want = self._prefix_cache_carry + (req.prompt_tokens // block) \
+                * p["prefix_cache_hit_rate"]
+            whole = int(want)
+            self._prefix_cache_carry = want - whole
+            self.prefix_cache_hits_total += whole * block
             req.reason = self._pick_reason()
             req.finish_at = self.now + prefill + req.gen_tokens * req.itl
             self.running.append(req)
@@ -463,7 +609,12 @@ class Simulator:
         # Histogram.observe.
         self.h_tpot.observe(req.itl, weight=req.gen_tokens)
         self.h_e2e.observe(self.now - req.arrived)
-        self.observations += 3
+        # Observed HERE and nowhere else, at the same point as TTFT, from the
+        # term TTFT was built out of. Anything that re-derives it — from queue
+        # depth, from a second clock reading — breaks the identity the selftest
+        # asserts, and does so without failing anything else.
+        self.h_queue.observe(req.queue_time)
+        self.observations += 4
 
     # -- derived gauges ---------------------------------------------------
     def kv_cache_usage(self):
@@ -487,6 +638,8 @@ class Simulator:
             out.append(f"# TYPE {name} counter")
             out.append(f"{name}{labels(lbls)} {fmt(value)}")
 
+        emit = {"gauge": gauge, "counter": counter}
+
         # --- vLLM surface -------------------------------------------------
         # NOTE: no `source` label on any vllm:* series. Real vLLM does not emit
         # one, and an extra label breaks exact-match joins against a real
@@ -506,6 +659,23 @@ class Simulator:
         counter("vllm:num_preemptions_total", self.preemptions_total,
                 "Cumulative number of preemptions from the engine.")
 
+        # Prefix cache. Which names appear depends on the surface: two counters
+        # on V1, one gauge of the ratio on v0. Every reading below is computed
+        # from state the worker already advanced — nothing here observes.
+        prefix_cache = {
+            "queries": self.prefix_cache_queries_total,
+            "hits": self.prefix_cache_hits_total,
+            # v0's gauge is the ratio the two V1 counters express. Cumulative
+            # rather than windowed: nothing here models eviction, so the lifetime
+            # ratio and a windowed one converge, and a windowed gauge would need
+            # state only a scrape could advance.
+            "ratio": (self.prefix_cache_hits_total / self.prefix_cache_queries_total
+                      if self.prefix_cache_queries_total else 0.0),
+        }
+        for name in surface_names("prefix_cache", self.surface):
+            kind, reading, help_text = PREFIX_CACHE_SERIES[name]
+            emit[kind](name, prefix_cache[reading], help_text)
+
         out.append("# HELP vllm:request_success_total Count of successfully processed requests.")
         out.append("# TYPE vllm:request_success_total counter")
         for reason in sorted(self.success_total):
@@ -519,6 +689,10 @@ class Simulator:
                                       "Histogram of inter-token latency in seconds.")
         out += self.h_e2e.render("vllm:e2e_request_latency_seconds", model,
                                  "Histogram of end to end request latency in seconds.")
+        # No surface entry: VERIFIED at tag v0.6.6 that v0 exposed this under the
+        # same name, so there is nothing to alias.
+        out += self.h_queue.render("vllm:request_queue_time_seconds", model,
+                                   "Histogram of time spent in WAITING phase for request.")
 
         # --- this rig's own series (safe to label freely) ------------------
         gauge("llmsim_profile_generation", self.profile_generation,
@@ -648,6 +822,10 @@ def detect_binding():
 
 DEFAULT_PORT = 9401
 
+# Committed inputs for --selftest. See tests/README.md.
+FIXTURES = os.path.join(os.path.dirname(os.path.abspath(__file__)),
+                        os.pardir, "tests", "fixtures")
+
 
 def default_port():
     """Listen port from the environment, or DEFAULT_PORT.
@@ -709,11 +887,16 @@ def selftest():
     lines = [ln for ln in text.splitlines() if ln and not ln.startswith("#")]
 
     check(sim.h_ttft.count > 0, "requests completed and TTFT was observed")
+    check(sim.h_queue.count == sim.h_ttft.count,
+          "queue time is observed once per completion, alongside TTFT")
+    check(sim.prefix_cache_queries_total > 0,
+          "prefix cache queries advance (every prompt token is looked up)")
     check(monotonic_ok, "counters never decrease across steps")
 
     # Buckets cumulative and non-decreasing, with a +Inf that equals _count.
     hist_ok, inf_ok, sum_ok = True, True, True
-    for hist, name in ((sim.h_ttft, "ttft"), (sim.h_tpot, "tpot"), (sim.h_e2e, "e2e")):
+    for hist, name in ((sim.h_ttft, "ttft"), (sim.h_tpot, "tpot"),
+                       (sim.h_e2e, "e2e"), (sim.h_queue, "queue")):
         running = 0
         prev = -1
         for i in range(len(hist.bounds)):
@@ -736,11 +919,17 @@ def selftest():
     check(len(types) == len(set(types)), "one # TYPE per metric family")
     check(set(types) == set(helps), "every family has both # HELP and # TYPE")
 
-    # The E2 requirement: rendering must not observe anything.
-    before = sim.observations
-    sim.render()
-    sim.render()
-    check(sim.observations == before, "rendering performs no observation (pure read)")
+    # The E2 requirement: rendering must not observe anything. Extended to the
+    # non-histogram counters, and to the rendered text itself — the prefix-cache
+    # series are computed at render time, which is exactly where a "let me just
+    # advance this here" would be easiest to slip in and hardest to see.
+    before = (sim.observations, sim.prefix_cache_queries_total,
+              sim.prefix_cache_hits_total)
+    first, second = sim.render(), sim.render()
+    after = (sim.observations, sim.prefix_cache_queries_total,
+             sim.prefix_cache_hits_total)
+    check(after == before, "rendering performs no observation (pure read)")
+    check(first == second, "two consecutive renders are identical")
 
     # No vllm:* series may carry a `source` label — it would break exact-match
     # joins against a real deployment.
@@ -779,6 +968,20 @@ def selftest():
     check(emits(ot, v0_kv) and not emits(ot, v1_kv),
           "surface 'v0' emits only the legacy names")
 
+    # ⚠️ Prefix caching is the RESHAPE case, and it is asserted per surface for a
+    # different reason than the two renames above. A rename can be repaired by
+    # substituting a name; this cannot — v0's single gauge of a ratio became two
+    # counters, so a panel bound to the old name needs rate(hits)/rate(queries).
+    # The counts differ by surface, which is the thing METRIC_SURFACES could not
+    # express, so assert the counts and not just the presence.
+    (v0_pc,), v1_pc = METRIC_RESHAPES["prefix_cache"]
+    check(all(emits(text, n) for n in v1_pc) and not emits(text, v0_pc),
+          "surface 'v1' emits the two prefix-cache counters and no gauge")
+    check(emits(ot, v0_pc) and not any(emits(ot, n) for n in v1_pc),
+          "surface 'v0' emits the prefix-cache gauge and neither counter")
+    check(all(emits(bt, n) for n in (v0_pc,) + v1_pc),
+          "surface 'both' emits all three prefix-cache series")
+
     # Duplicated families under 'both' must still each carry exactly one TYPE,
     # or Prometheus rejects the whole scrape.
     btypes = [ln.split()[2] for ln in bt.splitlines() if ln.startswith("# TYPE ")]
@@ -794,17 +997,93 @@ def selftest():
     check(profile["arrival_rate_rps"] < cap,
           f"shipped profile arrival {profile['arrival_rate_rps']}rps is below capacity {cap:.2f}rps")
 
+    # --- queue time, asserted as an IDENTITY rather than a statistic ------
+    # ttft is BUILT as queue_time + prefill in _admit(), and the histogram
+    # observes that same first term — so this must hold exactly for every
+    # request, floating point aside. That is strictly stronger than comparing a
+    # p95 against a p95 with a tolerance, which can pass while the wiring is
+    # wrong: observe the WHOLE ttft into the queue histogram and a quantile
+    # comparison still looks approximately right at this rig's operating point,
+    # where prefill is 0.08s against a queue wait of seconds.
+    #
+    # Subclassed rather than sampled from sim.running, because a request admitted
+    # and completed inside one step never appears there.
+    seen = []
+
+    class Recording(Simulator):
+        def _complete_one(self):
+            req = min(self.running, key=lambda r: r.finish_at)
+            seen.append((req.ttft, req.queue_time, req.prefill))
+            super()._complete_one()
+
+    rec = Recording(validate_profile(dict(DEFAULT_PROFILE, seed=99)), 0.0)
+    for step in range(1, 61):
+        rec.advance_to(step * 5.0)
+    check(bool(seen) and all(abs(t - (q + f)) < 1e-9 for t, q, f in seen),
+          f"ttft == queue_time + prefill for all {len(seen)} completed requests")
+
+    # --- prefix cache: the rate is emitted, and it changes NO latency -----
+    def drive(rate, seed=4242):
+        s = Simulator(validate_profile(dict(DEFAULT_PROFILE, seed=seed,
+                                            prefix_cache_hit_rate=rate)), 0.0)
+        for step in range(1, 61):
+            s.advance_to(step * 5.0)
+        return s
+
+    base = drive(0.0)
+    check(base.prefix_cache_hits_total == 0 and base.prefix_cache_queries_total > 0,
+          "a 0.0 hit rate misses every lookup rather than skipping it")
+    for want in (0.35, 0.15):                     # the two shipped tenant rates
+        run = drive(want)
+        got = run.prefix_cache_hits_total / run.prefix_cache_queries_total
+        # Tolerance, not equality, and the shortfall is real rather than noise:
+        # a partial trailing block is not cacheable, so at a 512-token mean about
+        # 1.6% of queried tokens can never be hits.
+        check(abs(got - want) < 0.02,
+              f"hit rate {want} emits a ratio of {got:.3f}")
+        # ⚠️ THE POINT OF W1.4. Same seed, same everything — the RNG stream is
+        # untouched by the prefix-cache accounting, so the TTFT histogram must be
+        # bit-identical. If this ever fails, someone has made prefill
+        # token-proportional without re-deriving the capacity arithmetic, the
+        # profiles, the 2s threshold and the promtool expectations. Fix the
+        # arithmetic, do not relax the check.
+        check((run.h_ttft.count, run.h_ttft.total, run.h_ttft.buckets)
+              == (base.h_ttft.count, base.h_ttft.total, base.h_ttft.buckets),
+              f"TTFT is unchanged at hit rate {want} (no latency effect, by construction)")
+
+    # --- the committed 0.0 fixture ---------------------------------------
+    # An absent series and a zero one are different things to a panel, so the
+    # case a profile is most likely to be left in is pinned in the repo rather
+    # than constructed here.
+    fixture = os.path.join(FIXTURES, "profile-no-prefix-cache.json")
+    try:
+        zero = Simulator(read_profile_file(fixture), 0.0)
+    except Exception as exc:                               # noqa: BLE001
+        check(False, f"tests/fixtures/profile-no-prefix-cache.json is readable ({exc})")
+    else:
+        for step in range(1, 61):
+            zero.advance_to(step * 5.0)
+        zt = {ln.split("{")[0]: ln.rsplit(" ", 1)[1]
+              for ln in zero.render().splitlines()
+              if ln and not ln.startswith("#")}
+        check(zt.get("vllm:prefix_cache_queries_total", "0") != "0"
+              and zt.get("vllm:prefix_cache_hits_total") == "0",
+              "the 0.0 fixture still EMITS both counters, hits flat at zero")
+
     # Malformed profiles are rejected, not fatal.
     bad = 0
     for broken in ({"finish_reasons": {"stop": 0.5}}, {"max_concurrency": 0},
-                   {"model_name": ""}, []):
+                   {"model_name": ""}, [],
+                   {"prefix_cache_hit_rate": 1.5},         # a rate, not a percentage
+                   {"prefix_cache_hit_rate": "0.35"},      # JSON string, not a number
+                   {"kv_block_tokens": 0}):
         try:
             validate_profile(broken)
         except ProfileError:
             bad += 1
         except Exception:                                  # noqa: BLE001
             pass
-    check(bad == 4, "malformed profiles raise ProfileError rather than crashing")
+    check(bad == 7, "malformed profiles raise ProfileError rather than crashing")
 
     print()
     if failures:

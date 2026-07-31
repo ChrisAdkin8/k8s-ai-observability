@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # verify.sh <eks|gke|local> — assert this repo's acceptance criteria: the GPU checks 1-5
-# (including 4b/4c/4d) and the LLM checks L1-L6. Both sets of numbers are cited elsewhere
+# (including 4b/4c/4d) and the LLM checks L1-L7. Both sets of numbers are cited elsewhere
 # in the repo and in commit history — do not renumber them.
 set -euo pipefail
 cd "$(dirname "${BASH_SOURCE[0]}")/.."
@@ -222,7 +222,7 @@ done
   || fail "GPUHighUtilization did not fire within timeout (check the 'gpu-busy' workload util range 85-99 vs the rule's >80 threshold and 1m for:)"
 
 # ============================================================================
-# LLM simulation checks — numbered L1..L6 so they can never be confused with
+# LLM simulation checks — numbered L1..L7 so they can never be confused with
 # the GPU checks above (which already use 1..5 and 4b/4c/4d).
 #
 # ⚠️ EVERY check below is phrased so it returns ZERO SERIES on failure.
@@ -337,6 +337,26 @@ for _ in $(seq 1 30); do
 done
 [[ "$llm_fired" -eq 1 ]] && pass "L6 LLMHighTTFT is firing (driven by llm-saturated)" \
   || fail "L6 LLMHighTTFT did not fire — is llm-saturated Running, and is its arrival_rate_rps still above the 2.74 rps capacity? (manifests/llm/10-profiles.yaml)"
+
+# L7. queue time and prefix caching actually SURVIVE A REAL SCRAPE.
+#     Everything else that covers these two families is a selftest assertion or a
+#     promtool test, and neither of those leaves the repo: --selftest proves the
+#     simulator emits a series, and this proves Prometheus receives one. They are
+#     different claims, and the gap between them is where a ServiceMonitor,
+#     a relabel rule or an exposition-format mistake lives.
+#
+#     Single-shot, unlike L3 — by the time this runs, L6 has just spent up to
+#     five minutes polling, so the first scrape landed long ago. Anything empty
+#     here is missing, not late.
+llm_qt="$(promql_count 'rate(vllm:request_queue_time_seconds_count[5m]) > 0')"
+[[ "${llm_qt:-0}" -gt 0 ]] && pass "L7 queue-time histogram is receiving observations" \
+  || fail "L7 no vllm:request_queue_time_seconds observations — histogram present but empty, or not scraped at all"
+
+# `and` on two label-less vectors: empty if EITHER counter is absent, which keeps
+# this inside the zero-series-on-failure rule this block opens with.
+llm_pc="$(promql_count 'count(vllm:prefix_cache_queries_total) > 0 and count(vllm:prefix_cache_hits_total) > 0')"
+[[ "${llm_pc:-0}" -gt 0 ]] && pass "L7 both prefix-cache counters are present" \
+  || fail "L7 vllm:prefix_cache_queries_total and/or _hits_total absent — are the simulator pods running the current scripts/llm-sim.py? (install.sh rebuilds the llm-sim-script ConfigMap, but a running pod keeps the old mount until it restarts)"
 
 graf_pf_stop
 prom_pf_stop
