@@ -68,3 +68,28 @@ PROMTOOL=/path/to/promtool task rule-tests   # or point at one you already have
 
 `task tools` reports whether it is on PATH. CI pins the version in
 `.github/workflows/ci.yml` (`PROMETHEUS_VERSION`).
+
+## ⚠️ Check a new expected value on amd64 before committing it
+
+`histogram_quantile` does not return bit-identical values on every architecture. A test
+that pins an interpolated percentile can pass on an Apple Silicon laptop and fail on CI's
+`ubuntu-latest`, one ULP apart — this has already happened here, with `(1.0, 2.5]`
+returning `2.4250000000000003` on arm64 and `2.425` on amd64. promtool compares exactly,
+so whichever you pin, the other fails. The alert annotation moves too, flipping between
+`2.42s` and `2.43s` under `%.2f`.
+
+The mechanism is not established and the inline comment in `rules/llm-rules_test.yaml`
+deliberately does not guess at one. The rule under test is unaffected — `> 2` is a
+comparison, and both values are above 2. Only exact-equality assertions are.
+
+So if you add or change an expected percentile, run it against a real linux/amd64
+promtool as well. No cluster, and the emulation is the only thing that needs Docker:
+
+```sh
+mkdir -p /tmp/w && ./scripts/extract.sh rules /tmp/w && cp tests/rules/*_test.yaml /tmp/w/
+docker run --rm --platform linux/amd64 -v "$PWD":/w -w /w \
+  --entrypoint promtool prom/prometheus:v3.7.3 test rules /tmp/w/*_test.yaml
+```
+
+Expectations currently verified green on both: `0.09`, `0.099`, `0.0998`, `0.9875`,
+`0.02425`, `4.875`, `78`.

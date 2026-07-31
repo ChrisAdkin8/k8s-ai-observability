@@ -136,19 +136,51 @@ tests:
   # this block is why that is not taken on trust again.
   #
   # 2 is NOT a bucket boundary in either layout — V1 runs ... 0.75, 1.0, 2.5 ...
-  # so the threshold sits INSIDE (1.0, 2.5]. That is the interesting case: a
-  # tenant whose mass lands in that bucket reports a p95 of 2.425 and fires,
-  # while one bucket lower reports 0.9875 and does not. The block above proves
-  # the threshold works with three orders of magnitude of daylight either side;
-  # this one proves it works where it is actually delicate.
+  # so the threshold sits INSIDE (1.0, 2.5]. The block above proves the rule
+  # works with three orders of magnitude of daylight either side; this one
+  # brackets it as tightly as can be done PORTABLY.
+  #
+  # ⚠️ "PORTABLY" IS A REAL CONSTRAINT — read this before tightening the bracket.
+  # The obvious test is a tenant inside (1.0, 2.5] itself, whose p95 is
+  # 1.0 + 1.5*0.95 = 2.425. That test was written, passed on arm64, and went RED
+  # in CI on amd64, because the two returned values one ULP apart:
+  #
+  #     arm64  2.4250000000000003        amd64  2.425
+  #
+  # promtool compares exactly, so whichever you pin, the other architecture
+  # fails. The alert annotation moves with it too, flipping between "2.42s" and
+  # "2.43s" under %.2f.
+  #
+  # WHY they differ is NOT established. Fused multiply-add in
+  # `bucketStart + (bucketEnd-bucketStart)*frac` was the obvious suspect and does
+  # not survive checking — evaluating that expression fused and unfused gives the
+  # same double for these inputs. The divergence is somewhere else in
+  # histogram_quantile or in the rate() values feeding it. Recording the observed
+  # fact and NOT a mechanism, because a confident wrong explanation here would be
+  # worse than none: someone would "fix" the wrong thing.
+  #
+  # The practical rule, which does not depend on knowing the mechanism: pin only
+  # expectations verified on BOTH architectures. These are, empirically:
+  #   (0.08, 0.1]  -> 0.099, 0.09, 0.0998      (block above)
+  #   (0.75, 1.0]  -> 0.9875                   (below)
+  #   (2.5,  5.0]  -> 4.875                    (below)
+  #   (40,   80]   -> 78                       (block above)
+  # Check a new one against linux/amd64 before committing it — no cluster needed:
+  #
+  #   ./scripts/extract.sh rules /tmp/w && cp tests/rules/*_test.yaml /tmp/w/
+  #   docker run --rm --platform linux/amd64 -v "$PWD":/w -w /w \
+  #     --entrypoint promtool prom/prometheus:v3.7.3 test rules /tmp/w/*_test.yaml
+  #
+  # None of this touches the rule: `> 2` is a comparison, and both values are
+  # comfortably above 2. Only exact-equality assertions are affected.
   # =========================================================================
   - interval: 30s
-    name: the 2s threshold separates correctly across the bucket it sits inside
+    name: the 2s threshold separates correctly, on the tightest portable bracket
     input_series:
-      # over: all mass in (1.0, 2.5] -> p95 = 1.0 + 1.5*0.95 = 2.425
-      - series: 'vllm:time_to_first_token_seconds_bucket{model_name="sim-over", le="1.0"}'
-        values: '0x40'
+      # over: all mass in (2.5, 5.0] -> p95 = 2.5 + 2.5*0.95 = 4.875
       - series: 'vllm:time_to_first_token_seconds_bucket{model_name="sim-over", le="2.5"}'
+        values: '0x40'
+      - series: 'vllm:time_to_first_token_seconds_bucket{model_name="sim-over", le="5.0"}'
         values: '0+10x40'
       - series: 'vllm:time_to_first_token_seconds_bucket{model_name="sim-over", le="+Inf"}'
         values: '0+10x40'
@@ -166,12 +198,8 @@ tests:
       - expr: llm:ttft:p95_5m
         eval_time: 10m
         exp_samples:
-          # NOT 2.425 — do not "tidy" this. 1.0 + 1.5*0.95 is 2.4250000000000003
-          # in IEEE 754 (0.95 has no exact binary representation), promtool
-          # compares exactly, and 2.425 fails. The steady tenant's 0.099 above
-          # happens to land exactly; this one does not. Both are the real value.
           - labels: 'llm:ttft:p95_5m{model_name="sim-over", source="simulated"}'
-            value: 2.4250000000000003
+            value: 4.875
           - labels: 'llm:ttft:p95_5m{model_name="sim-under", source="simulated"}'
             value: 0.9875
 
@@ -186,7 +214,7 @@ tests:
               source: simulated
             exp_annotations:
               summary: "Model sim-over p95 time-to-first-token above 2s"
-              description: "p95 TTFT has been over 2s for 2m (2.43s). Requests are queueing faster than they can be served (simulated)."
+              description: "p95 TTFT has been over 2s for 2m (4.88s). Requests are queueing faster than they can be served (simulated)."
 
   # =========================================================================
   # TPOT. Its own block because the bucket layout is the point: the rule file

@@ -80,9 +80,17 @@ Comparison links are at the foot of this file, one per released version.
     steady tenant's boundaries (`0.08`, `0.1`) are identical in both layouts, so its three
     expectations are untouched — which makes them the control.
   - **The 2s `LLMHighTTFT` threshold survives, and is now pinned rather than assumed.** A
-    new test block covers the delicate case: `2` is not a boundary in either layout, so it
-    sits *inside* `(1.0, 2.5]`. A tenant in that bucket reports `2.425` and fires; one
-    bucket lower reports `0.9875` and does not.
+    new test block brackets it as tightly as can be done portably — `0.9875` below,
+    `4.875` above.
+
+    ⚠️ *Portably* is load-bearing there. The tighter test — a tenant inside `(1.0, 2.5]`,
+    the bucket `2` actually falls in — **cannot be written**: arm64 and amd64 return
+    values one ULP apart (`2.4250000000000003` vs `2.425`), promtool compares exactly, and
+    the annotation flips between `2.42s` and `2.43s`. The mechanism is not established and
+    is deliberately not guessed at in the comment. Every pinned percentile is now verified
+    against a real linux/amd64 promtool as well as the local one;
+    [tests/](tests/#-check-a-new-expected-value-on-amd64-before-committing-it) has the
+    recipe and the list of values known green on both.
   - `verify.sh`'s L3b 120s bound still holds but no longer means what it did. 58s
     quantises to `78` in `(40, 80]`; the next bucket up interpolates to `152`, so the
     check jumps straight past 120 rather than degrading. It now reads "the queue wait has
