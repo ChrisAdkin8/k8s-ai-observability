@@ -271,10 +271,26 @@ jobs:
           # scripts/extract.sh unwrapped out of manifests/alerts/. Without them the
           # GPU board's lower half is blank — the same coupling verify.sh check 4c
           # asserts on the cluster.
+          #
+          # Polled, for the same reason 4c is, and this leg learned it the hard way:
+          # the loop above breaks the moment BOTH PRODUCERS are live, which on a fast
+          # runner is ~15s. A recording rule does not exist until its next evaluation
+          # (30s), so asserting immediately failed with DCGM_FI_DEV_GPU_TEMP at 0
+          # series while its input sat at 8. The quicker the producers come up, the
+          # more certainly the unpolled check loses the race — the failure mode gets
+          # WORSE as the machine gets faster, which is why it read as a real fault.
+          #
+          # 120s, matching DCGM_POLL_ATTEMPTS in verify.sh. Bounded, not unbounded:
+          # rules that were never extracted never appear, and that must fail.
           for m in DCGM_FI_DEV_GPU_TEMP DCGM_FI_DEV_POWER_USAGE llm:ttft:p95_5m; do
-            n=$(q "$m" || echo 0)
+            n=0
+            for _ in $(seq 1 40); do
+              n=$(q "$m" || echo 0)
+              [ "$n" -gt 0 ] && break
+              sleep 3
+            done
             echo "derived $m: $n series"
-            [ "$n" -gt 0 ] || { echo "$m empty — were the rules extracted and loaded?" >&2; exit 1; }
+            [ "$n" -gt 0 ] || { echo "$m empty after 120s — were the rules extracted and loaded?" >&2; exit 1; }
           done
 
       - name: Assert every scrape target is up

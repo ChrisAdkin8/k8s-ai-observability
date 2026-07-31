@@ -432,11 +432,26 @@ llm_tpw="$(promql_count '(sum(rate(vllm:generation_tokens_total[5m])) > 0) / (su
 # Prometheus renames those to exported_namespace/exported_pod because the scrape
 # target's own namespace/pod labels win the collision. label_replace maps them back
 # so the join has a common key.
+#
+# POLLED, and on DCGM_POLL_ATTEMPTS because it waits on the same producer. The two
+# sides of this join do not appear together: the simulator emits
+# llmsim_gpu_binding_info as soon as it reads MOCK_NVIDIA_VISIBLE_DEVICES at start-up,
+# whereas exported_pod only appears once the fake exporter has re-read the topology
+# after the allocation AND Prometheus has scraped it again. Single-shot, this asserted
+# "the binding is present but nothing matches it" during the window where that is
+# simply not true yet — it failed on the LITE leg while full passed, on identical
+# binding logs. Waiting does not weaken it: a binding that never resolves still fails,
+# which is the case this check exists to catch.
 llm_bind="$(promql_count 'llmsim_gpu_binding_info')"
 if [[ "${llm_bind:-0}" -gt 0 ]]; then
-  llm_join="$(promql_count 'llmsim_gpu_binding_info * on (namespace, pod) group_left(UUID, gpu) label_replace(label_replace(DCGM_FI_DEV_GPU_UTIL{exported_pod!=""}, "namespace", "$1", "exported_namespace", "(.*)"), "pod", "$1", "exported_pod", "(.*)")')"
+  llm_join=0
+  for _ in $(seq 1 "$DCGM_POLL_ATTEMPTS"); do
+    llm_join="$(promql_count 'llmsim_gpu_binding_info * on (namespace, pod) group_left(UUID, gpu) label_replace(label_replace(DCGM_FI_DEV_GPU_UTIL{exported_pod!=""}, "namespace", "$1", "exported_namespace", "(.*)"), "pod", "$1", "exported_pod", "(.*)")')"
+    [[ "${llm_join:-0}" -gt 0 ]] && break
+    sleep 5
+  done
   [[ "${llm_join:-0}" -gt 0 ]] && pass "L4b GPU binding resolves to a real DCGM series (joined on pod)" \
-    || fail "L4b llmsim_gpu_binding_info exists but no DCGM_FI_DEV_GPU_UTIL series is labelled with that pod"
+    || fail "L4b llmsim_gpu_binding_info exists but after $((DCGM_POLL_ATTEMPTS * 5))s no DCGM_FI_DEV_GPU_UTIL series is labelled with that pod"
 else
   skip "L4b no simulator holds a simulated GPU (unbound) — nothing to join"
 fi
