@@ -105,3 +105,9 @@ docker run --rm --platform linux/amd64 -v "$PWD":/w -w /w \
 
 Expectations currently verified green on both: `0.09`, `0.099`, `0.0998`, `0.9875`,
 `0.02425`, `4.875`, `78`.
+
+The prefix-cache ratio expectations (`0.5`, `0.25`, `0`) are deliberately **not** in that
+list, because nothing can put them at risk: the counters feeding them are in power-of-two
+ratios and `rate()` applies the same window and extrapolation to numerator and denominator,
+so the division is exact everywhere. Where you can choose the shape of a test, choose that
+one — the caution above only applies to an interpolated percentile.

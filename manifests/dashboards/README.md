@@ -15,7 +15,7 @@ into place, and no egress to grafana.com is needed at install time.
 | Board | File | uid | grafana.com id | Covers |
 |-------|------|-----|--|--------|
 | GPU Simulation — DCGM Overview | `gpu-sim-dcgm.json` | `gpu-sim-dcgm` | [25618](https://grafana.com/grafana/dashboards/25618) | GPU util / memory / temp / power |
-| LLM Simulation — vLLM Serving Overview | `llm-sim-overview.json` | `llm-sim-overview` | [25619](https://grafana.com/grafana/dashboards/25619) | First-token latency, throughput, queue depth, KV cache |
+| LLM Simulation — vLLM Serving Overview | `llm-sim-overview.json` | `llm-sim-overview` | [25619](https://grafana.com/grafana/dashboards/25619) | First-token latency, throughput, queue depth, KV cache, prefix-cache reuse |
 
 **The filename is the uid.** `install.sh` derives the ConfigMap name from it
 (`<uid>-dashboard`), and `scripts/config.sh` builds the `/d/<uid>` deep link that
@@ -112,15 +112,21 @@ it is absolute and the derived-series caveat is stated in full rather than refer
 
 **`llm-sim-overview.json`** — *LLM Simulation — vLLM Serving Overview*
 
-> Time to first token, inter-token latency, throughput, queue depth and KV-cache usage for
-> vLLM, broken out `by (model_name)` so a saturated tenant is never averaged into a healthy
-> one. Uses the **V1** engine's metric names (`vllm:kv_cache_usage_perc`,
-> `vllm:inter_token_latency_seconds`). Prompts for your Prometheus datasource on import.
+> Time to first token, inter-token latency, throughput, queue depth, KV-cache usage and
+> prefix-cache reuse for vLLM, broken out `by (model_name)` so a saturated tenant is never
+> averaged into a healthy one. Uses the **V1** engine's metric names
+> (`vllm:kv_cache_usage_perc`, `vllm:inter_token_latency_seconds`,
+> `vllm:prefix_cache_hits_total`). Prompts for your Prometheus datasource on import.
 
 Long-form description: [`llm-sim-overview.grafana-com.md`](llm-sim-overview.grafana-com.md).
 It carries more weight than the GPU one, because this board is the one that does **not**
-import-and-go: four panels read `llm:*` recording rules and two more are simulator-only,
+import-and-go: five panels read `llm:*` recording rules and two more are simulator-only,
 so the catalog page has to say which, and give the rules inline.
+
+⚠️ **25619 has an unpublished revision.** The prefix-cache panel is in the repo file and in
+`dist/`, and the catalog still serves the board without it. Re-submit as a **new revision
+of 25619**, never as a new dashboard: a second upload mints a second id, and everyone who
+already imported the first silently stops receiving fixes.
 
 A logo each, 512×512, is in [`docs/logos/`](../../docs/logos/) — `gpu-sim-dcgm.png` and
 `llm-sim-overview.png`, named for the boards they belong to. They are **generated**, not

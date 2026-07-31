@@ -245,6 +245,60 @@ tests:
             value: 0.02425
 
   # =========================================================================
+  # PREFIX CACHE HIT RATIO. Three cases, and each one is a different failure:
+  # the two sides of the ratio being transposed, the per-tenant aggregation
+  # being dropped, and the denominator being zero.
+  #
+  # ⚠️ THE VALUES HERE ARE EXACT BY CONSTRUCTION, not by luck, which is why this
+  # block needs none of the amd64/arm64 caution the TTFT blocks above do. The
+  # counters are in a 2:1 and a 4:1 ratio, both powers of two, and rate() applies
+  # the same window and the same extrapolation to numerator and denominator — so
+  # the division is exact on any architecture. Keep new cases power-of-two if you
+  # add them; an interpolated percentile is where that caution applies, and a
+  # ratio of two rates is where it can be avoided entirely.
+  #
+  # The two tenants have DIFFERENT QUERY RATES as well as different ratios. With
+  # a shared query rate, a rule that had lost its `by (model_name)` would produce
+  # a plausible single number and only one expectation would fail; with these it
+  # cannot produce either.
+  # =========================================================================
+  - interval: 30s
+    name: prefix cache hit ratio, per tenant and with the zero denominator guarded
+    input_series:
+      # steady: 160 of every 320 queried tokens are hits -> 0.5
+      - series: 'vllm:prefix_cache_queries_total{model_name="sim-llama-3-8b-steady"}'
+        values: '0+320x40'
+      - series: 'vllm:prefix_cache_hits_total{model_name="sim-llama-3-8b-steady"}'
+        values: '0+160x40'
+
+      # saturated: same hits, four times the queries -> 0.25. Lower reuse under
+      # eviction pressure is what the shipped profiles model.
+      - series: 'vllm:prefix_cache_queries_total{model_name="sim-llama-3-8b-saturated"}'
+        values: '0+640x40'
+      - series: 'vllm:prefix_cache_hits_total{model_name="sim-llama-3-8b-saturated"}'
+        values: '0+160x40'
+
+      # idle: both counters PRESENT and flat. This is the case clamp_min exists
+      # for — without it the expression is 0/0, and the panel gets NaN rather
+      # than a line at zero. It is also the state every tenant is in for the
+      # first few minutes after an install.
+      - series: 'vllm:prefix_cache_queries_total{model_name="sim-idle"}'
+        values: '0x40'
+      - series: 'vllm:prefix_cache_hits_total{model_name="sim-idle"}'
+        values: '0x40'
+
+    promql_expr_test:
+      - expr: llm:prefix_cache:hit_ratio5m
+        eval_time: 10m
+        exp_samples:
+          - labels: 'llm:prefix_cache:hit_ratio5m{model_name="sim-idle", source="simulated"}'
+            value: 0
+          - labels: 'llm:prefix_cache:hit_ratio5m{model_name="sim-llama-3-8b-saturated", source="simulated"}'
+            value: 0.25
+          - labels: 'llm:prefix_cache:hit_ratio5m{model_name="sim-llama-3-8b-steady", source="simulated"}'
+            value: 0.5
+
+  # =========================================================================
   # The two threshold alerts that are NOT driven to their boundary on the rig:
   # LLMQueueBacklog fires permanently (so a live check never sees it clear) and
   # LLMKVCacheSaturated never fires at all (the shipped profiles stay well
