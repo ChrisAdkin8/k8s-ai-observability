@@ -29,7 +29,8 @@ thing to ship alongside that claim.
 ```
 tests/rules/gpu-rules_test.yaml    # promtool tests for gpu-prometheusrule.yaml
 tests/rules/llm-rules_test.yaml    # promtool tests for llm-prometheusrule.yaml
-tests/fixtures/                    # committed inputs for the two Python selftests
+tests/contracts/                   # surfaces asserted from more than one side
+tests/fixtures/                    # committed inputs for the Python selftests
 ```
 
 `scripts/rule-tests.sh` extracts the `spec:` block from each PrometheusRule custom
@@ -68,6 +69,33 @@ case the thing being tested cannot demonstrate by running.
 |--|--|
 | `upstream-vllm-metric-names.txt` | a **stubbed** upstream metric set for `check-vllm-buckets.py --selftest`. Never update it to track upstream — the real file is the moving thing the drift check watches, and testing against it would make the test drift with its own input |
 | `profile-no-prefix-cache.json` | a load profile with `prefix_cache_hit_rate` at `0.0`, so `llm-sim.py --selftest` can assert both prefix-cache counters are still **emitted**, with hits flat at zero. An absent series and a zero one are different things to a panel |
+| `dcgm-surface-wrong.json` | a deliberately **wrong** DCGM contract, wrong in three independent ways, so `gpu-metrics-sim.py --selftest` can prove its checker rejects one. Never point a real run at it |
+
+## Contracts
+
+`tests/contracts/` is for a surface that **two independent things** have to agree about,
+where nothing else compares them.
+
+| File | Asserted by | As |
+|--|--|--|
+| `dcgm-surface.json` | `compose/gpu-metrics-sim.py --selftest` | **exact** equality — series set and label-key set |
+| | `scripts/verify.sh` check 3b | **subset** — every named series and label key present |
+
+The asymmetry is deliberate and the file's own header explains it: series arriving through
+Prometheus carry `job`, `instance`, `namespace`, `pod`, `endpoint` and `service` from the
+scrape target, and the exporter's own pod labels arrive renamed to `exported_*`, so an
+exact match on the cluster side would fail on day one.
+
+That is what makes it parity rather than self-consistency. The compose stack has a second
+implementation of the fake exporter's surface, and before this file the agreement between
+them was a claim in a header — so a chart bump that renamed a label failed the kind path
+loudly and let the compose path drift in silence.
+
+**The negative case is a permanent test, not an experiment.** The selftest feeds
+`dcgm-surface-wrong.json` and asserts each of its three faults is named in the rejection.
+A checker that only ever runs against the truth is one nobody has watched fail, and one
+that accepts everything also accepts the truth. Do not prove this by editing the real
+contract and reverting — nothing enforces the revert.
 
 ## promtool
 

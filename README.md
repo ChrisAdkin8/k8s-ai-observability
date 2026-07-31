@@ -50,6 +50,10 @@ See [compose/](compose/) for what it deliberately cannot cover.
   [25619](https://grafana.com/grafana/dashboards/25619) (vLLM).
 - **An acceptance suite** ([`scripts/verify.sh`](scripts/verify.sh)) that asserts metrics
   are flowing, both boards render, and the alerts actually reach `firing`.
+- **A path for clusters that already run Prometheus.** If you imported one of the boards
+  from the catalog and found panels blank for want of the `llm:*` recording rules, you do
+  not have to hand your monitoring stack to this repo — see
+  [bring your own Prometheus](#bring-your-own-prometheus).
 
 ![Six panels comparing a healthy tenant and an overloaded one side by
 side](docs/llm-dashboard.png)
@@ -152,6 +156,7 @@ Every command below takes any of the three prefixes ( `local` | `eks` | `gke` ):
 | `task prefix:up` | the lot: cluster → stacks → acceptance checks |
 | `task prefix:grafana` / `prefix:prometheus` | open the boards / the Prometheus console |
 | `task prefix:install` / `prefix:verify` | Phase 2 only, when the cluster already exists |
+| `task prefix:install -- --skip-monitoring` | Phase 2 against a Prometheus you already run ([below](#bring-your-own-prometheus)) |
 | `task prefix:load -- ramp` | drive a GPU utilisation curve (`ramp`, `spikes`) |
 | `task prefix:llm-load -- ramp` | drive an LLM load curve (`ramp`, `burst`, `saturation`, `idle`) |
 | `task prefix:teardown` / `prefix:destroy` | remove the stacks / and the cluster too |
@@ -169,6 +174,49 @@ kubectl apply -f manifests/llm/extras/         # for task <prefix>:llm-load
 `scripts/` stays the source of truth for install ordering, the wrong-context guard and
 the drift assertions; Task only wraps it. To drive the phases as scripts instead, see
 [docs/usage.md](docs/usage.md).
+
+### Bring your own Prometheus
+
+The default path installs `kube-prometheus-stack`. If you already run one, `--skip-monitoring`
+leaves it alone and installs only the simulators, rules, dashboards and workloads:
+
+```sh
+./scripts/install.sh local --skip-monitoring
+task local:install -- --skip-monitoring        # same thing through the front door
+./scripts/verify.sh local --byo
+```
+
+**If your Helm release is not named `kube-prometheus-stack`, say so** — one variable
+covers every script, because they all read it from `scripts/config.sh`:
+
+```sh
+export KPS_RELEASE=my-monitoring
+./scripts/install.sh local --skip-monitoring
+./scripts/verify.sh   local --byo
+./scripts/grafana.sh  local                    # port-forwards svc/$KPS_RELEASE-grafana
+```
+
+⚠️ **Two labels decide whether any of this works, and both fail with no error at all** —
+no scrape, no rule evaluation, empty boards, every object reporting itself as created:
+
+| | Default | Set it with | If it is wrong |
+|--|--|--|--|
+| the `release:` selector on the two ServiceMonitors and two PrometheusRules | follows `KPS_RELEASE` | `RELEASE_LABEL` | your Prometheus never adopts them |
+| the Grafana sidecar's discovery label | `grafana_dashboard=1` | `GRAFANA_DASHBOARD_LABEL` / `_VALUE` | the boards are never imported |
+
+The selector default is the upstream chart's: `ruleSelectorNilUsesHelmValues` and its two
+siblings default to `true`, making the selector `release=<your release name>`. So you have
+two possible fixes — set `RELEASE_LABEL` here, or set those three values `false` on your
+side. The second is often not yours to change.
+
+`verify.sh --byo` is what tells you. It still asserts everything about the simulators,
+scrapes, rules and dashboards — those are exactly what a wrong label breaks — and relaxes
+only the anonymous-Grafana claim, which follows from this repo's own Helm values rather
+than from anything it installed. A board Grafana has never heard of stays a hard failure.
+
+The monitoring stack must live in the `monitoring` namespace, and its Grafana sidecar must
+watch that namespace; `install.sh` refuses up front, naming the fix, if the namespace or
+the Prometheus Operator CRDs are missing.
 
 ### Cost and time
 

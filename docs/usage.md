@@ -21,6 +21,24 @@ Phase 2 onwards is identical on all three targets — substitute `local`, `eks` 
 
 `--destroy` removes the cluster too: `kind delete` on local, `terraform destroy` on the clouds.
 
+Against a cluster that **already runs Prometheus**, skip the monitoring install and tell
+the scripts what your release is called:
+
+```sh
+export KPS_RELEASE=my-monitoring            # covers all four scripts — they share config.sh
+./scripts/install.sh <target> --skip-monitoring
+./scripts/verify.sh  <target> --byo
+./scripts/grafana.sh <target>
+```
+
+Both flags are positional and validated: an unrecognised second argument is rejected
+rather than ignored, because a typo'd `--skip-monitoring` falling through would install a
+second monitoring stack over the top of yours. `install.sh` refuses up front, naming the
+fix, if the `monitoring` namespace or the Prometheus Operator CRDs are absent — and
+creates nothing when it does. The two labels that decide whether a BYO install actually
+works, and fail silently when wrong, are in
+[the README](../README.md#bring-your-own-prometheus).
+
 Only Phase 1 differs between targets:
 
 ```sh

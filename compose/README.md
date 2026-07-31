@@ -69,6 +69,30 @@ Three series are enough for all four GPU panels and every GPU alert, because tem
 and power are synthesised from utilisation by the recording rules — the same PromQL,
 running here. See the file header for the details.
 
+**"Exactly" is now checked rather than claimed.** The series and label keys live in
+[`tests/contracts/dcgm-surface.json`](../tests/contracts/dcgm-surface.json), and both
+producers are asserted against it — this one for exact equality, the cluster's exporter
+for a subset (`verify.sh` check 3b, since Prometheus adds target labels the exporter never
+emitted). One file, two independent producers:
+
+```sh
+task compose-selftest        # or: python3 compose/gpu-metrics-sim.py --selftest
+```
+
+It needs no docker and runs in CI's `fast` job on every push. Before the contract existed
+the agreement was prose in that file's header, so a chart bump renaming a series would
+fail the kind path loudly and let this path drift in silence — backwards, given this is
+the first command in the README.
+
+## Is this covered by CI?
+
+Yes, as of the `compose` job in `.github/workflows/ci.yml`. It brings the stack up on a
+runner and asserts it the way a user would: both producers **through Prometheus** rather
+than by curling them (the simulator containers publish no ports — only Prometheus and
+Grafana do), every scrape target `up`, the derived temp/power/p95 series that only exist
+if the extracted rules loaded, and both boards fetched by uid over an unauthenticated
+request. Logs upload on failure; `docker compose down -v` always runs.
+
 ## So what can't you do here?
 
 Kubernetes itself. Nothing in this stack exercises scheduling on `nvidia.com/gpu`, the
