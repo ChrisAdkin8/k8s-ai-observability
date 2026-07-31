@@ -35,6 +35,10 @@ the control plane only.
 > below its sizing floor for the duration. That is fine for an ephemeral test cluster
 > and worth knowing before you change `instance_type` or `k8s_version` on a live one.
 
+This page is the *operator* view — run it, reach it, tear it down. For the module itself,
+[`terraform/eks/README.md`](../terraform/eks/README.md) documents every input and output,
+which files own what, and the load-bearing details to read before editing the Terraform.
+
 ## Phase 2 — apps
 
 ```sh
