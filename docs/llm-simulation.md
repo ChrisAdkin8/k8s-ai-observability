@@ -155,8 +155,9 @@ This rig's **own** metrics are prefixed `llmsim_` and are safe to label freely:
 | `llmsim_capacity_rps` | Sustainable throughput implied by the current profile |
 
 Recording rules add `llm:ttft:p50_5m` / `p95_5m` / `p99_5m`, `llm:tpot:p95_5m`,
-`llm:tokens:generation_rate5m` and `llm:tokens:prompt_rate5m` — all aggregated
-**`by (model_name)`** so the two tenants never merge into one meaningless number.
+`llm:tokens:generation_rate5m`, `llm:tokens:prompt_rate5m` and
+`llm:prefix_cache:hit_ratio5m` — all aggregated **`by (model_name)`** so the two tenants
+never merge into one meaningless number.
 
 `llm:tokens_per_watt:5m` is the exception on both counts. It is **cluster-aggregate** — a bare
 `sum()` over every tenant, with no `by (model_name)` — and it is *derived from derived*: the

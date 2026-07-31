@@ -456,6 +456,41 @@
       ]
     },
     {
+      "id": 10,
+      "type": "timeseries",
+      "title": "Prefix cache hit ratio",
+      "description": "rate(vllm:prefix_cache_hits_total) / rate(vllm:prefix_cache_queries_total) — the fraction of queried prompt tokens served from the prefix cache. Both counters are in TOKENS, so plot the ratio: on its own either counter mostly tracks traffic. On this rig the rates are set per profile and are decoupled from latency by construction — a hit here shortens nothing, because prefill is flat rather than token-proportional. Against a real deployment this is the query that replaces the superseded vllm:gpu_prefix_cache_hit_rate gauge.",
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 34
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percentunit",
+          "min": 0,
+          "max": 1
+        },
+        "overrides": []
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "expr": "llm:prefix_cache:hit_ratio5m{model_name=~\"$model\"}",
+          "legendFormat": "{{model_name}}",
+          "refId": "A"
+        }
+      ]
+    },
+    {
       "id": 9,
       "type": "table",
       "title": "Simulated GPU attribution",
@@ -464,7 +499,7 @@
         "h": 8,
         "w": 24,
         "x": 0,
-        "y": 34
+        "y": 42
       },
       "datasource": {
         "type": "prometheus",

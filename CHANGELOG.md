@@ -77,6 +77,27 @@ Comparison links are at the foot of this file, one per released version.
   a `METRIC_RESHAPES` table beside it with the same positional `(v0, v1)` shape; the drift
   check reads both.
 
+- **A prefix-cache hit-ratio panel on the vLLM board, and the recording rule behind it**,
+  `llm:prefix_cache:hit_ratio5m` = `rate(hits) / rate(queries)` by tenant. Recorded once
+  rather than repeated per panel, so a dashboard and an alert can never disagree about what
+  the ratio means — the same reasoning as the quantile rules beside it.
+
+  The denominator is clamped like `GPUHighMemoryUsage`'s, but at an **epsilon rather than
+  at 1**. `clamp_min(x, 1)` suits a byte count and not a rate: a low-traffic real
+  deployment can genuinely sit below one queried token per second, and flooring there would
+  quietly under-report the tenants least likely to notice. An idle tenant reads `0/1e-9`,
+  which is a flat line at zero rather than a `NaN`.
+
+  promtool covers both sides of the ratio and the no-traffic case. Its expected values are
+  **exact by construction rather than by luck** — the counters sit in 2:1 and 4:1 ratios,
+  so the division is exact on any architecture, which sidesteps the amd64/arm64 percentile
+  trap documented in `tests/`.
+
+  ⚠️ **25619 needs re-submitting as a new revision.** The board is published, so the panel
+  does not reach anyone who imported it until it is uploaded again — and it must go up as a
+  revision of 25619, never as a new dashboard, or a second id is minted and everyone on the
+  first stops receiving fixes.
+
 - **A `verify.sh` L7.** The queue-time histogram is receiving observations and both
   prefix-cache counters are present, on a real cluster. Everything else covering these
   families is a selftest or a promtool assertion, and neither leaves the repo: the

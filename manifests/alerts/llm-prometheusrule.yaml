@@ -57,6 +57,32 @@ spec:
               (rate(vllm:inter_token_latency_seconds_bucket[5m])))
           labels: { source: simulated }
 
+        # Prefix cache reuse, as the RATIO and never as either counter.
+        #
+        # Upstream counts prompt TOKENS, so both counters scale with traffic and
+        # neither says anything on its own — a busy tenant with a cold cache
+        # out-counts an idle one with a warm cache on both of them. The ratio is
+        # what a vLLM operator plots, and it is the query that replaces the v0
+        # gauge this metric pair superseded (see METRIC_RESHAPES in
+        # scripts/llm-sim.py): a panel bound to vllm:gpu_prefix_cache_hit_rate
+        # cannot be repaired by substituting a name, only by writing this.
+        #
+        # ⚠️ The denominator is clamped like GPUHighMemoryUsage's, but at an
+        # EPSILON rather than at 1. clamp_min(x, 1) is right for a byte count and
+        # wrong for a rate: a low-traffic real deployment can genuinely sit below
+        # one queried token per second, and flooring there would quietly
+        # under-report exactly the deployments least able to notice. With no
+        # traffic both rates are zero and 0/1e-9 is 0 — a present series flat at
+        # zero, which is what a panel needs and what +Inf or NaN would not be.
+        # hits <= queries by construction, so the numerator can never be positive
+        # while the denominator is zero.
+        - record: llm:prefix_cache:hit_ratio5m
+          expr: >-
+            sum by (model_name) (rate(vllm:prefix_cache_hits_total[5m]))
+            / clamp_min(sum by (model_name)
+                (rate(vllm:prefix_cache_queries_total[5m])), 1e-9)
+          labels: { source: simulated }
+
         - record: llm:tokens:generation_rate5m
           expr: sum by (model_name) (rate(vllm:generation_tokens_total[5m]))
           labels: { source: simulated }
