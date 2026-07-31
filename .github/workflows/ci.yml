@@ -191,7 +191,7 @@ jobs:
       # path: flakier, but it runs.
       - name: Log in to Docker Hub (skipped without secrets)
         if: env.HAVE_DOCKERHUB == 'true'
-        uses: docker/login-action@c94ce9fb468520275223c153574b00df6fe4bcc9 # v3
+        uses: docker/login-action@371161bbe7024a29a25c5e19bfcbc0804fe9ad2c # v4.5.2
         with:
           username: ${{ secrets.DOCKERHUB_USERNAME }}
           password: ${{ secrets.DOCKERHUB_TOKEN }}
