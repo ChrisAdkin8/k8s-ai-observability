@@ -15,8 +15,8 @@ into place, and no egress to grafana.com is needed at install time.
 
 | Board | File | uid | grafana.com id | Covers |
 |-------|------|-----|--|--------|
-| GPU Simulation — DCGM Overview | `gpu-sim-dcgm.json` | `gpu-sim-dcgm` | [25618](https://grafana.com/grafana/dashboards/25618) | GPU util / memory / temp / power |
-| LLM Simulation — vLLM Serving Overview | `llm-sim-overview.json` | `llm-sim-overview` | [25620](https://grafana.com/grafana/dashboards/25620) | First-token latency, throughput, queue depth, KV cache, prefix-cache reuse |
+| GPU Simulation — DCGM Overview | `gpu-sim-dcgm.json` | `gpu-sim-dcgm` | [25618](https://grafana.com/grafana/dashboards/25618-gpu-simulation-dcgm-overview/) | GPU util / memory / temp / power |
+| LLM Simulation — vLLM Serving Overview | `llm-sim-overview.json` | `llm-sim-overview` | [25620](https://grafana.com/grafana/dashboards/25620-llm-simulation-vllm-serving-overview/) | First-token latency, throughput, queue depth, KV cache, prefix-cache reuse |
 
 **The filename is the uid.** `install.sh` derives the ConfigMap name from it
 (`<uid>-dashboard`), and `scripts/config.sh` builds the `/d/<uid>` deep link that
