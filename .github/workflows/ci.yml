@@ -443,11 +443,19 @@ jobs:
     # status checks ("full stack on kind (full)" / "(lite)"), so a ruleset can require
     # both and a red lite leg cannot hide behind a green full one.
     name: full stack on kind (${{ matrix.profile }})
-    # Skipped when only markdown changed — see the `changes` job for why this is an
-    # `if:` rather than `paths-ignore:`. Both matrix legs report as skipped, which a
-    # required-check ruleset accepts, so a docs-only PR stays mergeable.
+    # ⚠️ THE GATE IS ON THE STEPS, NOT THE JOB, AND THAT IS NOT A STYLE CHOICE.
+    #
+    # A job-level `if:` was tried first and blocked a docs-only PR outright. When a
+    # MATRIX job is skipped, GitHub does not interpolate its name — the check reports
+    # as the literal "full stack on kind (${{ matrix.profile }})". The ruleset on main
+    # requires "full stack on kind (full)" and "(lite)", so those two names never
+    # reported at all and the PR sat pending forever. Exactly the failure that made
+    # `paths-ignore:` unusable, reintroduced one layer down.
+    #
+    # Gating the steps keeps the job running, so the matrix expands, both names report,
+    # and the ruleset is satisfied. The cost is a runner spin-up per leg — seconds
+    # against the ~6.5 minutes each leg takes when it has real work to do.
     needs: changes
-    if: needs.changes.outputs.code == 'true'
     strategy:
       # NOT fail-fast. If lite breaks while full passes, that difference IS the signal
       # — cancelling the healthy leg to save four minutes would throw away the
@@ -492,11 +500,12 @@ jobs:
       LITE: ${{ matrix.profile == 'lite' && '1' || '' }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        if: needs.changes.outputs.code == 'true'
 
       # Gated on the secrets existing — see the header. Forks get the unauthenticated
       # path: flakier, but it runs.
       - name: Log in to Docker Hub (skipped without secrets)
-        if: env.HAVE_DOCKERHUB == 'true'
+        if: needs.changes.outputs.code == 'true' && env.HAVE_DOCKERHUB == 'true'
         uses: docker/login-action@371161bbe7024a29a25c5e19bfcbc0804fe9ad2c # v4.5.2
         with:
           username: ${{ secrets.DOCKERHUB_USERNAME }}
@@ -516,11 +525,13 @@ jobs:
       # raise the polling loop and watch it fail again. If you ever see 4 pass and 4b
       # 404 here, check these limits before touching anything else.
       - name: Raise inotify limits (kind + Prometheus stack exhaust the defaults)
+        if: needs.changes.outputs.code == 'true'
         run: |
           sudo sysctl -w fs.inotify.max_user_watches=524288
           sudo sysctl -w fs.inotify.max_user_instances=512
 
       - name: Install pinned toolchain
+        if: needs.changes.outputs.code == 'true'
         run: |
           set -euo pipefail
           mkdir -p "$HOME/.local/bin"
@@ -548,6 +559,7 @@ jobs:
       # what this job depends on, so a silently failed kind install would let
       # `task tools` exit 0 and only surface ~12 minutes later inside kind-up.sh.
       - name: Preflight
+        if: needs.changes.outputs.code == 'true'
         run: |
           set -euo pipefail
           task tools
@@ -565,6 +577,7 @@ jobs:
       # A workflow that builds its own cluster stops testing what users actually run,
       # and would go green while the real entry point is broken.
       - name: task local:up
+        if: needs.changes.outputs.code == 'true'
         id: up
         run: task local:up
 
@@ -578,7 +591,7 @@ jobs:
       # an artifact — an accepted limitation, since Actions does not distinguish a
       # timeout cancel from a supersession cancel.
       - name: Diagnostics
-        if: always() && steps.up.outcome != 'skipped'
+        if: always() && needs.changes.outputs.code == 'true' && steps.up.outcome != 'skipped'
         run: |
           mkdir -p /tmp/diag
           d=/tmp/diag
@@ -643,7 +656,7 @@ jobs:
           echo "--- collected ---"; ls -la "$d"
 
       - name: Upload diagnostics
-        if: always() && steps.up.outcome != 'skipped'
+        if: always() && needs.changes.outputs.code == 'true' && steps.up.outcome != 'skipped'
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           # ⚠️ matrix.profile is REQUIRED here. Both legs upload on failure, and two
