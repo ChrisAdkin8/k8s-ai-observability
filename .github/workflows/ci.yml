@@ -64,7 +64,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
-      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       # Validates the simulator's Prometheus exposition: histogram bucket
       # monotonicity, +Inf consistency, HELP/TYPE correctness, and that rendering
@@ -141,7 +141,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
-      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       # Exits 1 on drift and 2 when it could not check at all — the second is
       # reported as its own thing rather than silently passing, because "we did
@@ -201,7 +201,7 @@ jobs:
       # local run (colima --memory 4) and is stated as unverified in values-lite.yaml.
       LITE: ${{ matrix.profile == 'lite' && '1' || '' }}
     steps:
-      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       # Gated on the secrets existing — see the header. Forks get the unauthenticated
       # path: flakier, but it runs.
