@@ -14,7 +14,16 @@ metadata:
   name: fake-dcgm-exporter
   namespace: monitoring   # must match config.sh MONITORING_NS (install.sh guards drift)
   labels:
-    release: kube-prometheus-stack   # harmless; picked up regardless due to Nil...=false
+    # ⚠️ HARMLESS ONLY AGAINST THIS REPO'S OWN VALUES, which is not what the comment
+    # here used to say. helm/kube-prometheus-stack/values.yaml sets
+    # serviceMonitorSelectorNilUsesHelmValues (and its rule/podMonitor siblings) to
+    # FALSE, so this Prometheus adopts every ServiceMonitor whatever its labels.
+    # Upstream defaults all three to TRUE, where the selector becomes
+    # release=<their release name> and a mismatch here means NO SCRAPE AND NO ERROR.
+    #
+    # install.sh rewrites this value to $RELEASE_LABEL at apply time (config.sh), so
+    # a BYO user sets KPS_RELEASE or RELEASE_LABEL rather than editing this file.
+    release: kube-prometheus-stack
 spec:
   namespaceSelector:
     matchNames: [gpu-operator]       # must match config.sh FAKE_GPU_NS

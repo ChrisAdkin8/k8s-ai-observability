@@ -20,8 +20,52 @@ K8S_VERSION="1.36"
 MONITORING_NS="monitoring"
 FAKE_GPU_NS="gpu-operator"   # fake operator lives here to stand in for the real GPU operator
 LLM_NS="llm-sim"             # simulated vLLM serving stack
-KPS_RELEASE="kube-prometheus-stack"
 FAKE_GPU_RELEASE="gpu-operator"
+
+# ---- the monitoring stack: OURS, or someone else's ---------------------------
+# OVERRIDABLE FROM THE ENVIRONMENT, and that is the whole BYO story in one line.
+# All four scripts that touch the monitoring release source this file, so
+#
+#     KPS_RELEASE=my-monitoring ./scripts/grafana.sh local
+#
+# reaches install.sh, verify.sh, grafana.sh and prometheus.sh at once. Before this
+# was a :- default it was a plain assignment, so the environment was silently
+# overwritten at source time and every one of those scripts port-forwarded to a
+# Service that does not exist on a cluster whose release is named anything else.
+#
+# The Service and Secret names are BUILT from it — "${KPS_RELEASE}-grafana",
+# "${KPS_RELEASE}-prometheus" — which is a chart convention, not a Kubernetes one.
+KPS_RELEASE="${KPS_RELEASE:-kube-prometheus-stack}"
+
+# ⚠️ THE TWO LABELS THAT FAIL SILENTLY. Get either wrong and there is NO ERROR
+# ANYWHERE: the rules never evaluate, the scrapes never happen, the boards stay
+# empty, and every object involved reports itself as successfully created.
+#
+# RELEASE_LABEL is the `release:` selector carried by the four objects install.sh
+# applies — the two ServiceMonitors and the two PrometheusRules. Upstream
+# kube-prometheus-stack defaults ruleSelectorNilUsesHelmValues and its two
+# siblings to TRUE, which makes the selector `release=<their release name>`. This
+# repo's own helm/kube-prometheus-stack/values.yaml sets all three FALSE, which is
+# why the label is genuinely harmless HERE and why the ServiceMonitor comments
+# used to say so without qualification. On a BYO cluster it is not harmless.
+#
+# Defaults to KPS_RELEASE rather than to the literal, so someone who sets only
+# KPS_RELEASE=my-monitoring gets the matching label for free. A BYO user has two
+# possible fixes and should know both: set this, or set those three values false
+# on their side — and the second is often not theirs to change.
+RELEASE_LABEL="${RELEASE_LABEL:-$KPS_RELEASE}"
+
+# The Grafana sidecar's discovery label. `grafana_dashboard=1` is the
+# kube-prometheus-stack chart's convention, NOT a universal one; a different
+# Grafana deployment may watch a different key entirely.
+GRAFANA_DASHBOARD_LABEL="${GRAFANA_DASHBOARD_LABEL:-grafana_dashboard}"
+GRAFANA_DASHBOARD_LABEL_VALUE="${GRAFANA_DASHBOARD_LABEL_VALUE:-1}"
+
+# Ownership, so teardown.sh (and a BYO user's own cleanup) can remove OUR boards
+# without touching the several the monitoring chart ships under the same sidecar
+# label. Deleting by the sidecar label alone would take the chart's with them.
+# Not overridable: it is our marker, not theirs.
+DASHBOARD_OWNER_LABEL="app.kubernetes.io/part-of=gpu-sim-dashboards"
 
 # ---- GPU simulation contract (MUST match Terraform node labels) --------------
 NODE_POOL_LABEL_KEY="run.ai/simulated-gpu-node-pool"
@@ -600,6 +644,66 @@ assert_terraform_contract() {
     echo "       same-named cluster exists there, alias IT as the target." >&2
     exit 1
   fi
+}
+
+# THE BYO PRECONDITION — the CRDs must already exist.
+#
+# Under --skip-monitoring nothing installs kube-prometheus-stack, so nothing creates
+# the ServiceMonitor and PrometheusRule CRDs. Applying manifests/servicemonitor/ and
+# manifests/alerts/ against a cluster that lacks them is precisely the
+# green-install-with-nothing-working failure the other assertions exist to prevent —
+# except here it is worse, because `kubectl apply` DOES error and install.sh would
+# still have created the namespace, the ConfigMaps and the dashboards first.
+#
+# Unlike the assert_* family this one needs a live cluster, so install.sh calls it
+# after ensure_context rather than beside the others. It still runs before anything
+# is created, which is the property that matters: a refusal leaves the cluster
+# untouched.
+#
+# ⚠️ Names the fix. "CRD not found" sends people to the wrong place — they go
+# looking for a broken manifest rather than a missing operator.
+assert_monitoring_crds() {
+  local ctx="$1" missing=() crd
+
+  # The namespace too. The static manifests hardcode `namespace: monitoring`
+  # (assert_manifest_namespaces pins that), and under --skip-monitoring nothing
+  # creates it — so a monitoring stack living somewhere else fails at the first
+  # apply with a bare "namespaces not found" that says nothing about why.
+  if ! kubectl --context "$ctx" get namespace "$MONITORING_NS" >/dev/null 2>&1; then
+    echo "ERROR: namespace '$MONITORING_NS' does not exist." >&2
+    echo "       This repo's ServiceMonitors, rules and dashboard ConfigMaps are" >&2
+    echo "       applied there — the names are static in manifests/, which is why" >&2
+    echo "       assert_manifest_namespaces refuses to let config.sh drift from them." >&2
+    echo "       Install your monitoring stack into '$MONITORING_NS', or create the" >&2
+    echo "       namespace and make sure its Prometheus and Grafana watch it." >&2
+    exit 1
+  fi
+
+  for crd in servicemonitors.monitoring.coreos.com prometheusrules.monitoring.coreos.com; do
+    kubectl --context "$ctx" get crd "$crd" >/dev/null 2>&1 || missing+=("$crd")
+  done
+  # bash 3.2 treats an empty array as unbound under set -u; the +alternate form
+  # expands to nothing rather than aborting (same trick install.sh uses for helm args).
+  [[ ${#missing[@]} -eq 0 ]] && return 0
+
+  echo "ERROR: --skip-monitoring was passed, but the Prometheus Operator CRDs this" >&2
+  echo "       repo's ServiceMonitors and PrometheusRules need are not installed:" >&2
+  printf '         %s\n' "${missing[@]+"${missing[@]}"}" >&2
+  echo "" >&2
+  echo "       Nothing has been created. Install a monitoring stack that provides" >&2
+  echo "       them first, then re-run:" >&2
+  echo "" >&2
+  echo "         helm repo add prometheus-community $KPS_REPO" >&2
+  echo "         helm install <release> prometheus-community/kube-prometheus-stack \\" >&2
+  echo "           -n $MONITORING_NS --create-namespace --wait" >&2
+  echo "" >&2
+  echo "       If your release is NOT named '$KPS_RELEASE', pass its name through" >&2
+  echo "       so the port-forwards and the selector labels find it:" >&2
+  echo "" >&2
+  echo "         KPS_RELEASE=<release> ./scripts/install.sh <target> --skip-monitoring" >&2
+  echo "" >&2
+  echo "       Or drop --skip-monitoring and let this repo install the stack." >&2
+  exit 1
 }
 
 # Configure + guard in one call.
