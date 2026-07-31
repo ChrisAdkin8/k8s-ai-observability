@@ -98,6 +98,15 @@ tasks:
     cmds:
       - ./scripts/rule-tests.sh
 
+  # Derives the grafana.com upload from manifests/dashboards/*.json into dist/.
+  # The repo files cannot be uploaded as-is: they bind to a datasource VARIABLE,
+  # and the catalog requires the __inputs block instead — without it the uploader
+  # rejects the file as "Old dashboard JSON format". Generated, never committed.
+  dashboards:
+    desc: Build the grafana.com-ready dashboards into dist/ (no cluster needed)
+    cmds:
+      - python3 scripts/dashboard-publish.py
+
   # ---- the no-Kubernetes path ------------------------------------------------
   # Both boards and both alert sets in under a minute, reading the same dashboards,
   # rules, simulator and profiles the cluster does. See compose/README.md for what it
