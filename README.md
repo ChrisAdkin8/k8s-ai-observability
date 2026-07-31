@@ -119,7 +119,8 @@ In short: build the *pipeline* here, tune the *numbers* on real hardware.
 **Size your container runtime first.** Colima's 2 CPU / 2 GiB default cannot run this:
 Prometheus alone requests 1Gi and limits 2Gi. `scripts/kind-up.sh` refuses below 5 GiB and
 prints the exact `colima` / Docker Desktop / `podman machine` command to fix it. Allow
-8 GiB and 4 CPU:
+8 GiB and 4 CPU (the floors and the recommendation are `KIND_MIN_MEMORY_GIB` /
+`KIND_MIN_CPUS` and `KIND_WANT_MEMORY_GIB` / `KIND_WANT_CPUS`, if you need to move them):
 
 ```sh
 colima start --cpu 4 --memory 8 --disk 40
@@ -213,7 +214,7 @@ no scrape, no rule evaluation, empty boards, every object reporting itself as cr
 | | Default | Set it with | If it is wrong |
 |--|--|--|--|
 | the `release:` selector on the two ServiceMonitors and two PrometheusRules | follows `KPS_RELEASE` | `RELEASE_LABEL` | your Prometheus never adopts them |
-| the Grafana sidecar's discovery label | `grafana_dashboard=1` | `GRAFANA_DASHBOARD_LABEL` / `_VALUE` | the boards are never imported |
+| the Grafana sidecar's discovery label | `grafana_dashboard=1` | `GRAFANA_DASHBOARD_LABEL` and `GRAFANA_DASHBOARD_LABEL_VALUE` | the boards are never imported |
 
 The selector default is the upstream chart's: `ruleSelectorNilUsesHelmValues` and its two
 siblings default to `true`, making the selector `release=<your release name>`. So you have
