@@ -25,7 +25,7 @@ Comparison links are at the foot of this file, one per released version.
 
 ## [0.4.0] — 2026-07-31
 
-**This release exists because both dashboards got published.** Once 25618 and 25619 were
+**This release exists because both dashboards got published.** Once 25618 and 25620 were
 in the grafana.com catalog, people arrived with a Prometheus of their own, imported a
 board, and found panels blank for want of the `llm:*` recording rules — with no route
 forward that did not involve installing a second monitoring stack over their existing one.
@@ -43,7 +43,7 @@ those claims honest, and the CI legs that stop the alternative paths rotting.
   land beside whatever monitoring stack is already there.
 
   Both boards are published, so people arrive from the catalog with their own Prometheus,
-  import 25619, find four panels blank for want of the `llm:*` recording rules — and their
+  import 25620, find four panels blank for want of the `llm:*` recording rules — and their
   only route was a script that installs a second monitoring stack over the top of theirs.
   Nobody with a production stack will do that, which made it the single biggest structural
   blocker to using any of this.
@@ -215,9 +215,9 @@ those claims honest, and the CI legs that stop the alternative paths rotting.
   so the division is exact on any architecture, which sidesteps the amd64/arm64 percentile
   trap documented in `tests/`.
 
-  ⚠️ **25619 needs re-submitting as a new revision.** The board is published, so the panel
+  ⚠️ **25620 needs re-submitting as a new revision.** The board is published, so the panel
   does not reach anyone who imported it until it is uploaded again — and it must go up as a
-  revision of 25619, never as a new dashboard, or a second id is minted and everyone on the
+  revision of 25620, never as a new dashboard, or a second id is minted and everyone on the
   first stops receiving fixes.
 
 - **A `verify.sh` L7.** The queue-time histogram is receiving observations and both
@@ -293,7 +293,7 @@ those claims honest, and the CI legs that stop the alternative paths rotting.
 
 - **Both dashboards are published to the grafana.com catalog**: the GPU board is
   [25618](https://grafana.com/grafana/dashboards/25618) and the vLLM board is
-  [25619](https://grafana.com/grafana/dashboards/25619). They can now be imported by id
+  [25620](https://grafana.com/grafana/dashboards/25620). They can now be imported by id
   into any Grafana, without cloning this repo.
 
   The ids are recorded in three places on purpose, and all three are the ones the repo
