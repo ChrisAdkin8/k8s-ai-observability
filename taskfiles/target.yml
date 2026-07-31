@@ -118,17 +118,22 @@ tasks:
       - terraform -chdir={{.TF_DIR}} output
 
   # ---- Phase 2: stacks ------------------------------------------------------
+  # CLI_ARGS so `task local:install -- --skip-monitoring` reaches the script. The
+  # README calls Task the front door, and a flag reachable only from the raw script is
+  # half-delivered — worse, without the passthrough the flag is accepted and SILENTLY
+  # DROPPED, which is the failure mode this repo writes assertions against. Same
+  # pattern as `task <prefix>:load -- ramp` below.
   install:
-    desc: Deploy the observability, fake GPU and LLM simulation stacks (Phase 2)
+    desc: 'Deploy the observability, fake GPU and LLM simulation stacks (Phase 2; -- --skip-monitoring for BYO Prometheus)'
     dir: '{{.ROOT_DIR}}'
     cmds:
-      - ./scripts/install.sh {{.CLOUD}}
+      - ./scripts/install.sh {{.CLOUD}} {{.CLI_ARGS}}
 
   verify:
-    desc: Run the acceptance checks (GPU + LLM metrics, dashboards, alerts firing)
+    desc: 'Run the acceptance checks (GPU + LLM metrics, dashboards, alerts firing; -- --byo for BYO Prometheus)'
     dir: '{{.ROOT_DIR}}'
     cmds:
-      - ./scripts/verify.sh {{.CLOUD}}
+      - ./scripts/verify.sh {{.CLOUD}} {{.CLI_ARGS}}
 
   grafana:
     desc: Open the GPU + LLM dashboards (holds a port-forward; Ctrl-C to stop)

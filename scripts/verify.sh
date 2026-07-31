@@ -12,7 +12,17 @@ set -euo pipefail
 cd "$(dirname "${BASH_SOURCE[0]}")/.."
 source scripts/config.sh
 
-TARGET="${1:?usage: verify.sh <eks|gke|local>}"
+TARGET="${1:?usage: verify.sh <eks|gke|local> [--byo]}"
+# Positional and validated, matching install.sh's --skip-monitoring.
+BYO=0
+case "${2:-}" in
+  "")      ;;
+  --byo)   BYO=1 ;;
+  *) echo "ERROR: unknown argument '${2}'" >&2
+     echo "usage: verify.sh <eks|gke|local> [--byo]" >&2
+     exit 1 ;;
+esac
+
 # The per-target CLI that ensure_context shells out to. On local that is kind, which
 # resolves the kubeconfig entry the same way the cloud CLIs do for their clusters.
 case "$TARGET" in
@@ -36,6 +46,16 @@ fail() { printf '  \033[31mFAIL\033[0m %s\n' "$1"; FAILED=1; }
 # absent (e.g. no simulated GPU was free to bind). It must never be used to
 # paper over a real mismatch.
 skip() { printf '  \033[33mSKIP\033[0m %s\n' "$1"; }
+
+# Appended to the failures whose diagnosis differs on a BYO cluster. "ServiceMonitor
+# selector?" is the right first thought when this repo installed the stack and the
+# wrong one when it did not: there the object is usually fine and simply was never
+# ADOPTED, which is invisible from the object itself. Empty in the normal mode, so
+# the existing messages are unchanged.
+byo_hint() {
+  [[ "$BYO" == "1" ]] || return 0
+  printf ' [BYO: usually the selector label — your Prometheus adopts objects matching release=<its release>, this install applied release=%s. Set RELEASE_LABEL/KPS_RELEASE, or set ruleSelectorNilUsesHelmValues + serviceMonitorSelectorNilUsesHelmValues false on your side.]' "$RELEASE_LABEL"
+}
 
 # --- helper: run a PromQL instant query via a self-healing port-forward ---------
 PF_PID=""
@@ -91,6 +111,32 @@ DCGM_POLL_ATTEMPTS=24
 
 echo "Verifying $TARGET (context: $CTX)"
 
+# WHAT --byo RELAXES, AND WHY THE LIST IS THIS SHORT.
+#
+# The instinct is to skip a lot here. That would be wrong: almost every check in
+# this file is about the SIMULATORS, the scrapes, the rules and the dashboards, and
+# every one of those is exactly what a BYO user most needs asserted — they are the
+# things a mismatched RELEASE_LABEL or sidecar label silently breaks. Skipping them
+# would turn --byo into a mode that proves nothing on the install that needs proof
+# most.
+#
+# So the only claim relaxed is the one that follows from THIS repo's Helm values
+# rather than from anything it installed: anonymous Viewer access to Grafana
+# (helm/kube-prometheus-stack/values.yaml). On a foreign Grafana that is the
+# operator's choice, so 401/403 becomes a SKIP.
+#
+# ⚠️ 404 STAYS FATAL, and that is the point. A board that Grafana has never heard of
+# means the sidecar did not import the ConfigMap — overwhelmingly because
+# GRAFANA_DASHBOARD_LABEL does not match what their sidecar watches, which is the
+# single most likely way a BYO install appears broken. Downgrading that to a skip
+# would hide the failure this mode exists to surface.
+if [[ "$BYO" == "1" ]]; then
+  echo "  BYO mode: the monitoring stack was not installed by this repo."
+  echo "    release '$KPS_RELEASE' · selector label 'release=$RELEASE_LABEL'"
+  echo "    dashboards labelled '${GRAFANA_DASHBOARD_LABEL}=${GRAFANA_DASHBOARD_LABEL_VALUE}'"
+  echo "    Relaxed: anonymous Grafana access (401/403 -> SKIP). Everything else is asserted."
+fi
+
 # 1. a node advertises nvidia.com/gpu allocatable > 0
 max_gpu="$("${KUBECTL[@]}" get nodes -o jsonpath='{range .items[*]}{.status.allocatable.nvidia\.com/gpu}{"\n"}{end}' \
   | grep -vE '^$' | sort -rn | head -1 || echo 0)"
@@ -120,7 +166,7 @@ for _ in $(seq 1 "$DCGM_POLL_ATTEMPTS"); do
   [[ "${up:-0}" -gt 0 && "${util:-0}" -gt 0 ]] && break
   sleep 5
 done
-[[ "${up:-0}" -gt 0 ]] && pass "DCGM scrape target up" || fail "no DCGM scrape target up (ServiceMonitor selector?)"
+[[ "${up:-0}" -gt 0 ]] && pass "DCGM scrape target up" || fail "no DCGM scrape target up (ServiceMonitor selector?)$(byo_hint)"
 [[ "${util:-0}" -gt 0 ]] && pass "DCGM_FI_DEV_GPU_UTIL returns $util series" || fail "DCGM_FI_DEV_GPU_UTIL empty"
 
 # 3b. The CLUSTER side of the DCGM surface contract — the same file
@@ -195,7 +241,7 @@ for m in DCGM_FI_DEV_GPU_TEMP DCGM_FI_DEV_POWER_USAGE; do
     sleep 5
   done
   [[ "${n:-0}" -gt 0 ]] && pass "derived series $m returns $n series (recording rule live)" \
-    || fail "$m empty after $((DCGM_POLL_ATTEMPTS * 5))s → dashboard temp/power panel blank (are the recording rules in manifests/alerts/ applied?)"
+    || fail "$m empty after $((DCGM_POLL_ATTEMPTS * 5))s → dashboard temp/power panel blank (are the recording rules in manifests/alerts/ applied?)$(byo_hint)"
 done
 
 # 4b. The advertised access path itself: fetch the board by UID over an UNAUTHENTICATED
@@ -238,8 +284,25 @@ grafana_uid_check() {
   done
   case "$code" in
     200) pass "$label dashboard reachable anonymously at $url" ;;
-    401|403) fail "$label dashboard uid '$uid' needs auth — anonymous Viewer not enabled (helm/kube-prometheus-stack/values.yaml)" ;;
-    404) fail "no dashboard with uid '$uid' in Grafana — the /d/<uid> link would 404 (sidecar not imported it yet?)" ;;
+    401|403)
+      # The one claim --byo relaxes — see the BYO block above. Under our own values
+      # this is a real failure; on a foreign Grafana it is the operator's choice, and
+      # the board being PRESENT is what we actually needed to establish.
+      if [[ "$BYO" == "1" ]]; then
+        skip "$label dashboard uid '$uid' exists but needs auth — anonymous Viewer is this repo's values choice, not yours (http $code)"
+      else
+        fail "$label dashboard uid '$uid' needs auth — anonymous Viewer not enabled (helm/kube-prometheus-stack/values.yaml)"
+      fi
+      ;;
+    404)
+      # Fatal in BOTH modes, and MORE informative in BYO: on a foreign cluster the
+      # overwhelmingly likely cause is a sidecar label this repo cannot know.
+      if [[ "$BYO" == "1" ]]; then
+        fail "no dashboard with uid '$uid' in Grafana — the ConfigMap exists but the sidecar never imported it. Does your Grafana watch '${GRAFANA_DASHBOARD_LABEL}=${GRAFANA_DASHBOARD_LABEL_VALUE}' (GRAFANA_DASHBOARD_LABEL), and does it search namespace '$MONITORING_NS'?"
+      else
+        fail "no dashboard with uid '$uid' in Grafana — the /d/<uid> link would 404 (sidecar not imported it yet?)"
+      fi
+      ;;
     *)   fail "could not reach Grafana on localhost:${GRAFANA_PORT} (http $code) — the port-forward could not be established or kept alive. Is ${GRAFANA_PORT} already in use? try GRAFANA_PORT=3001" ;;
   esac
 }
@@ -300,7 +363,7 @@ echo "LLM simulation:"
 # L1. the simulators are being scraped
 llm_up="$(promql_count 'up{job="llm-sim"} == 1')"
 [[ "${llm_up:-0}" -gt 0 ]] && pass "L1 $llm_up LLM scrape target(s) up" \
-  || fail "L1 no LLM scrape target up — is the llm-sim ServiceMonitor selecting the Service? (kubectl -n $LLM_NS get svc --show-labels)"
+  || fail "L1 no LLM scrape target up — is the llm-sim ServiceMonitor selecting the Service? (kubectl -n $LLM_NS get svc --show-labels)$(byo_hint)"
 
 # L2. a counter is ADVANCING, not merely present
 llm_tok="$(promql_count 'rate(vllm:generation_tokens_total[1m]) > 0')"
