@@ -44,7 +44,10 @@ See [compose/](compose/) for what it deliberately cannot cover.
   including the ones the rig never drives. If you build alerting here, you can test it here.
 - **Two Grafana dashboards**, one `.json` each, used three ways: wrapped in a ConfigMap
   for the sidecar, mounted by the compose stack, or imported into any Grafana. Nothing is
-  ever clicked into place, so a re-install reproduces them exactly.
+  ever clicked into place, so a re-install reproduces them exactly. Both are published on
+  grafana.com, so you can import them by id into a Grafana you already run:
+  [25618](https://grafana.com/grafana/dashboards/25618) (GPU) and
+  [25619](https://grafana.com/grafana/dashboards/25619) (vLLM).
 - **An acceptance suite** ([`scripts/verify.sh`](scripts/verify.sh)) that asserts metrics
   are flowing, both boards render, and the alerts actually reach `firing`.
 

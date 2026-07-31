@@ -10,16 +10,8 @@ stands up GPU and LLM observability with no GPU and no model weights — but the
 plain vLLM PromQL against the **V1** metric surface. Build the board and its alerts here,
 point them at a real deployment afterwards.
 
-![Six panels comparing a healthy tenant and an overloaded one side by
-side](https://raw.githubusercontent.com/ChrisAdkin8/k8s-ai-observability/main/docs/llm-dashboard.png)
-
 The first panel is the whole design: two tenants either side of the 2s alert threshold,
 identical code, one degraded. A board that summed them would show neither.
-
-> The screenshot pre-dates the V1 histogram-bucket sync, so the saturated tenant reads
-> `1.20 mins` where it now reads ~78s. Same simulated latency — different bucket
-> resolution to report it at. That difference is itself worth knowing about, and it is
-> covered under [inter-token latency](#read-the-inter-token-latency-panel-carefully) below.
 
 ## Panels
 
@@ -116,9 +108,10 @@ is not wrong and neither is the histogram; the resolution simply is not there. *
 set an ITL SLO from a number that lands in a wide bucket** — check which bucket your
 operating point falls into first.
 
-The same effect explains the screenshot discrepancy above. V1 replaced TTFT's entire tail
-above 10s (`15/20/30/45/60/90/120` became `20/40/80/160/640/2560`), and the saturated
-tenant sits at ~58s — inside the part that moved.
+The same effect moved TTFT's reported numbers when V1 replaced its entire tail above 10s
+(`15/20/30/45/60/90/120` became `20/40/80/160/640/2560`), with the saturated tenant sitting
+at ~58s, inside the part that changed. If a screenshot of this board disagrees with what
+your own deployment reports, bucket resolution is the first thing to check, not the board.
 
 ## The cross-domain panel
 

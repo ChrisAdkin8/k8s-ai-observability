@@ -14,8 +14,8 @@ in `scripts/config.sh` at install time.
 | vLLM metric surface mirrored | `scripts/config.sh` (`LLM_VLLM_VERSION`) | `v1` — names and buckets, drift-checked weekly, see below |
 | promtool (rule tests) | `.github/workflows/ci.yml` (`PROMETHEUS_VERSION`) | `3.7.3` — CI only; locally any promtool works |
 | LLM simulator base image | `manifests/llm/20-simulators.yaml` | `python:3.12-slim` |
-| DCGM dashboard | `manifests/dashboards/gpu-sim-dcgm.json` | shipped in-repo (grafana.com board 12239 is an optional swap-in) |
-| vLLM dashboard | `manifests/dashboards/llm-sim-overview.json` | shipped in-repo |
+| DCGM dashboard | `manifests/dashboards/gpu-sim-dcgm.json` | shipped in-repo, published as grafana.com [25618](https://grafana.com/grafana/dashboards/25618) (board 12239 is an optional swap-in) |
+| vLLM dashboard | `manifests/dashboards/llm-sim-overview.json` | shipped in-repo, published as grafana.com [25619](https://grafana.com/grafana/dashboards/25619) |
 | aws provider | `terraform/eks/versions.tf` | `~> 6.55` |
 | eks module | `terraform/eks/main.tf` | `~> 21.24.0` — patch-level on purpose; the reason is in the comment above it |
 | vpc module | `terraform/eks/main.tf` | `~> 5.21.0` — patch-level on purpose, same reason |

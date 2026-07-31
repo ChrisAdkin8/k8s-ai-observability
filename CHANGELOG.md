@@ -49,6 +49,19 @@ Comparison links are at the foot of this file, one per released version.
   the two Helm chart pins, which live in shell variables and stay a deliberate manual
   decision; the file says so and says why.
 
+- **Both dashboards are published to the grafana.com catalog**: the GPU board is
+  [25618](https://grafana.com/grafana/dashboards/25618) and the vLLM board is
+  [25619](https://grafana.com/grafana/dashboards/25619). They can now be imported by id
+  into any Grafana, without cloning this repo.
+
+  The ids are recorded in three places on purpose, and all three are the ones the repo
+  already told you to update: the table at the top of `manifests/dashboards/README.md`,
+  `docs/versions.md`, and the README. A published board that cannot be traced back to the
+  file it came from is how a catalog entry goes stale without anyone noticing.
+
+  ⚠️ **Republish as a new revision, not a new dashboard.** A second upload would mint a
+  second id, and the one people have already imported would quietly stop receiving fixes.
+
 - **Publishing metadata for both dashboards**, ready to paste, in
   `manifests/dashboards/README.md`.
 
