@@ -23,6 +23,25 @@ Comparison links are at the foot of this file, one per released version.
 
 ## [Unreleased]
 
+_Nothing yet._
+
+## [0.3.0] — 2026-07-31
+
+**The simulator had stopped matching real vLLM, and nothing here could tell.** Two metric
+names and all three histogram bucket layouts had been superseded by the V1 engine while
+every check in this repo stayed green — because every check reads the simulator, and the
+simulator was perfectly consistent with itself. It was consistent with the wrong thing.
+
+That is the failure this rig exists to prevent, so this release does three things rather
+than one: resyncs the surface, re-derives every number that depended on it, and adds a
+check that points *upstream* — the only kind that could have caught it. Also a trimmed
+monitoring profile, for the laptops that cannot spare 8 GiB.
+
+⚠️ **Breaking, by this file's own table** — it changes metric names, which under semver's
+initial-development rule bumps the MINOR while the version is `0.x`. Re-run
+`./scripts/install.sh <target>`, and see Fixed below for the two names to change in any
+dashboard or alert of your own. `--vllm-surface both` is the quickest way to find them.
+
 ### Fixed
 
 - ⚠️ **The simulated vLLM metric surface was two releases out of date, and failing
@@ -298,6 +317,7 @@ Initial public release. Build and test GPU and LLM observability without a GPU.
   a GPU, running the advertised `task local:up` end to end including every acceptance
   check, with a diagnostics bundle on failure and weekly upstream-drift detection.
 
-[Unreleased]: https://github.com/ChrisAdkin8/k8s-ai-observability/compare/v0.2.0...HEAD
+[Unreleased]: https://github.com/ChrisAdkin8/k8s-ai-observability/compare/v0.3.0...HEAD
+[0.3.0]: https://github.com/ChrisAdkin8/k8s-ai-observability/compare/v0.2.0...v0.3.0
 [0.2.0]: https://github.com/ChrisAdkin8/k8s-ai-observability/compare/v0.1.0...v0.2.0
 [0.1.0]: https://github.com/ChrisAdkin8/k8s-ai-observability/releases/tag/v0.1.0

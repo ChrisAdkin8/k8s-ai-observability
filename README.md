@@ -1,4 +1,5 @@
 [![CI](https://github.com/ChrisAdkin8/k8s-ai-observability/actions/workflows/ci.yml/badge.svg)](https://github.com/ChrisAdkin8/k8s-ai-observability/actions/workflows/ci.yml)
+[![Release](https://img.shields.io/github/v/release/ChrisAdkin8/k8s-ai-observability?color=blue)](https://github.com/ChrisAdkin8/k8s-ai-observability/releases)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 [![Kubernetes](https://img.shields.io/badge/kubernetes-v1.36.1-326ce5.svg)](kind/gpu-sim.yaml)
 
