@@ -23,6 +23,60 @@ Comparison links are at the foot of this file, one per released version.
 
 ## [Unreleased]
 
+### Added
+
+- **A docs-only change no longer stands up two kind clusters and a compose stack.** A
+  `changes` job diffs the push or the whole PR and gates the expensive jobs on the result:
+  ~13 minutes down to seconds. Verified safe first — nothing under `scripts/`, `compose/`,
+  `manifests/` or `tests/` *reads* a `.md` file; every match is prose in a comment.
+
+  Deliberately **not** `paths-ignore:` on the triggers. A ruleset on `main` requires these
+  checks, and a job that never *starts* leaves its check pending forever, so a docs-only PR
+  would be unmergeable. It fails **open** — new branch, force-push, unreachable base, empty
+  diff all run everything — because being wrong that way costs 13 minutes and the other way
+  ships untested code. `schedule` and `workflow_dispatch` always run the lot: "does this
+  still work" must not depend on what the last commit happened to touch.
+
+### Fixed
+
+- **The first version of that gate blocked docs-only PRs outright**, which is the exact
+  failure it was written to prevent. A job-level `if:` on the `stack` **matrix** meant that
+  when it skipped, GitHub did not interpolate the job name — the check reported as the
+  literal `full stack on kind (${{ matrix.profile }})`, so the two names the ruleset
+  requires never reported. Caught on a real docs-only PR: every job green or skipped,
+  `mergeable=MERGEABLE`, **`state=BLOCKED`**.
+
+  The gate moved to the **steps**, so the job runs, the matrix expands and both names
+  report. Two steps already carried a condition, where a blind second `if:` would have been
+  a duplicate YAML key; merged, with `always()` ordered so the gate still holds — on a
+  docs-only run there is no cluster to dump.
+
+- **That fix cost the one honest signal**, so the job now says so. A skipped job reports
+  `skipped`; a step-gated one reports `success` in three seconds without standing anything
+  up, under a check named *"full stack on kind"*. The name cannot carry the caveat — it has
+  to stay byte-identical or the ruleset stops matching — so a `::notice::` on the run
+  summary states that the green means "nothing here could have been affected", not "the
+  stack was verified".
+
+- **The compose leg's readiness wait was tuned to the fast path**, and went red on a
+  perfectly healthy stack: every container `Up`, no crashes, nothing in the logs. Prometheus
+  was serving at `19:20:15` while Grafana was still running its first-run SQLite migrations
+  at `19:21:15`, a full minute behind. 60s → 180s, and the failure now records when each
+  service became ready and names whichever did not, instead of the useless "Prometheus
+  and/or Grafana never became ready" that made this need a log download to diagnose.
+
+  Also worth recording: the obvious one-liner for tracking both services,
+  `[ -z "$x" ] || curl … && x=$i`, is wrong under `set -e` — the failing curl is the line's
+  exit status, so the step aborts on the *first* poll, before anything can start. `if`.
+
+- **Documentation sweep.** `docs/llm-simulation.md` contradicted itself on the saturated
+  tenant's p95 — two places said `~60s` while a third, two lines below one of them, said
+  `~78s`. `verify.sh` settles it: `~58s` is the true queue wait, `~78s` is what p95 *reports*
+  once V1's `(40, 80]` bucket quantises it. Also documented `task load`, which appeared in
+  `task --list` and nowhere else; linked `manifests/workloads/extras/README.md`, the last
+  unreachable doc; and spelled out `GRAFANA_DASHBOARD_LABEL_VALUE` and the `KIND_MIN_*` /
+  `KIND_WANT_*` overrides, which had behaviour documented but no names.
+
 ## [0.4.0] — 2026-07-31
 
 **This release exists because both dashboards got published.** Once 25618 and 25620 were
