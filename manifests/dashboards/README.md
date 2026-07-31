@@ -124,10 +124,14 @@ It carries more weight than the GPU one, because this board is the one that does
 import-and-go: five panels read `llm:*` recording rules and two more are simulator-only,
 so the catalog page has to say which, and give the rules inline.
 
-⚠️ **25620 has an unpublished revision.** The prefix-cache panel is in the repo file and in
-`dist/`, and the catalog still serves the board without it. Re-submit as a **new revision
-of 25620**, never as a new dashboard: a second upload mints a second id, and everyone who
-already imported the first silently stops receiving fixes.
+⚠️ **When a panel changes, the catalog does not update itself.** The board in this repo and
+the board the catalog serves are two artefacts, and `task dashboards` only refreshes the
+first — so a merged panel reaches nobody who imported by id until it is uploaded again.
+
+Always re-submit as a **new revision of the existing id**, never as a new dashboard: a
+second upload mints a second id, and everyone who already imported the first silently
+stops receiving fixes. 25620's prefix-cache revision went up on 2026-07-31; both boards
+are currently in step with the repo.
 
 A logo each, 512×512, is in [`docs/logos/`](../../docs/logos/) — `gpu-sim-dcgm.png` and
 `llm-sim-overview.png`, named for the boards they belong to. They are **generated**, not

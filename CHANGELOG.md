@@ -297,10 +297,13 @@ those claims honest, and the CI legs that stop the alternative paths rotting.
   so the division is exact on any architecture, which sidesteps the amd64/arm64 percentile
   trap documented in `tests/`.
 
-  ⚠️ **25620 needs re-submitting as a new revision.** The board is published, so the panel
-  does not reach anyone who imported it until it is uploaded again — and it must go up as a
-  revision of 25620, never as a new dashboard, or a second id is minted and everyone on the
-  first stops receiving fixes.
+  ⚠️ ~~**25620 needs re-submitting as a new revision.**~~ **DONE — uploaded 2026-07-31.**
+  Struck rather than deleted, because the reasoning outlives the action: the board is
+  published, so a merged panel reaches nobody who imported it by id until the catalog copy
+  is uploaded again, and it must go up as a revision of the existing id, never as a new
+  dashboard — a second upload mints a second id and everyone on the first silently stops
+  receiving fixes. That applies to the next panel too, and is stated as standing guidance
+  in [`manifests/dashboards/README.md`](manifests/dashboards/README.md).
 
 - **A `verify.sh` L7.** The queue-time histogram is receiving observations and both
   prefix-cache counters are present, on a real cluster. Everything else covering these
