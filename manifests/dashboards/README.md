@@ -105,12 +105,29 @@ datasource it expects (Prometheus). Ready to paste:
 > https://github.com/ChrisAdkin8/k8s-ai-observability or those two panels stay blank
 > against a simulated source. Prompts for your Prometheus datasource on import.
 
+For the catalog page's long-form description, paste
+[`gpu-sim-dcgm.grafana-com.md`](gpu-sim-dcgm.grafana-com.md) — the same board written for
+someone arriving with their own Prometheus and no knowledge of this repo, so every link in
+it is absolute and the derived-series caveat is stated in full rather than referenced.
+
 **`llm-sim-overview.json`** — *LLM Simulation — vLLM Serving Overview*
 
 > Time to first token, inter-token latency, throughput, queue depth and KV-cache usage for
 > vLLM, broken out `by (model_name)` so a saturated tenant is never averaged into a healthy
 > one. Uses the **V1** engine's metric names (`vllm:kv_cache_usage_perc`,
 > `vllm:inter_token_latency_seconds`). Prompts for your Prometheus datasource on import.
+
+Long-form description: [`llm-sim-overview.grafana-com.md`](llm-sim-overview.grafana-com.md).
+It carries more weight than the GPU one, because this board is the one that does **not**
+import-and-go: four panels read `llm:*` recording rules and two more are simulator-only,
+so the catalog page has to say which, and give the rules inline.
+
+A logo each, 512×512, is in [`docs/logos/`](../../docs/logos/) — `gpu-sim-dcgm.png` and
+`llm-sim-overview.png`, named for the boards they belong to. They are **generated**, not
+drawn: `python3 docs/dashboard-logos.py` re-renders both from
+[`docs/dashboard-logos.py`](../../docs/dashboard-logos.py), so the pair cannot drift into
+mismatched marks and a tweak is a diff rather than a re-export. Needs `pillow`, like the
+other two image scripts in `docs/`.
 
 You get a numeric dashboard id back — **put it in the table at the top of this file**, and
 in the README, so the published board and this repo stay connected.
