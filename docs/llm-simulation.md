@@ -71,18 +71,67 @@ Prometheus sees.
 | `vllm:inter_token_latency_seconds` | histogram | Inter-token latency |
 | `vllm:e2e_request_latency_seconds` | histogram | Whole-request latency |
 | `vllm:request_queue_time_seconds` | histogram | Time spent waiting, before prefill starts |
+| `vllm:request_prefill_time_seconds` | histogram | Time spent in the PREFILL phase |
+| `vllm:request_decode_time_seconds` | histogram | Time spent in the DECODE phase |
+| `vllm:request_inference_time_seconds` | histogram | Time spent in the RUNNING phase — prefill + decode |
 | `vllm:request_success_total` | counter | Completions, by `finished_reason` |
 
-`vllm:request_queue_time_seconds` shares its bucket boundaries with
-`vllm:e2e_request_latency_seconds` — upstream declares one `request_latency_buckets` list
-and passes it to both, so this repo holds one `E2E_BUCKETS` constant and the weekly drift
-check watches it on behalf of both histograms.
+Those five request-scoped histograms share **one** bucket list. Upstream declares a single
+`request_latency_buckets` and passes it to all of them, so this repo holds one
+`E2E_BUCKETS` constant and the weekly drift check watches it on behalf of every one.
 
-**TTFT = queue time + prefill, exactly.** The simulator builds TTFT out of those two terms
-and observes the first of them into this histogram, so the relation is an identity rather
-than an approximation, and `--selftest` asserts it as one on every completed request. On a
-saturated tenant almost all of TTFT is the queue term: prefill is 0.08s against a queue
-wait of ~58s.
+### The phase decomposition
+
+The four phase histograms are the answer to "the request took 6 seconds — doing what":
+
+```
+e2e       = queue    + inference
+inference = prefill  + decode
+```
+
+Both hold, and the simulator asserts both per completed request in `--selftest`, but
+**they are not equally exact and that is worth knowing before you write a test over
+them.** `inference` is *assigned* as `prefill + decode` — one expression, evaluated once —
+so it survives an `==`. `e2e` is read off the clock as `(admit + prefill + decode) -
+arrived` while the identity reassociates it as `(admit - arrived) + prefill + decode`;
+those are not bit-identical in IEEE 754, so an `==` there fails on ~94% of perfectly
+correct requests. Measured worst error: 5.3e-14. The selftest uses `abs_tol=1e-9`, which
+is five orders of margin over that and twelve orders below what a real wiring fault moves.
+
+**TTFT = queue time + prefill, exactly**, for the same assignment reason. On a saturated
+tenant almost all of TTFT is the queue term: prefill is 0.08s against a queue wait of ~58s.
+
+⚠️ **Plot the breakdown as MEANS, not percentiles.** The board does, and there are two
+independent measured reasons:
+
+| | |
+|--|--|
+| **quantiles are not additive** | steady tenant, perfect resolution: p95 queue+prefill+decode = 7.473s against p95 e2e 7.468s. The means: 5.101s against 5.101s, exactly. |
+| **these buckets cannot resolve prefill** | `base_ttft_seconds` is 0.08s and the first boundary is 0.3s, so every prefill observation lands in the first bucket and `histogram_quantile` interpolates from zero across it — **3.03x** overstated on both tenants. |
+
+A histogram mean has no bucket dependence at all (`_sum` and `_count` are exact), so it is
+immune to the second, and it is additive, so it is immune to the first.
+
+⚠️ **The second effect transfers to real vLLM.** These boundaries are upstream's, so a
+real deployment with sub-300ms prefill reads exactly as high — it is not an artefact of
+this rig. Do not build a prefill SLO on a p95 from these buckets, and do not "fix" it by
+adding a finer low-end bucket list: the boundaries are what make a query built here
+transfer unchanged. The recorded percentile is scoped to **decode** for that reason —
+1.12x–1.26x across both tenants, against 3.03x for prefill and 1.71x for e2e under
+saturation.
+
+### One divergence from upstream, deliberately
+
+⚠️ Upstream labels every `vllm:` series `model_name` **and** `engine`
+(`loggers.py:468`); this repo emits `model_name` alone. That is real drift, and the weekly
+check cannot see it — `check-vllm-buckets.py` compares metric *names* and bucket
+*boundaries*, not label sets, so this is a known blind spot rather than an oversight.
+
+It is left alone on purpose. Adding `engine` would change the label set of every existing
+series at once, moving every `by (model_name)` aggregation's cardinality, every promtool
+`exp_labels` and every dashboard legend, for no panel anyone has asked for. By this repo's
+own definition it is a MAJOR-class change (`CHANGELOG.md` — "metric or recording-rule
+names"), so if it is ever added it should be its own change with its own migration note.
 
 ### Which engine's names
 
@@ -155,9 +204,23 @@ This rig's **own** metrics are prefixed `llmsim_` and are safe to label freely:
 | `llmsim_capacity_rps` | Sustainable throughput implied by the current profile |
 
 Recording rules add `llm:ttft:p50_5m` / `p95_5m` / `p99_5m`, `llm:tpot:p95_5m`,
-`llm:tokens:generation_rate5m`, `llm:tokens:prompt_rate5m` and
+`llm:decode:p95_5m`, `llm:tokens:generation_rate5m`, `llm:tokens:prompt_rate5m` and
 `llm:prefix_cache:hit_ratio5m` — all aggregated **`by (model_name)`** so the two tenants
 never merge into one meaningless number.
+
+The phase breakdown adds four **means**: `llm:queue:mean5m`, `llm:prefill:mean5m`,
+`llm:decode:mean5m` and `llm:e2e:mean5m`. Four rather than three — `llm:e2e:mean5m` is the
+right-hand side of *does the breakdown add up*, which is asserted as a permanent promtool
+test and again on a live cluster by `verify.sh` L8. It has to be a **rule** and not an
+inlined `rate(_sum)/rate(_count)`: recorded series here carry `source: simulated` and raw
+`vllm:` series do not, so an inlined right-hand side matches nothing and the obvious repair
+(`on(model_name)`) drops `source` from the result — right arithmetic, wrong labels, reading
+as an arithmetic bug.
+
+Their denominators clamp at `1e-9` rather than at `1`, exactly as
+`llm:prefix_cache:hit_ratio5m` does. A low-traffic tenant can genuinely complete fewer than
+one request per second, and flooring at 1 would silently under-report the mean of precisely
+the deployments least likely to notice. An idle tenant reads `0`, not `NaN`.
 
 `llm:tokens_per_watt:5m` is the exception on both counts. It is **cluster-aggregate** — a bare
 `sum()` over every tenant, with no `by (model_name)` — and it is *derived from derived*: the

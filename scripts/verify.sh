@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # verify.sh <eks|gke|local> [--byo] — assert this repo's acceptance criteria: the GPU
-# checks 1-5 (including 3b/4b/4c/4d) and the LLM checks L1-L7. Both sets of numbers are
+# checks 1-5 (including 3b/4b/4c/4d) and the LLM checks L1-L8. Both sets of numbers are
 # cited elsewhere in the repo and in commit history — do not renumber them. New checks
 # get a letter suffix on the one they belong with, which is why 3b is 3b.
 #
@@ -347,7 +347,7 @@ done
   || fail "GPUHighUtilization did not fire within timeout (check the 'gpu-busy' workload util range 85-99 vs the rule's >80 threshold and 1m for:)"
 
 # ============================================================================
-# LLM simulation checks — numbered L1..L7 so they can never be confused with
+# LLM simulation checks — numbered L1..L8 so they can never be confused with
 # the GPU checks above (which already use 1..5 and 4b/4c/4d).
 #
 # ⚠️ EVERY check below is phrased so it returns ZERO SERIES on failure.
@@ -497,6 +497,58 @@ llm_qt="$(promql_count 'rate(vllm:request_queue_time_seconds_count[5m]) > 0')"
 llm_pc="$(promql_count 'count(vllm:prefix_cache_queries_total) > 0 and count(vllm:prefix_cache_hits_total) > 0')"
 [[ "${llm_pc:-0}" -gt 0 ]] && pass "L7 both prefix-cache counters are present" \
   || fail "L7 vllm:prefix_cache_queries_total and/or _hits_total absent — are the simulator pods running the current scripts/llm-sim.py? (install.sh rebuilds the llm-sim-script ConfigMap, but a running pod keeps the old mount until it restarts)"
+
+# L8. the request phase breakdown survives a real scrape, for the same reason
+#     L7 exists: --selftest proves the simulator EMITS the three histograms and
+#     promtool proves the PromQL over them is right, and neither of those leaves
+#     the repo. This proves Prometheus RECEIVES them. The gap between those
+#     claims is where a ServiceMonitor, a relabel rule or an exposition-format
+#     mistake lives.
+#
+#     ⚠️ L8 is the next free label in THIS script and that is what decides it.
+#     prompt-llm-sim.md also uses L7/L8, but says at :861 that neither is a
+#     verify.sh check — its L7 is "every pre-existing check still passes" and
+#     its L8 is "teardown.sh removes the namespace". verify.sh has since taken
+#     L7 for the queue-time and prefix-cache assertion above, so that label
+#     already means two things depending on which document you read. Skipping to
+#     L9 to dodge the clash would leave a hole in this script's sequence to
+#     protect a label in a brief that explicitly is not about this script.
+#     verify.sh's labels are authoritative for verify.sh, and they are
+#     contiguous.
+#
+#     Single-shot, in the style of L7: by the time this runs L6 has polled for
+#     up to five minutes, so the first scrape landed long ago. Anything empty
+#     here is missing, not late.
+#
+#     All three in ONE expression, `and`-ed on the counts. `and` between
+#     label-less vectors yields nothing if ANY of them is absent, which keeps
+#     this inside the zero-series-on-failure rule this block opens with — and
+#     rate(..._count[5m]) > 0 is the ADVANCING form, so a histogram that exists
+#     and never receives an observation fails rather than passing on presence.
+llm_phases="$(promql_count 'count(rate(vllm:request_prefill_time_seconds_count[5m]) > 0) > 0
+  and count(rate(vllm:request_decode_time_seconds_count[5m]) > 0) > 0
+  and count(rate(vllm:request_inference_time_seconds_count[5m]) > 0) > 0')"
+[[ "${llm_phases:-0}" -gt 0 ]] && pass "L8 all three request phase histograms are receiving observations" \
+  || fail "L8 one or more of vllm:request_{prefill,decode,inference}_time_seconds is absent or not advancing — are the simulator pods running the current scripts/llm-sim.py? (install.sh rebuilds the llm-sim-script ConfigMap and the checksum annotation rolls the pods, but a pod that never rolled keeps the old mount)"
+
+# And that the breakdown ADDS UP against what Prometheus actually recorded.
+# promtool asserts this over fixtures; this asserts it over real observations,
+# which is a different claim — the fixtures cannot catch a rule that was applied
+# to the cluster in a stale form, or a phase histogram wired to the wrong term.
+#
+# Bounded rather than exact: these are floats through rate() and a division, so
+# an == would be asserting bit-equality on a live cluster. 1e-6 is far below any
+# real breakdown error (a mis-wired phase moves this by whole seconds) and far
+# above float noise. Polled, because four recording rules need a couple of
+# evaluations to exist at all.
+llm_sums=0
+for _ in $(seq 1 24); do
+  llm_sums="$(promql_count 'abs((llm:queue:mean5m + llm:prefill:mean5m + llm:decode:mean5m) - llm:e2e:mean5m) < 1e-6')"
+  [[ "${llm_sums:-0}" -gt 0 ]] && break
+  sleep 5
+done
+[[ "${llm_sums:-0}" -gt 0 ]] && pass "L8 the phase breakdown sums to end-to-end latency ($llm_sums tenant(s))" \
+  || fail "L8 llm:queue+prefill+decode:mean5m does not equal llm:e2e:mean5m — all four recording rules applied? (a quantile rule substituted for a mean stops summing: means are additive, percentiles are not)"
 
 graf_pf_stop
 prom_pf_stop
