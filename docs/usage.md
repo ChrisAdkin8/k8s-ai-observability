@@ -71,4 +71,4 @@ task load -- ramp        # drives the CURRENT context, whatever that is
 Prefer `task local:load` / `eks:load` / `gke:load`. Those resolve the context for their
 target first, so they cannot quietly drive a cluster you had forgotten you were pointed at.
 The bare form exists for when you already know, and it is the only task in the repo that
-takes your word for it. Use it knowingly.
+takes your word for it.
