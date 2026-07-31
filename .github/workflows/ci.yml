@@ -499,6 +499,22 @@ jobs:
       # local run (colima --memory 4) and is stated as unverified in values-lite.yaml.
       LITE: ${{ matrix.profile == 'lite' && '1' || '' }}
     steps:
+      # Says out loud what this job's green means when the gate is off.
+      #
+      # Gating the STEPS keeps the required check names reporting, but it costs the one
+      # honest signal a job-level `if:` gave for free: a skipped job says "skipped",
+      # whereas this one says "success" in 3 seconds without standing anything up. A
+      # check named "full stack on kind" going green without a stack is the hollow-green
+      # failure this repo writes assertions against, so it does not get to be silent.
+      #
+      # ::notice:: puts it on the run summary, not just in a collapsed log. The job NAME
+      # cannot carry it — that string has to stay byte-identical or the ruleset on main
+      # stops matching the check, which is the bug the step-level gate exists to fix.
+      - name: Docs-only change — the stack was NOT stood up
+        if: needs.changes.outputs.code != 'true'
+        run: |
+          echo "::notice title=Stack not verified::Only markdown changed, so every step in this job was skipped. This green means 'nothing here could have been affected', NOT 'the stack was stood up and passed'."
+
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         if: needs.changes.outputs.code == 'true'
 
