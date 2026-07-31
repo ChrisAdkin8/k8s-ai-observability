@@ -67,6 +67,7 @@ case the thing being tested cannot demonstrate by running.
 | File | Pins |
 |--|--|
 | `upstream-vllm-metric-names.txt` | a **stubbed** upstream metric set for `check-vllm-buckets.py --selftest`. Never update it to track upstream — the real file is the moving thing the drift check watches, and testing against it would make the test drift with its own input |
+| `profile-no-prefix-cache.json` | a load profile with `prefix_cache_hit_rate` at `0.0`, so `llm-sim.py --selftest` can assert both prefix-cache counters are still **emitted**, with hits flat at zero. An absent series and a zero one are different things to a panel |
 
 ## promtool
 

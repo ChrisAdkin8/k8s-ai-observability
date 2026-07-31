@@ -51,6 +51,12 @@ kubectl -n "$LLM_NS" get deploy "$DEPLOY" >/dev/null 2>&1 || {
 # Anything below that keeps the queue near zero; above it the queue fills to
 # max_in_flight - max_concurrency = 160 and TTFT plateaus around 160/2.74 ~= 58s
 # (reported TTFT is the real measured queue wait, so Little's Law sets it).
+#
+# prefix_cache_hit_rate is REWRITTEN UNCHANGED at every step, and must match
+# manifests/llm/extras/llm-driven.yaml: this function replaces the whole
+# ConfigMap, so a field omitted here silently reverts to the simulator's 0.0
+# default the first time load is driven, and the panel flatlines mid-demo. It
+# changes no latency by construction, so it is not what any mode is varying.
 set_rate() {
   local rps="$1" note="$2"
   echo "  -> ${rps} rps  (${note}; holding ${STEP_SECONDS}s)"
@@ -66,6 +72,7 @@ set_rate() {
   "base_ttft_seconds": 0.08,
   "base_itl_seconds": 0.015,
   "kv_cache_tokens_capacity": 32768,
+  "prefix_cache_hit_rate": 0.25,
   "finish_reasons": {"stop": 0.90, "length": 0.09, "abort": 0.01},
   "seed": null
 }

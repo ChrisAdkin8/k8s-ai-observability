@@ -24,6 +24,13 @@ metadata:
     app.kubernetes.io/part-of: gpu-sim-llm
 data:
   # Starts idle (well under the 2.74 rps capacity), like gpu-driven starts at 0-5.
+  #
+  # prefix_cache_hit_rate sits between the two fixed tenants, so the prefix-cache
+  # panel draws three distinguishable lines while this one is being driven.
+  # Chosen rather than modelled — see 10-profiles.yaml. It changes no latency by
+  # construction, so arrival rate is still the only thing that moves TTFT here.
+  #
+  # ⚠️ JSON below, so the comments have to live up here.
   profile.json: |
     {
       "model_name": "sim-llama-3-8b-driven",
@@ -35,6 +42,7 @@ data:
       "base_ttft_seconds": 0.08,
       "base_itl_seconds": 0.015,
       "kv_cache_tokens_capacity": 32768,
+      "prefix_cache_hit_rate": 0.25,
       "finish_reasons": {"stop": 0.90, "length": 0.09, "abort": 0.01},
       "seed": null
     }

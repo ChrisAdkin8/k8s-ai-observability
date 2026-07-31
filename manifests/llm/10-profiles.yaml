@@ -32,6 +32,23 @@
 #    it was really 0.88x, and the queue ran away until it pinned at 160 — making
 #    steady and saturated indistinguishable on the dashboard. Tune against the
 #    figure llmsim_capacity_rps reports, not against the base-latency figure.
+#
+# ⚠️ prefix_cache_hit_rate IS DERIVED FROM NOTHING, unlike every number above it.
+#    0.35 on steady and 0.15 on saturated are CHOSEN, so the board draws two
+#    distinguishable lines, with the lower one on the saturated tenant because a
+#    server under eviction pressure reuses less. That is the whole justification.
+#    It is written down because an invented number presented as a modelled one is
+#    exactly the failure the arithmetic above exists to prevent.
+#
+#    Setting them is safe here precisely because the hit rate is DECOUPLED FROM
+#    LATENCY BY CONSTRUCTION — prefill in scripts/llm-sim.py is flat, not
+#    token-proportional, so there is no per-token work a cached block could
+#    remove. No existing series changes; only the two new counters take a value.
+#    The capacity figure, the 2s threshold, verify.sh's L3b bound and every
+#    promtool expectation are untouched, and --selftest asserts TTFT is identical
+#    across hit rates so that stays true. A zero on a published board would be a
+#    worse first impression than no panel; a fabricated speedup would be worse
+#    than either.
 ---
 apiVersion: v1
 kind: ConfigMap
@@ -52,6 +69,7 @@ data:
       "base_ttft_seconds": 0.08,
       "base_itl_seconds": 0.015,
       "kv_cache_tokens_capacity": 32768,
+      "prefix_cache_hit_rate": 0.35,
       "finish_reasons": {"stop": 0.90, "length": 0.09, "abort": 0.01},
       "seed": null
     }
@@ -64,8 +82,10 @@ metadata:
   labels:
     app.kubernetes.io/part-of: gpu-sim-llm
 data:
-  # Identical to steady except model_name and arrival_rate_rps. That is the
-  # whole difference between a healthy tenant and one that trips the alert.
+  # Identical to steady except model_name, arrival_rate_rps and the prefix-cache
+  # hit rate. The arrival rate is the whole difference between a healthy tenant
+  # and one that trips the alert; the hit rate changes no latency at all and only
+  # gives the cache panel a second, lower line to draw.
   profile.json: |
     {
       "model_name": "sim-llama-3-8b-saturated",
@@ -77,6 +97,7 @@ data:
       "base_ttft_seconds": 0.08,
       "base_itl_seconds": 0.015,
       "kv_cache_tokens_capacity": 32768,
+      "prefix_cache_hit_rate": 0.15,
       "finish_reasons": {"stop": 0.88, "length": 0.09, "abort": 0.03},
       "seed": null
     }

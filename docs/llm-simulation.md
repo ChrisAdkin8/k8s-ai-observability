@@ -65,10 +65,24 @@ Prometheus sees.
 | `vllm:kv_cache_usage_perc` | gauge | KV-cache utilisation, 0–1 |
 | `vllm:prompt_tokens_total` | counter | Prefill tokens |
 | `vllm:generation_tokens_total` | counter | Decode tokens |
+| `vllm:prefix_cache_queries_total` | counter | Prompt tokens looked up in the prefix cache |
+| `vllm:prefix_cache_hits_total` | counter | Prompt tokens found there — **plot the ratio, not either counter** |
 | `vllm:time_to_first_token_seconds` | histogram | TTFT |
 | `vllm:inter_token_latency_seconds` | histogram | Inter-token latency |
 | `vllm:e2e_request_latency_seconds` | histogram | Whole-request latency |
+| `vllm:request_queue_time_seconds` | histogram | Time spent waiting, before prefill starts |
 | `vllm:request_success_total` | counter | Completions, by `finished_reason` |
+
+`vllm:request_queue_time_seconds` shares its bucket boundaries with
+`vllm:e2e_request_latency_seconds` — upstream declares one `request_latency_buckets` list
+and passes it to both, so this repo holds one `E2E_BUCKETS` constant and the weekly drift
+check watches it on behalf of both histograms.
+
+**TTFT = queue time + prefill, exactly.** The simulator builds TTFT out of those two terms
+and observes the first of them into this histogram, so the relation is an identity rather
+than an approximation, and `--selftest` asserts it as one on every completed request. On a
+saturated tenant almost all of TTFT is the queue term: prefill is 0.08s against a queue
+wait of ~58s.
 
 ### Which engine's names
 
@@ -79,6 +93,19 @@ before V1, and this repo emitted the old spellings up to and including `0.2.0`:
 |--|--|--|
 | `vllm:gpu_cache_usage_perc` | `vllm:kv_cache_usage_perc` | V1 dropped CPU KV-cache offload, so `gpu_` no longer distinguished anything |
 | `vllm:time_per_output_token_seconds` | `vllm:inter_token_latency_seconds` | Same measurement, clearer name |
+
+And one that is **not a rename at all**, which is the more interesting case:
+
+| v0 | V1 | Why it is different |
+|--|--|--|
+| `vllm:gpu_prefix_cache_hit_rate` (gauge of a ratio) | `vllm:prefix_cache_queries_total` + `vllm:prefix_cache_hits_total` (two counters) | the *shape* changed, not the spelling |
+
+**A panel bound to the v0 gauge cannot be repaired by substituting a name.** The
+replacement is `rate(hits) / rate(queries)` — a different query, over two series that did
+not exist before. That is a class of upgrade breakage the two renames above cannot
+demonstrate, and it is why this one is worth having on the rig. (The `cpu_` variant is
+deliberately not simulated: nothing here models CPU KV offload, and V1 dropped it
+entirely.)
 
 Nothing broke when they moved — that is the problem. A renamed metric fails
 *silently*: panels go blank and alerts stop firing against a real deployment while
@@ -183,6 +210,7 @@ states `verify.sh` asserts against.
   "base_ttft_seconds": 0.08,
   "base_itl_seconds": 0.015,
   "kv_cache_tokens_capacity": 32768,
+  "prefix_cache_hit_rate": 0.35,
   "finish_reasons": {"stop": 0.90, "length": 0.09, "abort": 0.01},
   "seed": null
 }
@@ -231,6 +259,43 @@ Three numbers interlock, and changing one means re-checking the others:
 
 A malformed profile is never fatal: the simulator logs the problem, keeps the last good
 profile, and increments `llmsim_profile_reload_errors_total`.
+
+### Prefix caching, and why it changes no latency here
+
+Two more profile fields, both optional:
+
+| Field | Default | |
+|---|---|---|
+| `prefix_cache_hit_rate` | `0.0` | fraction of *cacheable prompt tokens* served from the prefix cache |
+| `kv_block_tokens` | `16` | vLLM's KV block size — hits are quantised to whole blocks, so a partial trailing block is never a hit |
+
+Counted in **tokens, not requests**, because that is what upstream counts and because a
+per-request counter would give a ratio that does not respond to prompt length. The panel
+you build here would then behave differently against a real deployment, which defeats the
+purpose of having the metric at all.
+
+> **⚠️ A cache hit does not shorten TTFT in this simulator, and that is deliberate.**
+> Prefill here is *flat* — `base_ttft_seconds × jitter` — not token-proportional, so there
+> is no per-token work a cached block could remove. Any speedup would have to be invented.
+> Making prefill token-proportional is a real modelling change: it re-derives the service
+> time, the 2.74 rps capacity figure, both shipped profiles, the 2s alert threshold,
+> `verify.sh`'s L3b bound and every expected value in `tests/rules/llm-rules_test.yaml`.
+> `--selftest` asserts the TTFT histogram is **identical** across hit rates, so nobody can
+> change one without noticing the other.
+>
+> An honest zero beats a fabricated speedup, and nothing is lost: what a real deployment
+> plots is the **ratio**, and the ratio transfers whether or not the latency here responds
+> to it.
+
+**⚠️ The shipped rates are chosen, not derived.** 0.35 on `llm-steady` and 0.15 on
+`llm-saturated` exist so the panel draws two distinguishable lines, with the lower one on
+the saturated tenant because a server under eviction pressure reuses less. Unlike
+`capacity_rps`, no arithmetic produces those numbers — which is exactly why they are
+labelled as invented in `manifests/llm/10-profiles.yaml` rather than left to look modelled.
+
+`0.0` means a cache that is **consulted and always misses**, not one that is switched off:
+queries still advance, hits stay at zero, and both series are still emitted. An absent
+series and a zero one are different things to a panel.
 
 ## Alerts
 

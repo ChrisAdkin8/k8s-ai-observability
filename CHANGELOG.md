@@ -25,6 +25,64 @@ Comparison links are at the foot of this file, one per released version.
 
 ### Added
 
+- **Three more vLLM series: `vllm:prefix_cache_queries_total`,
+  `vllm:prefix_cache_hits_total` and `vllm:request_queue_time_seconds`.**
+
+  ⚠️ **This changes what a cluster exposes after install.** Nothing existing moved and no
+  panel or alert changes meaning, but the simulator pods emit more than they did, so a
+  re-apply is what makes the new series appear. `install.sh` rebuilds the `llm-sim-script`
+  ConfigMap; a *running* pod keeps the old mount, so restart the simulator Deployments
+  (or let `install.sh` roll them) if the new series do not turn up.
+
+  This closes the gap that most limited the repo's central claim. A real vLLM operator's
+  dashboard has a prefix-cache hit-rate panel, and there was nothing here to build one
+  against — the simulator emitted 10 of upstream's ~38 V1 metrics and none of them said
+  anything about cache reuse or queue wait.
+
+  Notes worth having before you use them:
+
+  - **Counted in tokens, not requests.** A per-request counter gives a ratio that does not
+    respond to prompt length, so a panel built here would behave differently against a
+    real deployment. Hits are quantised to whole KV blocks (`kv_block_tokens`, default 16)
+    the way upstream quantises them — a partial trailing block is never a hit.
+  - **⚠️ A cache hit shortens NO latency here, by construction.** Prefill in this
+    simulator is flat, not token-proportional, so there is no per-token work a cached
+    block could remove and any speedup would be invented. `--selftest` asserts the TTFT
+    histogram is *identical* across hit rates. Changing that is a real modelling change
+    and re-derives the service time, the 2.74 rps capacity figure, both profiles, the 2s
+    threshold, `verify.sh`'s L3b bound and every promtool expectation.
+  - **Queue time is extracted, not re-derived.** The simulator already built TTFT as
+    `queue_wait + prefill`; the histogram observes that first term at the same point TTFT
+    is observed, so `ttft == queue_time + prefill` is an identity and the selftest asserts
+    it on every completed request rather than comparing a p95 to a p95 with a tolerance.
+  - **No new bucket constant.** Upstream declares one `request_latency_buckets` list and
+    passes it to both `e2e_request_latency_seconds` and `request_queue_time_seconds`, and
+    `E2E_BUCKETS` already *is* that list — so the existing drift-check entry watches these
+    boundaries on behalf of both.
+
+- **`prefix_cache_hit_rate` on the shipped profiles: 0.35 steady, 0.15 saturated.**
+  ⚠️ Unlike `capacity_rps`, these are **derived from nothing**. They are chosen so the
+  panel draws two distinguishable lines, the lower one on the saturated tenant because a
+  server under eviction pressure reuses less — and `manifests/llm/10-profiles.yaml` says
+  exactly that where it sets them, because an invented number presented as a modelled one
+  is the failure those profile comments exist to prevent. Shipping non-zero is safe only
+  because the hit rate is decoupled from latency: no existing series changes.
+
+- **`--vllm-surface` now covers a metric RESHAPE, not just renames.** v0 exposed prefix
+  caching as a gauge of a ratio (`vllm:gpu_prefix_cache_hit_rate`); V1 replaced it with
+  two counters. A panel bound to the old name cannot be repaired by substituting a name —
+  the replacement is `rate(hits)/rate(queries)`. Neither of the two renames the repo
+  already shipped makes that point, and it is the sharpest upgrade-rehearsal case here.
+  The 1:1 `METRIC_SURFACES` map cannot express one-gauge-to-two-counters, so there is now
+  a `METRIC_RESHAPES` table beside it with the same positional `(v0, v1)` shape; the drift
+  check reads both.
+
+- **A `verify.sh` L7.** The queue-time histogram is receiving observations and both
+  prefix-cache counters are present, on a real cluster. Everything else covering these
+  families is a selftest or a promtool assertion, and neither leaves the repo: the
+  simulator proving it emits a series and Prometheus proving it receives one are different
+  claims.
+
 - **The weekly drift check now watches the metric SET, not just the bucket boundaries**
   (`scripts/check-vllm-buckets.py`). It ast-walks both files for string literals beginning
   `vllm:` and compares the sets, in the same structure-blind way the bucket check already

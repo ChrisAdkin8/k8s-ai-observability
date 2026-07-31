@@ -1,0 +1,32 @@
+{
+  "_comment": [
+    "A load profile with prefix caching at 0.0, held here so llm-sim.py --selftest",
+    "can assert what that case EMITS rather than what it computes.",
+    "",
+    "0.0 means a cache that is consulted and always misses, NOT one that is switched",
+    "off. vllm:prefix_cache_queries_total still advances, because every prompt token",
+    "is still looked up; vllm:prefix_cache_hits_total stays at zero; and BOTH series",
+    "are still present in the exposition. An absent series and a zero one are",
+    "different things to a panel — one draws a flat line at zero, the other draws",
+    "nothing and reads as a broken query.",
+    "",
+    "Everything else is DEFAULT_PROFILE verbatim, so the case under test is the hit",
+    "rate and nothing else. seed is pinned so the selftest is reproducible.",
+    "",
+    "Keys the simulator does not know are ignored by validate_profile, which is what",
+    "lets this comment live in the file it documents."
+  ],
+  "model_name": "sim-llama-3-8b-no-prefix-cache",
+  "arrival_rate_rps": 1.8,
+  "max_concurrency": 16,
+  "max_in_flight": 176,
+  "prompt_tokens":     {"mean": 512, "stddev": 128},
+  "generation_tokens": {"mean": 256, "stddev": 64},
+  "base_ttft_seconds": 0.08,
+  "base_itl_seconds": 0.015,
+  "kv_cache_tokens_capacity": 32768,
+  "prefix_cache_hit_rate": 0.0,
+  "kv_block_tokens": 16,
+  "finish_reasons": {"stop": 0.90, "length": 0.09, "abort": 0.01},
+  "seed": 20260731
+}
