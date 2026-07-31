@@ -25,7 +25,7 @@ saturated, with the alert threshold drawn across them.
 | | |
 |--|--|
 | `llm-steady` | Healthy. ~1.8 requests/sec, queue at zero, p95 first-token latency ~0.1s |
-| `llm-saturated` | Overloaded on purpose. ~6 requests/sec against ~2.7 rps of capacity, so the queue fills to 160 and p95 climbs to ~60s |
+| `llm-saturated` | Overloaded on purpose. ~6 requests/sec against ~2.7 rps of capacity, so the queue fills to 160, the true wait reaches ~58s, and p95 **reports** ~78s |
 
 `llm-saturated` keeps the `LLMHighTTFT` alert permanently firing. That is deliberate: it
 means `scripts/verify.sh` can prove the alert path works without changing anything on the
@@ -254,7 +254,7 @@ Three numbers interlock, and changing one means re-checking the others:
 
 | Quantity | Value | Why |
 |---|---|---|
-| `LLMHighTTFT` threshold | p95 > 2s for 2m | Above steady (~0.1s), below saturated (~60s) |
+| `LLMHighTTFT` threshold | p95 > 2s for 2m | Above steady (~0.1s), below saturated (~78s as reported) |
 | Steady p95 | ~0.1s | Must stay **below** the threshold or the healthy tenant alerts |
 | Saturated p95 | ~78s | Must stay **above** it, and under `verify.sh`'s 120s sanity bound. The underlying wait is `160 / 2.74 rps` ≈ 58s by Little's Law, so it moves if you change `max_in_flight` or capacity — but the *reported* figure is quantised by V1's `(40, 80]` bucket to `40 + 40×0.95 = 78`, and will read 78 for any true latency inside that band |
 

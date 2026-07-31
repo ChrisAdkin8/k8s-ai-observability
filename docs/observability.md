@@ -164,7 +164,8 @@ scrape interval or two.
 
 ### Richer & time-varying workloads (opt-in)
 
-`manifests/workloads/extras/` (not auto-applied) adds more workload-like behaviour:
+[`manifests/workloads/extras/`](../manifests/workloads/extras/) (not auto-applied) adds
+more workload-like behaviour — its README describes what each manifest does:
 
 ```sh
 kubectl apply -f manifests/workloads/extras/

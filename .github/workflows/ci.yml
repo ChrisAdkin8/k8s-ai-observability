@@ -56,6 +56,71 @@ env:
 
 jobs:
   # ---------------------------------------------------------------------------
+  # Is there anything here a cluster could possibly test? A docs-only change
+  # cannot alter what `task local:up` does — verified: nothing under scripts/,
+  # compose/, manifests/ or tests/ READS a .md file, the only mentions are prose
+  # in comments. So standing two kind clusters and a compose stack up to prove a
+  # typo fix is 13 minutes of runner time and ~13 minutes of a contributor's
+  # patience for no signal.
+  #
+  # Deliberately NOT `paths-ignore:` on the triggers. A ruleset on main requires
+  # these checks, and a job that never STARTS leaves its check pending forever —
+  # a docs-only PR would be unmergeable. A job that starts and is SKIPPED by an
+  # `if:` reports as successful to the ruleset, which is the behaviour we want.
+  #
+  # `fast` is never gated. It is 8 seconds, and every PR should have at least one
+  # check that actually executed rather than a wall of green skips.
+  # ---------------------------------------------------------------------------
+  changes:
+    name: what changed
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      code: ${{ steps.filter.outputs.code }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0          # need both endpoints of the comparison
+
+      - id: filter
+        env:
+          EVENT: ${{ github.event_name }}
+          BASE: ${{ github.event.pull_request.base.sha || github.event.before }}
+          HEAD: ${{ github.event.pull_request.head.sha || github.sha }}
+        run: |
+          set -euo pipefail
+
+          # Anything not a pull_request or push runs the lot: a scheduled or
+          # manually dispatched run is asking "does this still work", and the
+          # answer must not depend on what the last commit happened to touch.
+          if [ "$EVENT" != "pull_request" ] && [ "$EVENT" != "push" ]; then
+            echo "code=true" >> "$GITHUB_OUTPUT"
+            echo "$EVENT: running everything"; exit 0
+          fi
+
+          # A new branch, or a force-push, gives an all-zero or unreachable base.
+          # Fail OPEN: an unknown diff is treated as a code change. Being wrong in
+          # this direction costs 13 minutes; the other way ships untested code.
+          if [ -z "${BASE:-}" ] || [ "$BASE" = "0000000000000000000000000000000000000000" ] \
+             || ! git cat-file -e "$BASE^{commit}" 2>/dev/null; then
+            echo "code=true" >> "$GITHUB_OUTPUT"
+            echo "base commit unavailable — running everything"; exit 0
+          fi
+
+          changed="$(git diff --name-only "$BASE" "$HEAD")"
+          echo "changed files:"; echo "$changed" | sed 's/^/  /'
+
+          # Non-markdown means code. An EMPTY diff also means code, for the same
+          # fail-open reason: it should not happen, and if it does we do not know why.
+          if [ -z "$changed" ] || echo "$changed" | grep -qvE '\.md$'; then
+            echo "code=true" >> "$GITHUB_OUTPUT"
+            echo "-> non-markdown changes present, running everything"
+          else
+            echo "code=false" >> "$GITHUB_OUTPUT"
+            echo "-> markdown only, skipping the cluster and compose jobs"
+          fi
+
+  # ---------------------------------------------------------------------------
   # Seconds, no cluster, no network. Runs in parallel with the slow job so a typo
   # in the most-edited file in the repo does not cost a 20-minute wait.
   # ---------------------------------------------------------------------------
@@ -194,6 +259,11 @@ jobs:
   # ---------------------------------------------------------------------------
   compose:
     name: compose stack (no Kubernetes)
+    # Gated for the same reason as `stack`, on the same output: the compose path reads
+    # the same dashboards, rules, simulator and profiles, so a markdown-only change
+    # cannot move it either. Cheaper to run (~1 min) but the signal is identically zero.
+    needs: changes
+    if: needs.changes.outputs.code == 'true'
     runs-on: ubuntu-latest
     # Generous against a measured ~1 minute. Nothing here waits on a Helm release; the
     # budget is image pulls plus the readiness poll below.
@@ -373,6 +443,11 @@ jobs:
     # status checks ("full stack on kind (full)" / "(lite)"), so a ruleset can require
     # both and a red lite leg cannot hide behind a green full one.
     name: full stack on kind (${{ matrix.profile }})
+    # Skipped when only markdown changed — see the `changes` job for why this is an
+    # `if:` rather than `paths-ignore:`. Both matrix legs report as skipped, which a
+    # required-check ruleset accepts, so a docs-only PR stays mergeable.
+    needs: changes
+    if: needs.changes.outputs.code == 'true'
     strategy:
       # NOT fail-fast. If lite breaks while full passes, that difference IS the signal
       # — cancelling the healthy leg to save four minutes would throw away the

@@ -58,3 +58,17 @@ terraform -chdir=terraform/gke init && terraform -chdir=terraform/gke apply
 
 GKE has first-time `gcloud` setup — login, ADC, the two APIs, and the
 `gke-gcloud-auth-plugin` PATH trap — covered in [gke.md](gke.md#prerequisites).
+
+## The cluster-agnostic escape hatch
+
+`task load` and the other bare, unprefixed forms act on **whatever kubecontext is current**,
+with none of the guards the prefixed tasks apply:
+
+```sh
+task load -- ramp        # drives the CURRENT context, whatever that is
+```
+
+Prefer `task local:load` / `eks:load` / `gke:load`. Those resolve the context for their
+target first, so they cannot quietly drive a cluster you had forgotten you were pointed at.
+The bare form exists for when you already know, and it is the only task in the repo that
+takes your word for it.
