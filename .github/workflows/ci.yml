@@ -22,8 +22,8 @@ on:
   pull_request:
   workflow_dispatch:
   # Weekly drift detection. The stack tracks two upstream Helm charts, a pinned
-  # kindest/node image and vLLM's histogram bucket boundaries; without this,
-  # upstream breakage is discovered by a stranger.
+  # kindest/node image, and vLLM's histogram bucket boundaries and metric set;
+  # without this, upstream breakage is discovered by a stranger.
   # NOTE: `schedule` fires only on the default branch, so this trigger cannot be
   # verified before merge — workflow_dispatch runs the same job to prove the code path.
   schedule:
@@ -72,6 +72,16 @@ jobs:
       - name: LLM simulator selftest
         run: python3 scripts/llm-sim.py --selftest
 
+      # The MATCHING RULES of the weekly drift check, against a committed fixture
+      # rather than against upstream. The drift job below runs on a schedule and
+      # needs network; this needs neither, and it covers the one piece of
+      # judgement in that script — the `_total` suffix rule — which fails
+      # SILENTLY when it is wrong. A blanket strip reports "in sync" while a name
+      # we emit has no upstream counterpart; the real run prints a plausible
+      # answer either way, so the rule cannot be tested by running it.
+      - name: vLLM drift-check matching rules
+        run: python3 scripts/check-vllm-buckets.py --selftest
+
       # promtool is the only tool this job installs, and it is worth it: the stack
       # job below can only ever observe the two alerts the shipped workloads happen
       # to drive, and only from the firing side. These tests cover every rule, both
@@ -118,9 +128,15 @@ jobs:
   # network egress to raw.githubusercontent.com, which a fork's runner may not
   # have. Weekly is the right cadence: bucket drift is a correctness bug, but
   # never an urgent one.
+  #
+  # It watches the metric SET as well as the bucket boundaries. A name we emit
+  # that upstream has dropped is the same failure one level up — a panel that
+  # goes blank against a real deployment while every test here stays green — and
+  # it is the half that actually happened. The reverse direction, upstream
+  # declaring something we do not emit, is printed as a gap and exits 0.
   # ---------------------------------------------------------------------------
   upstream-drift:
-    name: vLLM bucket drift
+    name: vLLM upstream drift (buckets + metric set)
     if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-latest
     timeout-minutes: 5
@@ -130,7 +146,7 @@ jobs:
       # Exits 1 on drift and 2 when it could not check at all — the second is
       # reported as its own thing rather than silently passing, because "we did
       # not look" and "we looked and it was fine" are not the same result.
-      - name: vLLM histogram bucket boundaries
+      - name: vLLM bucket boundaries and metric set
         run: python3 scripts/check-vllm-buckets.py
 
   # ---------------------------------------------------------------------------

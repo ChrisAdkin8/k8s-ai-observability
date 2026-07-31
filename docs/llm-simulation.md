@@ -106,6 +106,13 @@ transcribed from `vllm/v1/metrics/loggers.py` and
 python3 scripts/check-vllm-buckets.py
 ```
 
+That check watches the metric **set** as well, in both directions: a `vllm:` name this
+repo emits that upstream has dropped is drift and fails, while an upstream metric this
+simulator does not emit is printed as a gap and passes. The gap list is long on purpose —
+upstream declares around 40 series and this file emits 10 — and keeping it printed is what
+stops that distance from growing back silently. See
+[versions.md](versions.md#keeping-them-honest).
+
 > **No `source` label on `vllm:*` series.** The GPU side tags its synthesised metrics
 > `source="derived"`, but doing that here would break the transfer property: real vLLM emits
 > no such label, so an extra one breaks exact-match joins and `group_left` against a real

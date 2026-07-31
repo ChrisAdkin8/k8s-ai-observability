@@ -77,10 +77,11 @@ tasks:
         [ $rc -eq 0 ] || echo "  one or more REQUIRED tools are missing"
         exit $rc
 
-  # ---- the two checks that need no cloud, no cluster and no network ----------
-  # Both run in seconds. Between them they cover the two things this repo produces
-  # that are worth testing on their own: what the simulator emits, and what the
-  # PromQL over it computes.
+  # ---- the three checks that need no cloud, no cluster and no network --------
+  # All run in seconds. Between them they cover the three things this repo produces
+  # that are worth testing on their own: what the simulator emits, what the PromQL
+  # over it computes, and how the weekly drift check decides those names still
+  # match upstream's.
 
   # Validates the LLM simulator's Prometheus output: bucket monotonicity, +Inf
   # consistency, HELP/TYPE correctness, and that rendering /metrics observes
@@ -97,6 +98,16 @@ tasks:
     desc: Unit-test the alert + recording rules with promtool (no cluster needed)
     cmds:
       - ./scripts/rule-tests.sh
+
+  # The MATCHING RULES of the weekly upstream drift check, against a committed
+  # fixture instead of against upstream — so it needs no network and cannot drift
+  # with the very input it exists to pin. It covers the `_total` suffix rule,
+  # which fails silently: strip it blindly and the real run reports "in sync"
+  # while a name we emit has no upstream counterpart at all.
+  drift-test:
+    desc: Unit-test the vLLM drift check's matching rules (no cluster, no network)
+    cmds:
+      - python3 scripts/check-vllm-buckets.py --selftest
 
   # Derives the grafana.com upload from manifests/dashboards/*.json into dist/.
   # The repo files cannot be uploaded as-is: they bind to a datasource VARIABLE,

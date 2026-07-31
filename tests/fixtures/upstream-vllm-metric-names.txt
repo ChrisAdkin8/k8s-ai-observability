@@ -1,0 +1,41 @@
+# A STUBBED upstream vLLM metric set — NOT a copy of the real one, and it must
+# never be updated to track upstream.
+#
+# scripts/check-vllm-buckets.py --selftest matches a stubbed set of OUR names
+# against this file to test its `_total` rule, which is the one piece of
+# judgement in that script and the one that fails silently when it is wrong:
+#
+#   * a blanket `_total` strip reports "in sync" while a name we emit has no
+#     upstream counterpart at all
+#   * no strip at all reports drift on every counter we emit, every week, until
+#     someone stops reading the output
+#
+# Neither shows up in the real run, which prints a plausible answer either way.
+# A fixture is the only way to assert the rule, because the real upstream file
+# is the moving thing this whole script exists to watch — testing against it
+# would make the test drift with the very input it is meant to pin.
+#
+# Each name below is a CASE. Read the selftest beside it.
+
+# Exactly as we emit it: matches directly.
+vllm:num_requests_running
+
+# Declared WITHOUT the suffix. The Prometheus client appends `_total` at
+# exposition time, so our `vllm:prompt_tokens_total` is this metric.
+vllm:prompt_tokens
+
+# ⚠️ Declared WITH the suffix, and a histogram rather than a counter. Upstream's
+# naming is not uniform, so this must match our `vllm:iteration_tokens_total`
+# EXACTLY rather than being stripped to a `vllm:iteration_tokens` that upstream
+# does not declare.
+vllm:iteration_tokens_total
+
+# Upstream declares these and the stubbed set does not emit them: a gap, listed
+# clearly and exiting 0. Upstream adds metrics regularly, and reddening a weekly
+# scheduled run for each one trains people to ignore it.
+#
+# Deliberately invented names. A real upstream metric here would read as a claim
+# about what this repo does or does not emit, and would go stale the day someone
+# closed that gap.
+vllm:not_emitted_here
+vllm:some_new_metric

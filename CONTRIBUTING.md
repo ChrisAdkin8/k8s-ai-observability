@@ -10,9 +10,10 @@ documented where they apply; this collects them so you do not have to find them 
 ```sh
 task selftest      # simulator exposition — no cluster, ~1s
 task rule-tests    # promtool over every alert and recording rule — needs promtool, ~2s
+task drift-test    # the drift check's matching rules, against a fixture — no network, ~1s
 ```
 
-Both run in CI as the `fast` job, so a failure here is a failure there. The full stack
+All three run in CI as the `fast` job, so a failure here is a failure there. The full stack
 job takes ~6 minutes and stands up a real kind cluster; you do not need to run it locally
 to open a PR, but `task local:up` does exactly what CI does if you want to.
 
@@ -30,7 +31,7 @@ rather than comments, and why the assertions run before anything is created.
 | A namespace in `scripts/config.sh` | change the static manifests to match | `assert_manifest_namespaces` |
 | `LLM_STEADY_MODEL` / `LLM_SATURATED_MODEL` | change the profile ConfigMaps, and keep them distinct | `assert_llm_contract` |
 | `FAKE_GPU_CHART_VERSION` | re-verify the three bullets above it in `config.sh` — the exporter's three series, the ServiceMonitor's selector, and the labels the dashboards and rules join on | **nothing.** A bad bump is green with blank panels |
-| `LLM_VLLM_VERSION`, or any bucket list | run `python3 scripts/check-vllm-buckets.py`, then re-derive the expected values in `tests/rules/llm-rules_test.yaml` | the drift check, weekly in CI |
+| `LLM_VLLM_VERSION`, any bucket list, or any `vllm:` name emitted | run `python3 scripts/check-vllm-buckets.py`, then re-derive the expected values in `tests/rules/llm-rules_test.yaml` | the drift check, weekly in CI |
 | `K8S_VERSION` | move `kind/gpu-sim.yaml`'s node image onto the same minor | `assert_kind_contract` |
 
 The three-way naming invariant is the one to read first if you are touching Terraform or
@@ -46,7 +47,9 @@ are listed here because none of them is discoverable until it happens to you.
   every test green, because every test reads the simulator and the simulator agreed with
   itself. If you touch anything under `vllm:`, the question is not "do the tests pass" but
   "does this match a real deployment". `scripts/check-vllm-buckets.py` is the only thing
-  here that points upstream.
+  here that points upstream — it watches the metric *set* as well as the bucket
+  boundaries, and prints the ~28 upstream metrics this simulator does not emit so that
+  distance stays visible rather than silent.
 - **A promtool expected percentile can be architecture-dependent.** `histogram_quantile`
   returned `2.4250000000000003` on arm64 and `2.425` on amd64 for the same input; promtool
   compares exactly, so the test passed locally and went red in CI. If you add or change an
