@@ -542,26 +542,48 @@ llm_phases="$(promql_count 'count(rate(vllm:request_prefill_time_seconds_count[5
 # above float noise. Polled, because four recording rules need a couple of
 # evaluations to exist at all.
 #
-# ⚠️ COUNTED AGAINST THE TENANTS THAT HAVE THE SERIES, not asserted as "at least
-# one". The first draft of this check was `count(...) > 0`, and both CI legs
-# passed it reporting ONE tenant when two are running — a saturated tenant whose
-# breakdown had stopped summing would have gone unnoticed, which is the
-# hollow-green failure this file exists to prevent. The count on the right is
-# llm:e2e:mean5m rather than llmsim_profile_generation (which L3b uses) on
-# purpose: a tenant too young to have two samples in the rate() window has no
-# recorded mean at all, and demanding a number it cannot yet produce would make
-# this flaky rather than strict. So the claim is exactly "every tenant that HAS
-# a recorded breakdown has one that adds up", and a phase mean that is missing
-# while e2e is present drops the left count and fails.
+# ⚠️ COUNTED, not asserted as "at least one" — and the right-hand side is the
+# part that took two CI runs to get right, so it is written down.
+#
+# FIRST DRAFT: `count(...) > 0`. Both legs passed it reporting ONE tenant on a
+# cluster running two — a saturated tenant whose breakdown had stopped summing
+# would have hidden behind the healthy one. That is the hollow-green failure
+# this file exists to prevent, reintroduced by the check meant to prevent it.
+#
+# SECOND DRAFT: `== count(llm:e2e:mean5m)`. Too strict, and it FAILED CI for a
+# reason that is not a fault: a tenant can carry a recorded e2e mean at an
+# evaluation instant where one of its phase means has not yet produced a sample
+# (rate() needs two points in the window, and the four rules are not guaranteed
+# to cross that line on the same evaluation). The left side then has fewer
+# series than the right forever, on a rig that is working perfectly.
+#
+# ⚠️ AND THE TOLERANCE WAS NEVER THE PROBLEM — MEASURED, so nobody re-opens it.
+# Replicating Prometheus's arithmetic offline against the simulator's own
+# exposition output, INCLUDING fmt()'s round(x, 6):
+#     steady    543 completions  residual 1.8e-15
+#     saturated 822 completions  residual 7.1e-15   (means spanning 0.08s..58s)
+# Seven orders under the 1e-6 bound. Widening the tolerance would fix nothing
+# and would blind the check to a real fault, which moves this by WHOLE SECONDS.
+#
+# SO: compare against the tenants for which the arithmetic PRODUCED A VALUE AT
+# ALL. `count(expr)` counts exactly the label sets where all four means were
+# present, so this asserts "every tenant with a complete breakdown has one that
+# adds up" — which is the claim worth making. A tenant whose phase means are
+# permanently missing is not silently excused: the assertion above this one
+# already fails if any of the three histograms is absent or not advancing.
 llm_sums=0
 for _ in $(seq 1 24); do
-  llm_sums="$(promql_count 'count(abs((llm:queue:mean5m + llm:prefill:mean5m + llm:decode:mean5m) - llm:e2e:mean5m) < 1e-6) == count(llm:e2e:mean5m)')"
+  llm_sums="$(promql_count 'count(abs((llm:queue:mean5m + llm:prefill:mean5m + llm:decode:mean5m) - llm:e2e:mean5m) < 1e-6)
+    == count((llm:queue:mean5m + llm:prefill:mean5m + llm:decode:mean5m) - llm:e2e:mean5m)')"
   [[ "${llm_sums:-0}" -gt 0 ]] && break
   sleep 5
 done
-llm_sum_n="$(promql_count 'llm:e2e:mean5m')"
-[[ "${llm_sums:-0}" -gt 0 ]] && pass "L8 the phase breakdown sums to end-to-end latency for all ${llm_sum_n:-0} tenant(s) that have one" \
-  || fail "L8 llm:queue+prefill+decode:mean5m does not equal llm:e2e:mean5m for every tenant carrying it (${llm_sum_n:-0} tenant(s) have llm:e2e:mean5m) — all four recording rules applied? (a quantile rule substituted for a mean stops summing: means are additive, percentiles are not)"
+# Reported on both paths so a future failure is diagnosable from the summary
+# rather than from a rerun: "3 of 4" and "0 of 0" are different faults.
+llm_ok_n="$(promql_count 'abs((llm:queue:mean5m + llm:prefill:mean5m + llm:decode:mean5m) - llm:e2e:mean5m) < 1e-6')"
+llm_all_n="$(promql_count '(llm:queue:mean5m + llm:prefill:mean5m + llm:decode:mean5m) - llm:e2e:mean5m')"
+[[ "${llm_sums:-0}" -gt 0 ]] && pass "L8 the phase breakdown sums to end-to-end latency (${llm_ok_n:-0}/${llm_all_n:-0} tenant(s) with a complete breakdown)" \
+  || fail "L8 only ${llm_ok_n:-0} of ${llm_all_n:-0} tenant(s) with a complete breakdown sum to llm:e2e:mean5m — all four recording rules applied, and none swapped back to a quantile? (means are additive, percentiles are not). ${llm_all_n:-0} = 0 means the four mean rules are not evaluating at all."
 
 graf_pf_stop
 prom_pf_stop
