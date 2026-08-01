@@ -23,6 +23,25 @@ Comparison links are at the foot of this file, one per released version.
 
 ## [Unreleased]
 
+## [0.5.0] — 2026-08-01
+
+**This release finishes the sentence 0.4.0 started.** That one gave a cluster with its own
+Prometheus a route in; this one removes the two things still standing between a stranger
+and a working board. The **Helm chart** means you no longer need a shell script with the
+right flags — `helm install`, and your monitoring stack is untouched. The **published
+simulator image** means you do not need this repo at all to point your own dashboards at a
+realistic vLLM surface.
+
+The third piece is the one the boards themselves needed. The vLLM board could say how long
+a request took and not what it was *doing*: TTFT and queue time covered the waiting half,
+and nothing covered the serving half. The **request phase breakdown** closes that, and it
+is pure extraction — every term was already computed inside the simulator.
+
+⚠️ **Everything here is additive.** No existing metric, recording rule, threshold, profile
+or expected value moved, and no dashboard `uid` changed. An existing install upgrades by
+re-running `install.sh`, which now rolls the simulator pods when the script changes — see
+*Fixed*.
+
 ### Added
 
 - **The request phase breakdown: `vllm:request_prefill_time_seconds`,
@@ -944,7 +963,8 @@ Initial public release. Build and test GPU and LLM observability without a GPU.
   a GPU, running the advertised `task local:up` end to end including every acceptance
   check, with a diagnostics bundle on failure and weekly upstream-drift detection.
 
-[Unreleased]: https://github.com/ChrisAdkin8/k8s-ai-observability/compare/v0.4.0...HEAD
+[Unreleased]: https://github.com/ChrisAdkin8/k8s-ai-observability/compare/v0.5.0...HEAD
+[0.5.0]: https://github.com/ChrisAdkin8/k8s-ai-observability/compare/v0.4.0...v0.5.0
 [0.4.0]: https://github.com/ChrisAdkin8/k8s-ai-observability/compare/v0.3.0...v0.4.0
 [0.3.0]: https://github.com/ChrisAdkin8/k8s-ai-observability/compare/v0.2.0...v0.3.0
 [0.2.0]: https://github.com/ChrisAdkin8/k8s-ai-observability/compare/v0.1.0...v0.2.0
