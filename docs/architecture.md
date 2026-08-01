@@ -105,11 +105,14 @@ step. The omission is no longer claimed because it says nothing about how the si
 reaches anyone who has not cloned this repo, which is the case a published image exists to
 serve.
 
-**No image is published yet** — this is a scope decision, not a shipped artefact. When one
-lands it must be *derived* from `scripts/llm-sim.py` in the same way `dist/` and the
-dashboard ConfigMaps are, never committed beside it; a drifted copy of the simulator would
-be undetectable from outside, which is exactly what
-[`tests/contracts/`](../tests/contracts/) exists to prevent for the DCGM surface.
+**That image has since shipped**: `Dockerfile` builds it and `publish-image.yml` pushes
+`ghcr.io/<owner>/vllm-metrics-sim` on every release tag, for `linux/amd64` and
+`linux/arm64`. It is *derived* from `scripts/llm-sim.py` in the same way `dist/` and the
+dashboard ConfigMaps are, never committed beside it — CI asserts no second copy exists in
+the tree, and that what the image serves is that file byte for byte. A drifted copy of the
+simulator would be undetectable from outside, which is exactly what
+[`tests/contracts/`](../tests/contracts/) exists to prevent for the DCGM surface. See
+[below](#two-artefacts-that-are-not-part-of-a-cluster-install).
 
 ## Components
 
