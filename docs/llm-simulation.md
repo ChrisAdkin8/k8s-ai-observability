@@ -428,8 +428,74 @@ python3 scripts/llm-sim.py --profile p.json  # serve on :9401
 
 `--selftest` checks the things that are easy to get subtly wrong and hard to notice: bucket
 monotonicity, `+Inf` matching `_count`, one `# TYPE` per family, that no `vllm:*` series
-carries a `source` label, and that serving `/metrics` observes nothing. It drives an
-injected clock, so it is deterministic and finishes instantly.
+carries a `source` label, that serving `/metrics` observes nothing, and that both phase
+identities hold on every completed request. It drives an injected clock, so it is
+deterministic and finishes instantly.
+
+## The container image
+
+For pointing your **own** dashboards, recording rules and alert expressions at a realistic
+vLLM metric surface, without cloning this repo:
+
+```sh
+docker run --rm -p 9401:9401 ghcr.io/chrisadkin8/vllm-metrics-sim:latest
+```
+
+Verified: **no `--profile` is needed**. The simulator falls back to `DEFAULT_PROFILE` — a
+self-consistent steady tenant at 1.8 rps against a modelled capacity of 2.74 rps — and
+serves on `:9401` immediately. Mount a profile and pass `--profile /path/to/p.json` to
+change the tenant; the file is polled, so edits apply without a restart.
+
+| | |
+|--|--|
+| tags | `:<release tag>` (e.g. `:v0.5.0`) and `:latest`, published on every release tag |
+| platforms | `linux/amd64` and `linux/arm64` |
+| provenance | `docker inspect` reads back `org.opencontainers.image.revision` / `.version` / `.source` — an image whose version cannot be tied to a commit is one nobody can debug |
+| built from | [`scripts/llm-sim.py`](../scripts/llm-sim.py) directly, never a committed second copy |
+
+### ⚠️ What this image is NOT
+
+**It is not how this rig runs the simulator, and it must not become that.**
+`scripts/install.sh` still builds the `llm-sim-script` ConfigMap from the file, and the
+compose stack still mounts it. Three reasons, and the third is the one that bites:
+
+- `task selftest` and `--print` run the file directly with no build step, which is what
+  makes the simulator editable in seconds;
+- the compose path mounts the same file, so an image would fork the two;
+- an image-based Deployment pins a **tag**, so a local edit to `llm-sim.py` would stop
+  reaching the cluster — *silently*, since the pod would still be `Running`. That is
+  exactly the failure the checksum annotation in `install.sh` was added to fix,
+  reintroduced one layer up.
+
+The image is for **external consumers**. Someone will otherwise helpfully "simplify" the
+Deployment onto it.
+
+**`pip install` is still a non-goal and was not reversed.** The image ships the same
+stdlib-only file; that constraint is what makes the Dockerfile a `FROM` and a `COPY`. The
+two rules are habitually stated in one breath and only one of them moved.
+
+### ⚠️ The port override is `LLM_SIM_LISTEN_PORT`, not `LLM_SIM_PORT`
+
+```sh
+docker run --rm -p 9999:9999 -e LLM_SIM_LISTEN_PORT=9999 \
+  ghcr.io/chrisadkin8/vllm-metrics-sim:latest
+```
+
+Verified against the built image: `LLM_SIM_LISTEN_PORT=9999` serves on 9999, and
+`LLM_SIM_PORT=tcp://10.0.0.1:9401` is **silently ignored** — it does not crash, and it does
+not move the listener.
+
+Two things follow, and both belong here because this is where someone meets the name:
+
+- **someone will try `LLM_SIM_PORT`**, find it ignored, and conclude the image has no port
+  override at all;
+- **do not "simplify" it back to the obvious name — the obvious name is the bug.** kubelet
+  injects a Docker-link-compatible `<SVCNAME>_PORT` environment variable for every Service
+  in the pod's namespace, so a Service called `llm-sim` sets
+  `LLM_SIM_PORT=tcp://<clusterIP>:9401` into every simulator pod. Reading *that* name meant
+  `int()` received a URL and every pod died at startup — a `CrashLoopBackOff` whose only
+  visible symptom was an LLM dashboard with no data. The full account is in
+  `default_port()` in the script.
 
 ## Security note
 
