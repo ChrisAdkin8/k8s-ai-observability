@@ -1,0 +1,234 @@
+# k8s-ai-observability — values.
+#
+# ═══════════════════════════════════════════════════════════════════════════
+# ⚠️ READ THIS FIRST: TWO SETTINGS HERE FAIL WITH NO ERROR AT ALL.
+#
+# `releaseLabel` and `grafana.dashboardLabel` are SELECTORS on someone else's
+# controllers. Get either wrong and nothing errors, nothing warns, and every
+# object reports itself successfully created:
+#
+#   wrong releaseLabel          -> your Prometheus never adopts the
+#                                  PrometheusRules or the ServiceMonitors.
+#                                  The rules never evaluate. The scrapes never
+#                                  happen. Every panel that reads an `llm:*` or
+#                                  `DCGM_FI_DEV_GPU_TEMP` series is empty.
+#   wrong grafana.dashboardLabel -> the sidecar never imports the dashboard
+#                                  ConfigMaps. The boards simply do not exist
+#                                  in Grafana, and `/d/<uid>` 404s.
+#
+# This is the single most likely way this chart appears broken. `helm test`
+# exists specifically to say so out loud — run it after installing.
+# ═══════════════════════════════════════════════════════════════════════════
+
+# ---- what this chart does and does not install -----------------------------
+
+# FALSE by default, and that default is the whole point of this chart. The
+# audience is a cluster that ALREADY runs Prometheus; installing a second
+# kube-prometheus-stack over the top of someone's production monitoring is what
+# scripts/install.sh does and what nobody with a real stack will accept.
+#
+# Set true to serve a greenfield cluster from the same chart — it then becomes a
+# conditional dependency (Chart.yaml) and brings its own Prometheus, Grafana and
+# the CRDs below.
+kubePrometheusStack:
+  enabled: false
+
+# TRUE by default. Without it nothing advertises `nvidia.com/gpu`, the sample
+# workloads stay Pending forever and the GPU board is blank — an install that
+# succeeds and demonstrates nothing.
+#
+# ⚠️ THE NODE LABEL IS A PREREQUISITE THIS CHART CANNOT SATISFY. A chart cannot
+# label nodes. At least one node must already carry
+# `nodePoolLabelKey=nodePoolName` (below) or the fake operator watches a pool no
+# node belongs to: a green install with ZERO GPUs. `helm test` checks it.
+fakeGpuOperator:
+  enabled: true
+
+# ---- ⚠️ the two silent-failure selectors -----------------------------------
+
+# The `release:` selector carried by the two PrometheusRules and the two
+# ServiceMonitors this chart creates.
+#
+# Upstream kube-prometheus-stack defaults `ruleSelectorNilUsesHelmValues` and its
+# two siblings to TRUE, which makes its selector `release=<its own release
+# name>`. So if your monitoring release is called `my-monitoring`, this must be
+# `my-monitoring`:
+#
+#     helm install rig ... --set releaseLabel=my-monitoring
+#
+# You have two possible fixes and should know both: set this, or set those three
+# values false on your side — and the second is often not yours to change.
+#
+# Default is the name kube-prometheus-stack installs under when nobody chooses
+# one. It is right for a greenfield install and wrong for most BYO clusters.
+releaseLabel: kube-prometheus-stack
+
+grafana:
+  # The sidecar's discovery label. `grafana_dashboard=1` is the
+  # kube-prometheus-stack chart's convention, NOT a universal one — a Grafana
+  # deployed another way may watch a different key entirely. Check yours:
+  #   kubectl -n <ns> get deploy <grafana> -o yaml | grep -A5 LABEL
+  dashboardLabel: grafana_dashboard
+  dashboardLabelValue: "1"
+
+# ---- namespaces -------------------------------------------------------------
+# ⚠️ `monitoring` is where the ServiceMonitors, PrometheusRules and dashboard
+# ConfigMaps go, and it must be a namespace your Prometheus and your Grafana
+# sidecar actually watch. It is not created by this chart unless
+# createMonitoringNamespace is true — on a BYO cluster it already exists, and
+# creating it would make Helm delete someone else's namespace on uninstall.
+namespaces:
+  monitoring: monitoring
+  gpuOperator: gpu-operator
+  llmSim: llm-sim
+
+# Off by default: see above. Turn it on only for a greenfield install where this
+# chart genuinely owns the namespace.
+createMonitoringNamespace: false
+
+# ---- the three-way naming invariant ----------------------------------------
+# docs/architecture.md#the-naming-invariant-read-before-editing. The node label
+# key AND value, the fake operator's topology pool name, and the workloads' node
+# selector must all agree. A chart cannot label nodes, so the label is a
+# PREREQUISITE — these values are how the other two halves are told about it.
+nodePoolLabelKey: run.ai/simulated-gpu-node-pool
+nodePoolName: default
+
+# ---- the LLM simulators -----------------------------------------------------
+llm:
+  enabled: true
+
+  # ⚠️ THIS TAG MUST TRACK THE REPO'S RELEASE TAG. Empty means "use
+  # Chart.appVersion", which is the coupling that keeps them together by
+  # default. A chart pinned to a stale tag installs cleanly and runs an old
+  # simulator — green, with something silently wrong — so `task chart` and the
+  # publish workflow both cross-check it rather than trusting it.
+  image:
+    repository: ghcr.io/chrisadkin8/vllm-metrics-sim
+    tag: ""            # "" -> .Chart.AppVersion
+    pullPolicy: IfNotPresent
+
+  # ⚠️ model_name is an IDENTITY, not a label, and the two MUST be distinct.
+  # The recording rules aggregate `by (model_name)`; two tenants sharing a name
+  # merge into one series that describes neither, and the saturated one then
+  # drags the healthy one over the alert threshold. The chart refuses to render
+  # if these are equal — see templates/_assertions.tpl.
+  steady:
+    modelName: sim-llama-3-8b-steady
+    arrivalRateRps: 1.8
+    prefixCacheHitRate: 0.35
+    # The only Deployment that requests a simulated GPU. It exists so the device
+    # plugin injects MOCK_NVIDIA_VISIBLE_DEVICES, which becomes
+    # llmsim_gpu_binding_info's device_id. Nothing load-bearing depends on it —
+    # set false if you have no simulated GPUs free and it runs unbound.
+    requestGpu: true
+
+  saturated:
+    modelName: sim-llama-3-8b-saturated
+    # 6.0 rps against a modelled capacity of 2.74 rps. This is the whole
+    # difference between a healthy tenant and one that trips LLMHighTTFT, and
+    # the reason two simulators run at all.
+    arrivalRateRps: 6.0
+    prefixCacheHitRate: 0.15
+    # Deliberately unbound, to exercise the path you land on when the GPU stack
+    # is absent or every simulated GPU is already allocated.
+    requestGpu: false
+
+  # ⚠️ SHARED ACROSS BOTH TENANTS, AND THE NUMBERS INTERLOCK. capacity_rps uses
+  # the CONGESTED inter-token latency:
+  #   itl_full = base_itl x 1.5                         = 0.0225
+  #   capacity = maxConcurrency / (baseTtft + genMean x itl_full)
+  #            = 16 / (0.08 + 256 x 0.0225) = 2.74 rps
+  # steady 1.8 rps is 0.66x that; saturated 6.0 rps is 2.19x, so its queue fills
+  # to maxInFlight - maxConcurrency = 160 and TTFT plateaus at 160/2.74 ~= 58s.
+  # The LLMHighTTFT threshold of 2s sits between them.
+  #
+  # Change ONE of these and the 2s threshold, verify.sh's L3b bound and every
+  # promtool expectation have to be re-derived. Tune against what
+  # llmsim_capacity_rps reports, not against the base latency.
+  profile:
+    maxConcurrency: 16
+    maxInFlight: 176
+    promptTokens: { mean: 512, stddev: 128 }
+    generationTokens: { mean: 256, stddev: 64 }
+    baseTtftSeconds: 0.08
+    baseItlSeconds: 0.015
+    kvCacheTokensCapacity: 32768
+    # vLLM's KV block size. Prefix-cache hits are quantised to whole blocks
+    # upstream — a partial trailing block is not cacheable — so they are here
+    # too. 16 is vLLM's default.
+    kvBlockTokens: 16
+
+  resources:
+    requests: { cpu: 25m, memory: 48Mi }
+    limits:   { cpu: 500m, memory: 128Mi }
+
+  service:
+    port: 9401
+
+  # 15s is LOAD-BEARING, not cosmetic. `rate(x[1m])` needs at least TWO samples
+  # in the window: at 15s you get four, at 60s you get one and rate() returns
+  # nothing — a failure that reads as a dead counter rather than a scrape-interval
+  # choice. Keep this <= 30s.
+  scrapeInterval: 15s
+
+# ---- the sample GPU workloads ----------------------------------------------
+# Three Deployments driving simulated utilisation via the run.ai annotation.
+# `gpu-busy` is what keeps GPUHighUtilization firing, so the alert is exercised
+# by the install rather than by a check that mutates something.
+workloads:
+  enabled: true
+  namespace: default
+  image: busybox:1.36
+
+# ---- what else to create ----------------------------------------------------
+dashboards:
+  enabled: true
+rules:
+  enabled: true
+serviceMonitors:
+  enabled: true
+  # The fake operator's chart MAY already ship its own ServiceMonitor for the
+  # dcgm-exporter. Two of them means conflicting scrape configs. Check with
+  # `kubectl get servicemonitor -n gpu-operator` and set this false if so.
+  fakeGpuExporter: true
+
+# ---- helm test --------------------------------------------------------------
+# ⚠️ `helm test <release>` is where the two silent selectors above are actually
+# checked, and it is OPT-IN — `helm install` does not run it. Run it.
+tests:
+  # Needs kubectl and bash. Pinned rather than :latest, for the same reason
+  # every other version in this repo is: an unpinned toolchain turns someone
+  # else's release into a mystery failure on an unrelated day.
+  image: bitnami/kubectl:1.31
+
+# ---- pass-through to the conditional dependencies ---------------------------
+# Only reached when the corresponding `enabled` above is true. Keys here are the
+# SUBCHART's own values, not this chart's.
+fake-gpu-operator:
+  topology:
+    # ⚠️ Kept in step with .Values.nodePoolLabelKey / .nodePoolName above by an
+    # assertion in templates/_assertions.tpl — Helm cannot template a subchart's
+    # values from the parent's, so they are two copies and the render fails if
+    # they disagree. That is the alternative to a green install with ZERO GPUs.
+    nodePoolLabelKey: run.ai/simulated-gpu-node-pool
+    nodePools:
+      default:
+        gpuCount: 8
+        gpuProduct: Tesla-T4
+        gpuMemory: 15360
+
+kube-prometheus-stack:
+  # Only consulted when kubePrometheusStack.enabled is true. These three make the
+  # selectors permissive, which is what stops `releaseLabel` mattering at all on
+  # a greenfield install.
+  prometheus:
+    prometheusSpec:
+      ruleSelectorNilUsesHelmValues: false
+      serviceMonitorSelectorNilUsesHelmValues: false
+      podMonitorSelectorNilUsesHelmValues: false
+  grafana:
+    sidecar:
+      dashboards:
+        enabled: true
+        searchNamespace: ALL

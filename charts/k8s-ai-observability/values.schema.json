@@ -1,0 +1,153 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "k8s-ai-observability values",
+  "description": "A typo in releaseLabel or grafana.dashboardLabel is otherwise undetectable until someone notices an empty board, which is why this schema exists at all. It catches the shape and the type; it cannot catch a well-formed value that names the wrong release — helm test does that, on a live cluster.",
+  "type": "object",
+  "additionalProperties": true,
+  "required": ["releaseLabel", "grafana", "namespaces", "llm"],
+  "properties": {
+    "releaseLabel": {
+      "type": "string",
+      "minLength": 1,
+      "description": "The `release:` selector on the PrometheusRules and ServiceMonitors. WRONG VALUE = NO ERROR: the rules never evaluate and the boards stay empty."
+    },
+    "kubePrometheusStack": {
+      "type": "object",
+      "properties": { "enabled": { "type": "boolean" } }
+    },
+    "fakeGpuOperator": {
+      "type": "object",
+      "properties": { "enabled": { "type": "boolean" } }
+    },
+    "createMonitoringNamespace": { "type": "boolean" },
+    "nodePoolLabelKey": { "type": "string", "minLength": 1 },
+    "nodePoolName": { "type": "string", "minLength": 1 },
+    "grafana": {
+      "type": "object",
+      "required": ["dashboardLabel", "dashboardLabelValue"],
+      "properties": {
+        "dashboardLabel": {
+          "type": "string",
+          "minLength": 1,
+          "description": "The sidecar's discovery key. WRONG VALUE = NO ERROR: the ConfigMaps exist and are never imported."
+        },
+        "dashboardLabelValue": {
+          "type": "string",
+          "description": "A STRING. `1` unquoted is a number in YAML and a label value must be a string; quoting it here is not stylistic."
+        }
+      }
+    },
+    "namespaces": {
+      "type": "object",
+      "required": ["monitoring", "gpuOperator", "llmSim"],
+      "properties": {
+        "monitoring": { "type": "string", "minLength": 1 },
+        "gpuOperator": { "type": "string", "minLength": 1 },
+        "llmSim": { "type": "string", "minLength": 1 }
+      }
+    },
+    "llm": {
+      "type": "object",
+      "required": ["steady", "saturated", "profile", "image"],
+      "properties": {
+        "enabled": { "type": "boolean" },
+        "image": {
+          "type": "object",
+          "required": ["repository"],
+          "properties": {
+            "repository": { "type": "string", "minLength": 1 },
+            "tag": {
+              "type": "string",
+              "description": "Empty means Chart.appVersion, which is the coupling that keeps the chart and the published image in step. Pinning it by hand is how it goes stale — a green install running an old simulator."
+            },
+            "pullPolicy": { "enum": ["Always", "IfNotPresent", "Never"] }
+          }
+        },
+        "steady": { "$ref": "#/$defs/tenant" },
+        "saturated": { "$ref": "#/$defs/tenant" },
+        "scrapeInterval": {
+          "type": "string",
+          "pattern": "^[0-9]+(s|ms)$",
+          "description": "MUST stay <= 30s. verify.sh asserts rate(...[1m]) > 0, and rate() needs two samples in the window: at 60s it gets one and returns nothing, which reads as a dead counter."
+        },
+        "service": {
+          "type": "object",
+          "properties": { "port": { "type": "integer", "minimum": 1, "maximum": 65535 } }
+        },
+        "resources": { "type": "object" },
+        "profile": {
+          "type": "object",
+          "description": "⚠️ These numbers interlock with the 2s LLMHighTTFT threshold, verify.sh's L3b bound and every promtool expectation. Change one and re-derive the others; the chart refuses to render if the tenants stop straddling capacity.",
+          "required": ["maxConcurrency", "maxInFlight", "baseTtftSeconds", "baseItlSeconds"],
+          "properties": {
+            "maxConcurrency": { "type": "integer", "minimum": 1 },
+            "maxInFlight": { "type": "integer", "minimum": 1 },
+            "baseTtftSeconds": { "type": "number", "exclusiveMinimum": 0 },
+            "baseItlSeconds": { "type": "number", "exclusiveMinimum": 0 },
+            "kvCacheTokensCapacity": { "type": "integer", "minimum": 1 },
+            "kvBlockTokens": {
+              "type": "integer",
+              "minimum": 1,
+              "description": "vLLM's KV block size; hits are quantised to whole blocks upstream, so they are here too. 16 is vLLM's default."
+            },
+            "promptTokens": { "$ref": "#/$defs/tokenSpec" },
+            "generationTokens": { "$ref": "#/$defs/tokenSpec" }
+          }
+        }
+      }
+    },
+    "workloads": {
+      "type": "object",
+      "properties": {
+        "enabled": { "type": "boolean" },
+        "namespace": { "type": "string", "minLength": 1 },
+        "image": { "type": "string", "minLength": 1 }
+      }
+    },
+    "dashboards": { "type": "object", "properties": { "enabled": { "type": "boolean" } } },
+    "rules": { "type": "object", "properties": { "enabled": { "type": "boolean" } } },
+    "serviceMonitors": {
+      "type": "object",
+      "properties": {
+        "enabled": { "type": "boolean" },
+        "fakeGpuExporter": {
+          "type": "boolean",
+          "description": "Set false if the fake-gpu-operator chart already ships its own ServiceMonitor — two of them means conflicting scrape configs for one target."
+        }
+      }
+    },
+    "tests": {
+      "type": "object",
+      "properties": { "image": { "type": "string", "minLength": 1 } }
+    }
+  },
+  "$defs": {
+    "tenant": {
+      "type": "object",
+      "required": ["modelName", "arrivalRateRps", "prefixCacheHitRate"],
+      "properties": {
+        "modelName": {
+          "type": "string",
+          "minLength": 1,
+          "description": "⚠️ An IDENTITY, not a label. The recording rules aggregate by (model_name); the two tenants MUST be distinct or they merge into one series describing neither."
+        },
+        "arrivalRateRps": { "type": "number", "exclusiveMinimum": 0 },
+        "prefixCacheHitRate": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 1,
+          "description": "A RATE in 0.0-1.0, not a percentage. Out of range, the simulator rejects the whole profile and silently keeps the previous one."
+        },
+        "requestGpu": { "type": "boolean" }
+      }
+    },
+    "tokenSpec": {
+      "type": "object",
+      "required": ["mean"],
+      "properties": {
+        "mean": { "type": "integer", "minimum": 1 },
+        "stddev": { "type": "integer", "minimum": 0 }
+      }
+    }
+  }
+}

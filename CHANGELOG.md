@@ -74,6 +74,68 @@ Comparison links are at the foot of this file, one per released version.
   three histograms are receiving observations. An untested design decision is one that gets
   reverted by someone who does not know why it was made.
 
+- **A Helm chart, `charts/k8s-ai-observability`, for clusters that already run
+  Prometheus.** This is a new supported installation mode, not a replacement:
+  `scripts/install.sh` stays the source of truth for install ordering and the
+  wrong-context guard, and remains what CI exercises end to end.
+
+  ```sh
+  task chart
+  helm install rig dist/charts/k8s-ai-observability --set releaseLabel=<your release>
+  helm test rig --logs
+  ```
+
+  **Why.** Both boards are published, so people arrive from the catalog, import one, and
+  find the panels blank for want of the `llm:*` recording rules. Their only route was a
+  script that installs kube-prometheus-stack over the top of whatever they already run,
+  which nobody with a production monitoring stack will accept. That was the single biggest
+  structural blocker to adoption.
+
+  ⚠️ **There is a build step, and `helm install ./charts/...` does not work.** Helm's
+  `.Files.Get` cannot read outside the chart directory, so the chart cannot reference
+  `manifests/dashboards/*.json` or `manifests/alerts/*.yaml` where they live. Of the three
+  ways out — a build step, symlinks, or committed copies with a drift check — only the
+  build step means the second copy **never exists in the tree**, which is what this repo
+  refuses everywhere else. `task chart` assembles into gitignored `dist/`. The cost is
+  real and the chart's own assertions state it rather than failing with a template error.
+
+  **The simulator image above is what made this affordable.** `scripts/llm-sim.py` used to
+  be the hardest item on that list — executable code, the one file a drifted copy of would
+  be genuinely dangerous. A chart whose simulator Deployment references an image needs a
+  *tag*, not the file, so it drops out entirely; what remains is static JSON and YAML.
+  That is the one structural difference between the chart and `install.sh`, which still
+  mounts the script from a ConfigMap.
+
+  ⚠️ **Two values fail with NO ERROR AT ALL**, and this is the most likely way the chart
+  appears broken. A wrong `releaseLabel` means your Prometheus never adopts the rules or
+  ServiceMonitors — they never evaluate, the scrapes never happen, every derived panel is
+  empty. A wrong `grafana.dashboardLabel` means the sidecar never imports the boards and
+  `/d/<uid>` 404s. Every object reports itself successfully created either way.
+  **`helm test` is what says so out loud, and it is opt-in** — a genuine weakness of the
+  design, stated rather than hidden, which is why `NOTES.txt` tells you to run it in the
+  imperative.
+
+  **`install.sh`'s five assertions are ported rather than lost.** A `helm install` runs
+  none of them, and a chart that installs cleanly and produces an empty dashboard is worse
+  than no chart, because the failure arrives later and looks like the user's fault.
+  Everything knowable at render time is a template-time `fail` caught by `--dry-run` — the
+  dashboard filename/`uid` contract, that every board parses, distinct `model_name`s, the
+  three-way naming invariant — and everything needing a cluster is a `helm test` hook. The
+  chart README maps `CONTRIBUTING.md`'s invariants table onto which half covers each row,
+  so the two cannot drift. **CI drives all thirteen to their failure**, because an
+  assertion that has quietly stopped firing looks exactly like one that passes.
+
+  One assertion has no `install.sh` counterpart: the capacity arithmetic. The script
+  path's profiles are static files, so nobody can set an arrival rate that stops the two
+  tenants straddling the 2s alert threshold. Templating them from `values.yaml` — needed
+  so the numbers are genuinely reachable rather than frozen at their defaults — created
+  that possibility, so the chart refuses to render it.
+
+  ⚠️ **The chart's default image tag and the repo's release tag must agree, and nothing
+  else enforces it.** A chart on a stale tag installs cleanly and runs an old simulator.
+  `llm.image.tag` defaults to empty, meaning "use `Chart.appVersion`", and both
+  `task chart` and the publish workflow cross-check it.
+
 - **The simulator is published as a container image**, `ghcr.io/<owner>/vllm-metrics-sim`,
   for `linux/amd64` and `linux/arm64` on every release tag.
 

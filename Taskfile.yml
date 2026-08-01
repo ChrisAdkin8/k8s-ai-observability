@@ -127,6 +127,44 @@ tasks:
     cmds:
       - python3 scripts/dashboard-publish.py
 
+  # Assembles the installable Helm chart into gitignored dist/charts/, then lints
+  # and renders it both ways.
+  #
+  # ⚠️ THERE IS A BUILD STEP, AND `helm install ./charts/...` DOES NOT WORK.
+  # Helm's .Files.Get cannot read outside the chart directory, so the chart
+  # cannot reference manifests/dashboards/*.json or manifests/alerts/*.yaml
+  # where they live — and a second committed copy is refused, here as
+  # everywhere else in this repo. Assembling into dist/ is the only option
+  # where the second copy never exists in the tree. The cost is this step.
+  #
+  #   task chart
+  #   helm install rig dist/charts/k8s-ai-observability --set releaseLabel=<yours>
+  #   helm test rig --logs      # <- the two silent labels are checked HERE
+  chart:
+    desc: Build the Helm chart into dist/, then lint and render it (needs helm)
+    preconditions:
+      - sh: command -v helm >/dev/null 2>&1
+        msg: |
+          helm is not on PATH. The chart cannot even be RENDERED without it:
+          Helm refuses to load a chart whose declared dependencies are absent
+          from charts/, even when their condition is false, so the build has to
+          fetch them.
+    cmds:
+      - python3 scripts/chart-build.py
+      - helm lint dist/charts/k8s-ai-observability
+      # Both ways round, because they exercise different code paths: with the
+      # stack disabled (the BYO case this chart exists for) and enabled (the
+      # greenfield case, where the subchart's own templates render too).
+      - helm template rig dist/charts/k8s-ai-observability >/dev/null
+      - helm template rig dist/charts/k8s-ai-observability --set kubePrometheusStack.enabled=true >/dev/null
+      - cmd: |
+          echo
+          echo "  helm install rig dist/charts/k8s-ai-observability \\"
+          echo "    --set releaseLabel=<your monitoring release>"
+          echo
+          echo "  helm test rig --logs   # the two silent labels are checked HERE"
+        silent: true
+
   # Builds the simulator image from scripts/llm-sim.py and smoke-tests it the way
   # CI does — run it, scrape it, assert the surface. Building alone would only
   # prove the Dockerfile parses.

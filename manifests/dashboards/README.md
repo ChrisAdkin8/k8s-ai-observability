@@ -121,8 +121,24 @@ it is absolute and the derived-series caveat is stated in full rather than refer
 
 Long-form description: [`llm-sim-overview.grafana-com.md`](llm-sim-overview.grafana-com.md).
 It carries more weight than the GPU one, because this board is the one that does **not**
-import-and-go: five panels read `llm:*` recording rules and two more are simulator-only,
+import-and-go: several panels read `llm:*` recording rules and two more are simulator-only,
 so the catalog page has to say which, and give the rules inline.
+
+### ⚠️ Arrived from the catalog and found the panels blank?
+
+That is the expected first experience, and it is not a fault in the board: the `llm:*` and
+derived-DCGM series are **recording rules**, and importing a dashboard does not bring them.
+Three ways to get them, cheapest first:
+
+| | |
+|--|--|
+| paste the rules | both catalog pages give them inline — enough for a board you just want to look at |
+| [the Helm chart](../../charts/k8s-ai-observability/README.md) | installs the rules, the simulators and the workloads **without touching your monitoring stack**. `task chart && helm install rig dist/charts/k8s-ai-observability --set releaseLabel=<yours>` |
+| [`scripts/install.sh`](../../scripts/install.sh) | the whole rig, including its own kube-prometheus-stack unless you pass `--skip-monitoring` |
+
+⚠️ Whichever you choose, the `release:` label on the `PrometheusRule` has to match what
+your Prometheus selects on, and a mismatch is **silent** — the rules are created and never
+evaluated. The chart's `helm test` is the thing that says so; see its README.
 
 ⚠️ **When a panel changes, the catalog does not update itself.** The board in this repo and
 the board the catalog serves are two artefacts, and `task dashboards` only refreshes the

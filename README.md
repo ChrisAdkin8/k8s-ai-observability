@@ -77,8 +77,21 @@ See [compose/](compose/) for what it deliberately cannot cover.
   deliberately so.
 - **A path for clusters that already run Prometheus.** If you imported one of the boards
   from the catalog and found panels blank for want of the `llm:*` recording rules, you do
-  not have to hand your monitoring stack to this repo — see
-  [bring your own Prometheus](#bring-your-own-prometheus).
+  not have to hand your monitoring stack to this repo — either
+  [bring your own Prometheus](#bring-your-own-prometheus) with the install script, or use
+  the **[Helm chart](charts/k8s-ai-observability/README.md)**:
+
+  ```sh
+  task chart                                          # assembles into gitignored dist/
+  helm install rig dist/charts/k8s-ai-observability \
+    --set releaseLabel=<your monitoring release>
+  helm test rig --logs                                # ⚠️ do not skip this
+  ```
+
+  It installs the simulators, workloads, rules and dashboards and leaves your monitoring
+  stack alone. ⚠️ Two of its values — the `release:` selector and the Grafana sidecar
+  label — fail with **no error at all** if they are wrong; `helm test` is what tells you,
+  and it is opt-in. The chart README explains both, and why there is a build step.
 
 ![Six panels comparing a healthy tenant and an overloaded one side by
 side](docs/llm-dashboard.png)

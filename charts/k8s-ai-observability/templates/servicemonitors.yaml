@@ -1,0 +1,66 @@
+{{- if .Values.serviceMonitors.enabled }}
+{{- if .Values.llm.enabled }}
+---
+# Wires Prometheus to the simulated LLM servers. Lives in `monitoring` and
+# reaches across via namespaceSelector, exactly as the GPU one below does.
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: {{ include "k8s-ai-observability.fullname" . }}-llm-sim
+  namespace: {{ .Values.namespaces.monitoring }}
+  labels:
+    {{- include "k8s-ai-observability.labels" . | nindent 4 }}
+    # ⚠️ Same silent selector as the PrometheusRules — a mismatch here is no
+    # scrape and no error, so `vllm:*` never appears at all and every LLM panel
+    # is blank rather than wrong.
+    release: {{ .Values.releaseLabel }}
+spec:
+  namespaceSelector:
+    matchNames: [{{ .Values.namespaces.llmSim }}]
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: llm-sim
+      app.kubernetes.io/instance: {{ .Release.Name }}
+  endpoints:
+    # ⚠️ 15s is LOAD-BEARING. verify.sh asserts
+    # rate(vllm:generation_tokens_total[1m]) > 0, and rate() needs at least TWO
+    # samples inside its window. At 15s you get four; at 60s you get one and
+    # rate() returns nothing — which reads as a dead counter rather than as a
+    # scrape-interval choice. values.yaml keeps this <= 30s.
+    - port: llm-metrics
+      interval: {{ .Values.llm.scrapeInterval }}
+      path: /metrics
+{{- end }}
+{{- if .Values.serviceMonitors.fakeGpuExporter }}
+---
+# Wires Prometheus to the fake-gpu-operator's dcgm-exporter.
+#
+# ⚠️ The chart MAY already ship its own ServiceMonitor for this exporter — two
+# of them means conflicting scrape configs for one target. Check with
+#   kubectl get servicemonitor -n {{ .Values.namespaces.gpuOperator }}
+# and set serviceMonitors.fakeGpuExporter=false if so.
+#
+# ⚠️ The selector and port name below are true of fake-gpu-operator 0.0.59
+# specifically. A chart bump that renames either produces a green install with
+# blank GPU panels, which is why that version is pinned in Chart.yaml rather
+# than floated. Verify with `kubectl get svc -n {{ .Values.namespaces.gpuOperator }} --show-labels`.
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: {{ include "k8s-ai-observability.fullname" . }}-fake-dcgm-exporter
+  namespace: {{ .Values.namespaces.monitoring }}
+  labels:
+    {{- include "k8s-ai-observability.labels" . | nindent 4 }}
+    release: {{ .Values.releaseLabel }}
+spec:
+  namespaceSelector:
+    matchNames: [{{ .Values.namespaces.gpuOperator }}]
+  selector:
+    matchLabels:
+      app: nvidia-dcgm-exporter
+  endpoints:
+    - port: gpu-metrics
+      interval: 15s
+      path: /metrics
+{{- end }}
+{{- end }}

@@ -1,0 +1,31 @@
+{{- if .Values.rules.enabled }}
+{{- range $path, $_ := .Files.Glob "files/rules/*-rules.yaml" }}
+{{- $stem := base $path | trimSuffix "-rules.yaml" }}
+---
+# The rule GROUPS come from manifests/alerts/*.yaml, unwrapped out of the
+# PrometheusRule custom resource by scripts/extract.sh — the same extraction
+# scripts/rule-tests.sh feeds to promtool and the compose stack feeds to
+# Prometheus. One transformation, three consumers: a second copy of it is how
+# the rules promtool tests and the rules Prometheus loads start to differ.
+#
+# So what is templated here is only the WRAPPER: the name, the namespace, and
+# the selector label. The PromQL itself is byte-identical to what
+# scripts/install.sh applies.
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: {{ $stem }}-simulation-alerts
+  namespace: {{ $.Values.namespaces.monitoring }}
+  labels:
+    {{- include "k8s-ai-observability.labels" $ | nindent 4 }}
+    # ⚠️ THE SILENT ONE. Upstream kube-prometheus-stack defaults
+    # ruleSelectorNilUsesHelmValues to TRUE, which makes its selector
+    # `release=<its own release name>`. If this does not match, your Prometheus
+    # never adopts this object: the rules never evaluate, every `llm:*` and
+    # every derived DCGM series is absent, and the panels reading them are
+    # blank. Nothing errors. Nothing warns. The object reports itself created.
+    release: {{ $.Values.releaseLabel }}
+spec:
+{{ $.Files.Get $path | indent 2 }}
+{{- end }}
+{{- end }}
