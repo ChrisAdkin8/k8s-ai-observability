@@ -25,6 +25,15 @@ Comparison links are at the foot of this file, one per released version.
 
 ### Changed
 
+- **`What you get` tightened from 53 lines to 47**, by cutting justification the repo
+  already tells properly elsewhere rather than by dropping claims — every one of the eight
+  bullets survives, and a term-by-term check confirms nothing it referenced was lost. The
+  weekly-drift bullet was ten lines, half of them re-telling the 0.1.0/0.2.0 story that
+  [docs/versions.md](docs/versions.md#keeping-them-honest) tells in full and that the
+  bullet did not even link to; it now makes the point in two clauses and links there. The
+  dashboards bullet dropped a four-way enumeration of how the JSON is consumed, which is
+  detail rather than value at that position.
+
 - **`Bring your own Prometheus` moved out of the README into
   [docs/byo-prometheus.md](docs/byo-prometheus.md).** It was 44 lines — a seventh of the
   README, and the largest single block inside `Install` — covering the

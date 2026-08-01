@@ -44,25 +44,19 @@ See [compose/](compose/) for what it deliberately cannot cover.
 - **Recording rules and alerts** over both domains, [unit-tested with `promtool`](tests/)
   in about a second, with no cluster. The tests cover both sides of every threshold,
   including the ones the rig never drives. If you build alerting here, you can test it here.
-- **Two Grafana dashboards**, one `.json` each, used four ways: wrapped in a ConfigMap
-  for the sidecar, mounted by the compose stack, imported into any Grafana, or derived into
-  the grafana.com upload by `task dashboards`. Nothing is ever clicked into place, so a
-  re-install reproduces them exactly. Both are published, so you can import them by id
-  into a Grafana you already run:
-  [25618](https://grafana.com/grafana/dashboards/25618-gpu-simulation-dcgm-overview/) (GPU) and
+- **Two Grafana dashboards**, one `.json` each and never clicked into place, so a
+  re-install reproduces them exactly. Both are in the catalog — import by id into a Grafana
+  you already run:
+  [25618](https://grafana.com/grafana/dashboards/25618-gpu-simulation-dcgm-overview/) (GPU),
   [25620](https://grafana.com/grafana/dashboards/25620-llm-simulation-vllm-serving-overview/) (vLLM).
 - **An acceptance suite** ([`scripts/verify.sh`](scripts/verify.sh)) that asserts metrics
   are flowing, both boards render, and the alerts actually reach `firing`.
-- **A weekly check against real vLLM**, which is what keeps the "real metric names and
-  buckets" claim above true rather than merely asserted.
-  [`scripts/check-vllm-buckets.py`](scripts/check-vllm-buckets.py) fetches upstream's own
-  metrics definitions and fails if a bucket boundary or a metric name has moved, and
-  reports the upstream metrics this simulator does not emit so that distance stays
-  visible. It exists because 0.1.0 and 0.2.0 shipped the superseded `v0.6.x` bucket layout
-  with **every test green** — every test reads the simulator, and the simulator was
-  consistent with itself. A drifted boundary does not error or blank a panel; it returns a
-  confident, plausible percentile that will not match real hardware, which no self-contained
-  test suite can catch.
+- **A weekly check against real vLLM**, which is what makes the claim above *checked*
+  rather than asserted. [`check-vllm-buckets.py`](scripts/check-vllm-buckets.py) fetches
+  upstream's own metric definitions and fails if a name or a bucket boundary has moved. It
+  exists because two releases shipped the wrong bucket layout with **every test green** —
+  a drifted boundary returns a confident, plausible, wrong percentile
+  ([the full story](docs/versions.md#keeping-them-honest)).
 - **The simulator as a container image**, so you can point your *own* dashboards at a
   realistic vLLM metric surface without cloning anything:
   `docker run --rm -p 9401:9401 ghcr.io/chrisadkin8/vllm-metrics-sim:latest`. Built from
