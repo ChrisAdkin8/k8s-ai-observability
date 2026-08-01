@@ -23,6 +23,21 @@ Comparison links are at the foot of this file, one per released version.
 
 ## [Unreleased]
 
+### Changed
+
+- **`Bring your own Prometheus` moved out of the README into
+  [docs/byo-prometheus.md](docs/byo-prometheus.md).** It was 44 lines — a seventh of the
+  README, and the largest single block inside `Install` — covering the
+  `--skip-monitoring` flow, the two labels that fail silently, and what `verify.sh --byo`
+  relaxes.
+
+  Nothing was cut: a line-by-line check confirms every substantive line survives, and the
+  page gains what a README subsection could not carry — the choice between the script path
+  and the Helm chart stated up front, and a note that the chart's `helm test` is the only
+  thing here that can *verify* those two labels against a live Prometheus rather than
+  merely document them. A short pointer keeps the trail from `Install`, and the README
+  drops from 306 lines to 280.
+
 ## [0.5.0] — 2026-08-01
 
 **This release finishes the sentence 0.4.0 started.** That one gave a cluster with its own
