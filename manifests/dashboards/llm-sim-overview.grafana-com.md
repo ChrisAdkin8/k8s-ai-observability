@@ -29,7 +29,7 @@ The first panel is the whole design: two tenants either side of the 2s alert thr
 
 ## What it needs - read this before importing
 
-Unlike a pure `vllm:*` board, **five panels read recording rules rather than raw series**, and two more read simulator-only metrics. Import without them and you get an empty board and no explanation.
+Unlike a pure `vllm:*` board, **seven panels read recording rules rather than raw series**, and two more read simulator-only metrics. Import without them and you get an empty board and no explanation.
 
 | Tier | Series | Against real vLLM |
 |--|--|--|
@@ -54,6 +54,12 @@ Quantiles are recorded once rather than repeated in every panel and alert, so a 
   expr: sum by (model_name) (rate(vllm:prompt_tokens_total[5m]))
 - record: llm:prefix_cache:hit_ratio5m
   expr: sum by (model_name) (rate(vllm:prefix_cache_hits_total[5m])) / clamp_min(sum by (model_name) (rate(vllm:prefix_cache_queries_total[5m])), 1e-9)
+
+# The cross-domain rule. CLUSTER-AGGREGATE on purpose - power is per GPU, not
+# per model, so this is the one rule here that is deliberately not by (model_name).
+# Needs DCGM in the same Prometheus; without it the panel is blank.
+- record: llm:tokens_per_watt:5m
+  expr: sum(rate(vllm:generation_tokens_total[5m])) / sum(DCGM_FI_DEV_POWER_USAGE)
 
 # The request phase breakdown. MEANS - see the caveat below for why not p95s.
 - record: llm:queue:mean5m
@@ -143,7 +149,7 @@ The same effect moved TTFT's reported numbers when V1 replaced its entire tail a
 
 ## The cross-domain panel
 
-`llm:tokens_per_watt:5m` is `sum(rate(vllm:generation_tokens_total[5m])) / sum(DCGM_FI_DEV_POWER_USAGE)` - cluster-aggregate, and it needs **DCGM metrics in the same Prometheus**. Without a GPU exporter the panel is blank; that is expected, not a fault.
+`llm:tokens_per_watt:5m` is `sum(rate(vllm:generation_tokens_total[5m])) / sum(DCGM_FI_DEV_POWER_USAGE)` - cluster-aggregate, and it needs **DCGM metrics in the same Prometheus**. Without the recording rule above, or without a GPU exporter behind it, the panel is blank; that is expected, not a fault.
 
 **⚠️ On this rig the two signals are driven independently**: GPU load comes from pod annotations, LLM load from simulator profiles, and nothing makes one follow the other. The panel demonstrates the query pattern and the wiring across two metric families - it does not show causation. Against real hardware it becomes meaningful, provided you are honest about which GPUs are actually serving the model.
 

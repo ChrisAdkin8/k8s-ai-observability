@@ -146,8 +146,19 @@ first — so a merged panel reaches nobody who imported by id until it is upload
 
 Always re-submit as a **new revision of the existing id**, never as a new dashboard: a
 second upload mints a second id, and everyone who already imported the first silently
-stops receiving fixes. 25620's prefix-cache revision went up on 2026-07-31; both boards
-are currently in step with the repo.
+stops receiving fixes. 25620 is on **revision 2** — the phase breakdown — uploaded
+2026-08-01; 25618 is still on revision 1 from 2026-07-31. Both boards' JSON is in step
+with the repo, and so is 25620's catalog page.
+
+⚠️ **25618's catalog page text is not**, and it is worth re-pasting from
+[`gpu-sim-dcgm.grafana-com.md`](gpu-sim-dcgm.grafana-com.md) next time that board is
+touched: the live copy predates the dash flattening, and the paste corrupted two things a
+reader would copy — the per-pod attribution query lost the `)` after `gpu`, and the board
+12239 link lost its `]` so it renders as literal text. Both are intact in this repo.
+
+⚠️ **The short description on both boards is still the upload form's placeholder** —
+"Dashboard for vLLM stats" on 25620, "Dashboard to display NVIDIA DCGM stats" on 25618 —
+rather than the paste-ready text above. That field is what the catalog search results show.
 
 A logo each, 512×512, is in [`docs/logos/`](../../docs/logos/) — `gpu-sim-dcgm.png` and
 `llm-sim-overview.png`, named for the boards they belong to. They are **generated**, not
