@@ -541,14 +541,27 @@ llm_phases="$(promql_count 'count(rate(vllm:request_prefill_time_seconds_count[5
 # real breakdown error (a mis-wired phase moves this by whole seconds) and far
 # above float noise. Polled, because four recording rules need a couple of
 # evaluations to exist at all.
+#
+# ⚠️ COUNTED AGAINST THE TENANTS THAT HAVE THE SERIES, not asserted as "at least
+# one". The first draft of this check was `count(...) > 0`, and both CI legs
+# passed it reporting ONE tenant when two are running — a saturated tenant whose
+# breakdown had stopped summing would have gone unnoticed, which is the
+# hollow-green failure this file exists to prevent. The count on the right is
+# llm:e2e:mean5m rather than llmsim_profile_generation (which L3b uses) on
+# purpose: a tenant too young to have two samples in the rate() window has no
+# recorded mean at all, and demanding a number it cannot yet produce would make
+# this flaky rather than strict. So the claim is exactly "every tenant that HAS
+# a recorded breakdown has one that adds up", and a phase mean that is missing
+# while e2e is present drops the left count and fails.
 llm_sums=0
 for _ in $(seq 1 24); do
-  llm_sums="$(promql_count 'abs((llm:queue:mean5m + llm:prefill:mean5m + llm:decode:mean5m) - llm:e2e:mean5m) < 1e-6')"
+  llm_sums="$(promql_count 'count(abs((llm:queue:mean5m + llm:prefill:mean5m + llm:decode:mean5m) - llm:e2e:mean5m) < 1e-6) == count(llm:e2e:mean5m)')"
   [[ "${llm_sums:-0}" -gt 0 ]] && break
   sleep 5
 done
-[[ "${llm_sums:-0}" -gt 0 ]] && pass "L8 the phase breakdown sums to end-to-end latency ($llm_sums tenant(s))" \
-  || fail "L8 llm:queue+prefill+decode:mean5m does not equal llm:e2e:mean5m — all four recording rules applied? (a quantile rule substituted for a mean stops summing: means are additive, percentiles are not)"
+llm_sum_n="$(promql_count 'llm:e2e:mean5m')"
+[[ "${llm_sums:-0}" -gt 0 ]] && pass "L8 the phase breakdown sums to end-to-end latency for all ${llm_sum_n:-0} tenant(s) that have one" \
+  || fail "L8 llm:queue+prefill+decode:mean5m does not equal llm:e2e:mean5m for every tenant carrying it (${llm_sum_n:-0} tenant(s) have llm:e2e:mean5m) — all four recording rules applied? (a quantile rule substituted for a mean stops summing: means are additive, percentiles are not)"
 
 graf_pf_stop
 prom_pf_stop
