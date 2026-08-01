@@ -33,7 +33,7 @@ and the reason for each stage.
 
 Versions are deliberately absent below, so this diagram never disagrees with
 [Pinned versions](versions.md). The Task and Make front doors are
-also left out, being thin wrappers over `scripts/`; see [Quick start](../README.md#quick-start).
+also left out, being thin wrappers over `scripts/`; see [Install](../README.md#install).
 
 The `kube-prometheus-stack` box is a bundle. Alongside Prometheus, Alertmanager and Grafana it
 brings the Prometheus Operator — which is what turns the ServiceMonitor and PrometheusRule CRDs
