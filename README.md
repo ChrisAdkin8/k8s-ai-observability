@@ -61,37 +61,16 @@ See [compose/](compose/) for what it deliberately cannot cover.
   consistent with itself. A drifted boundary does not error or blank a panel; it returns a
   confident, plausible percentile that will not match real hardware, which no self-contained
   test suite can catch.
-- **The simulator as a container image**, for pointing your *own* dashboards at a realistic
-  vLLM metric surface without cloning anything:
-
-  ```sh
-  docker run --rm -p 9401:9401 ghcr.io/chrisadkin8/vllm-metrics-sim:latest
-  ```
-
-  No `--profile` needed — it falls back to a self-consistent steady tenant and serves on
-  `:9401`. Published on every release tag for `linux/amd64` and `linux/arm64`, and built
-  from [`scripts/llm-sim.py`](scripts/llm-sim.py) rather than a second copy of it. ⚠️ The
-  port override is **`LLM_SIM_LISTEN_PORT`**, not the more obvious `LLM_SIM_PORT` — see
-  [docs/llm-simulation.md](docs/llm-simulation.md#the-container-image) for why that is not
-  a matter of taste. This image is **not** how the rig itself runs the simulator, and
-  deliberately so.
-- **A path for clusters that already run Prometheus.** If you imported one of the boards
-  from the catalog and found panels blank for want of the `llm:*` recording rules, you do
-  not have to hand your monitoring stack to this repo — either
-  [bring your own Prometheus](#bring-your-own-prometheus) with the install script, or use
-  the **[Helm chart](charts/k8s-ai-observability/README.md)**:
-
-  ```sh
-  task chart                                          # assembles into gitignored dist/
-  helm install rig dist/charts/k8s-ai-observability \
-    --set releaseLabel=<your monitoring release>
-  helm test rig --logs                                # ⚠️ do not skip this
-  ```
-
-  It installs the simulators, workloads, rules and dashboards and leaves your monitoring
-  stack alone. ⚠️ Two of its values — the `release:` selector and the Grafana sidecar
-  label — fail with **no error at all** if they are wrong; `helm test` is what tells you,
-  and it is opt-in. The chart README explains both, and why there is a build step.
+- **The simulator as a container image**, so you can point your *own* dashboards at a
+  realistic vLLM metric surface without cloning anything:
+  `docker run --rm -p 9401:9401 ghcr.io/chrisadkin8/vllm-metrics-sim:latest`. Built from
+  [`scripts/llm-sim.py`](scripts/llm-sim.py) rather than a copy of it, for `amd64` and
+  `arm64` — [details](docs/llm-simulation.md#the-container-image).
+- **A path for clusters that already run Prometheus**, so panels blank for want of the
+  `llm:*` recording rules are a two-minute fix rather than a reason to hand your monitoring
+  stack to an install script. Either
+  [bring your own Prometheus](#bring-your-own-prometheus) or the
+  [Helm chart](charts/k8s-ai-observability/README.md).
 
 ![Six panels comparing a healthy tenant and an overloaded one side by
 side](docs/llm-dashboard.png)
