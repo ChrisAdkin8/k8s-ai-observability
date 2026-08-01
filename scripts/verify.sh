@@ -536,11 +536,9 @@ llm_phases="$(promql_count 'count(rate(vllm:request_prefill_time_seconds_count[5
 # which is a different claim — the fixtures cannot catch a rule that was applied
 # to the cluster in a stale form, or a phase histogram wired to the wrong term.
 #
-# Bounded rather than exact: these are floats through rate() and a division, so
-# an == would be asserting bit-equality on a live cluster. 1e-6 is far below any
-# real breakdown error (a mis-wired phase moves this by whole seconds) and far
-# above float noise. Polled, because four recording rules need a couple of
-# evaluations to exist at all.
+# RELATIVE, not absolute, and that distinction is the whole of the third fix
+# below. Polled, because four recording rules need a couple of evaluations to
+# exist at all.
 #
 # ⚠️ COUNTED, not asserted as "at least one" — and the right-hand side is the
 # part that took two CI runs to get right, so it is written down.
@@ -557,13 +555,39 @@ llm_phases="$(promql_count 'count(rate(vllm:request_prefill_time_seconds_count[5
 # to cross that line on the same evaluation). The left side then has fewer
 # series than the right forever, on a rig that is working perfectly.
 #
-# ⚠️ AND THE TOLERANCE WAS NEVER THE PROBLEM — MEASURED, so nobody re-opens it.
-# Replicating Prometheus's arithmetic offline against the simulator's own
-# exposition output, INCLUDING fmt()'s round(x, 6):
-#     steady    543 completions  residual 1.8e-15
-#     saturated 822 completions  residual 7.1e-15   (means spanning 0.08s..58s)
-# Seven orders under the 1e-6 bound. Widening the tolerance would fix nothing
-# and would blind the check to a real fault, which moves this by WHOLE SECONDS.
+# THIRD DRAFT — and the one that matters: `abs(...) < 1e-6`, an ABSOLUTE bound.
+# It failed the lite leg with 1 of 2 tenants summing, both carrying a complete
+# breakdown. Not a missing rule: one tenant genuinely exceeded the bound.
+#
+# ⚠️ THE BOUND WAS THE WRONG SHAPE, not the wrong number, and the earlier
+# measurement that justified it was taken under conditions the cluster does not
+# reproduce. It ran the simulator from a clock starting at ZERO and got ~1e-15.
+# A cluster starts it at time.monotonic(). e2e is read off the clock as
+# (admit + prefill + decode) - arrived, so the cancellation happens between two
+# LARGE numbers, and float64's absolute precision near X is X*2^-52 — the error
+# therefore scales with the CLOCK, not with the latency. MEASURED, by rerunning
+# the same offline replication with the start time moved:
+#
+#     clock start   worst residual
+#     0 .. 1e4      ~1e-15
+#     1e6            1.2e-9
+#     1e9            3.7e-9
+#
+# Prometheus's rate() adds more on top: it extrapolates to the window edges and
+# corrects for counter resets, and neither correction is proportional across
+# four series whose magnitudes differ by three orders (queue ~58s, prefill
+# ~0.08s). Those corrections do not cancel in the subtraction.
+#
+# An absolute bound on a quantity whose error scales with its inputs was never
+# going to hold. So the comparison is RELATIVE — the breakdown must account for
+# essentially all of e2e, rather than land within a fixed number of seconds of
+# it. A genuinely mis-wired phase moves this by a LARGE FRACTION of e2e (a
+# dropped term is 0.1-0.9 of it), so 1e-3 keeps three orders of margin over the
+# fault it exists to catch while being immune to the arithmetic above.
+#
+# clamp_min on the denominator for the same reason the rules themselves use it:
+# an idle tenant has all four means at zero, and 0/0 would be NaN — which is not
+# < 1e-3, so it would be counted as a failure rather than as the nothing it is.
 #
 # SO: compare against the tenants for which the arithmetic PRODUCED A VALUE AT
 # ALL. `count(expr)` counts exactly the label sets where all four means were
@@ -573,17 +597,18 @@ llm_phases="$(promql_count 'count(rate(vllm:request_prefill_time_seconds_count[5
 # already fails if any of the three histograms is absent or not advancing.
 llm_sums=0
 for _ in $(seq 1 24); do
-  llm_sums="$(promql_count 'count(abs((llm:queue:mean5m + llm:prefill:mean5m + llm:decode:mean5m) - llm:e2e:mean5m) < 1e-6)
+  llm_sums="$(promql_count 'count(abs((llm:queue:mean5m + llm:prefill:mean5m + llm:decode:mean5m) - llm:e2e:mean5m)
+      / clamp_min(llm:e2e:mean5m, 1e-9) < 1e-3)
     == count((llm:queue:mean5m + llm:prefill:mean5m + llm:decode:mean5m) - llm:e2e:mean5m)')"
   [[ "${llm_sums:-0}" -gt 0 ]] && break
   sleep 5
 done
 # Reported on both paths so a future failure is diagnosable from the summary
 # rather than from a rerun: "3 of 4" and "0 of 0" are different faults.
-llm_ok_n="$(promql_count 'abs((llm:queue:mean5m + llm:prefill:mean5m + llm:decode:mean5m) - llm:e2e:mean5m) < 1e-6')"
+llm_ok_n="$(promql_count 'abs((llm:queue:mean5m + llm:prefill:mean5m + llm:decode:mean5m) - llm:e2e:mean5m) / clamp_min(llm:e2e:mean5m, 1e-9) < 1e-3')"
 llm_all_n="$(promql_count '(llm:queue:mean5m + llm:prefill:mean5m + llm:decode:mean5m) - llm:e2e:mean5m')"
-[[ "${llm_sums:-0}" -gt 0 ]] && pass "L8 the phase breakdown sums to end-to-end latency (${llm_ok_n:-0}/${llm_all_n:-0} tenant(s) with a complete breakdown)" \
-  || fail "L8 only ${llm_ok_n:-0} of ${llm_all_n:-0} tenant(s) with a complete breakdown sum to llm:e2e:mean5m — all four recording rules applied, and none swapped back to a quantile? (means are additive, percentiles are not). ${llm_all_n:-0} = 0 means the four mean rules are not evaluating at all."
+[[ "${llm_sums:-0}" -gt 0 ]] && pass "L8 the phase breakdown accounts for end-to-end latency (${llm_ok_n:-0}/${llm_all_n:-0} tenant(s) with a complete breakdown, within 0.1%)" \
+  || fail "L8 only ${llm_ok_n:-0} of ${llm_all_n:-0} tenant(s) with a complete breakdown account for llm:e2e:mean5m to within 0.1% — all four recording rules applied, and none swapped back to a quantile? (means are additive, percentiles are not). ${llm_all_n:-0} = 0 means the four mean rules are not evaluating at all."
 
 graf_pf_stop
 prom_pf_stop
