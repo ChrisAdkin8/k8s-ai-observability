@@ -21,7 +21,7 @@ causes apart by working outwards from the producer.
 | Panels fill in slowly, or rate panels read low just after install | Warm-up, not a fault — allow about 6 minutes. The `[5m]` rule windows, the alert `for:` durations and the ephemeral TSDB each add delay; [observability.md](observability.md#warm-up-the-first-few-minutes-after-install) breaks it down. |
 | Half the GPUs sit flat at 0% on the GPU board | Expected. `gpuCount` is 8 per node and the default workloads claim four; the headroom is for the opt-in extras in `manifests/workloads/extras/`. Flat-zero for an unclaimed GPU is a correct reading, not a missing series. |
 | A scrape target is down | `./scripts/prometheus.sh eks` says so on startup, and `/targets` lists every target. See [The Prometheus console](observability.md#the-prometheus-console). |
-| `task eks:load` or `eks:llm-load` fails its precondition | The opt-in Deployments are not applied. See [Quick start](../README.md#quick-start). |
+| `task eks:load` or `eks:llm-load` fails its precondition | The opt-in Deployments are not applied. See [Install](../README.md#install). |
 | A green install with zero GPUs | The naming invariant is broken. See [The naming invariant](architecture.md#the-naming-invariant-read-before-editing). |
 | `task local:up` fails before creating anything | The container runtime is missing or too small. The error names the exact `colima` / Docker Desktop / `podman machine` fix. |
 | Pods Pending on local, nothing scheduling | The runtime is under-provisioned. `kind-up.sh` warns between 5 and 8 GiB rather than refusing — raise it to 8 GiB / 4 CPU and recreate. |

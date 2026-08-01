@@ -12,6 +12,8 @@ hardware, no quota, no drivers, no model weights.
 ![Four time-series panels tracking utilisation, memory, temperature and power across
 eight simulated GPUs](docs/gpu-dashboard.png)
 
+## Try it
+
 ```sh
 cd compose && docker compose up -d     # both boards on localhost:3000. ~1 min, no Kubernetes.
 ```
@@ -99,56 +101,11 @@ half of your work it affects.
 
 In short: build the *pipeline* here, tune the *numbers* on real hardware.
 
-## Why not just…
+## Install
 
-| | Why not |
-|--|--|
-| …use a real GPU node? | That is the goal, not the starting point. It costs money and quota, and you can't put one in CI. This repo's own CI stands the whole stack up on a free runner. |
-| …use [kwok](https://kwok.sigs.k8s.io)? | kwok fakes the kubelet, so pods never really run. Excellent for scheduler and scale testing; it emits no DCGM or vLLM metrics, so there is nothing to point a dashboard at. |
-| …use Grafana's TestData datasource? | Gives you panels with data, but no metric names, labels or PromQL, so nothing you build against it transfers to a real deployment. |
-| …push synthetic series straight into Prometheus? | Gets you series without the Kubernetes half: no device plugin, no `nvidia.com/gpu` scheduling, no ServiceMonitor discovery, no operator wiring to get wrong. |
-| …run real vLLM with a tiny model? | Real metrics, but it needs a GPU to be meaningful, and you cannot ask it for a saturated tenant on demand. Here, saturation is a line in a JSON profile. |
-
-## Prerequisites
-
-| Tool | Notes |
-|------|-------|
-| `kubectl`, `helm`, `curl`, `python3` | required on every target |
-| [`kind`](https://kind.sigs.k8s.io) + Docker, colima or podman | local only, and all it needs |
-| [`task`](https://taskfile.dev/docs/installation) | the front door. `brew install go-task/tap/go-task`; needs >= 3.32 |
-| `terraform` >= 1.6, plus `aws` or `gcloud` | EKS/GKE only. GKE also needs `gke-gcloud-auth-plugin`, a [common silent miss](docs/gke.md#prerequisites) |
-| `promtool` | optional, for `task rule-tests`. Ships inside the Prometheus release |
-| `docker compose` | optional, for the [no-Kubernetes path](compose/). Nothing else on the host |
-| `docker` | optional, for `task image` (build the simulator image) and `task chart` (which needs `helm` and network too) |
-
-`task tools` checks all of the above, and only fails on the target-agnostic ones.
-
-**Size your container runtime first.** Colima's 2 CPU / 2 GiB default cannot run this:
-Prometheus alone requests 1Gi and limits 2Gi. `scripts/kind-up.sh` refuses below 5 GiB and
-prints the exact `colima` / Docker Desktop / `podman machine` command to fix it. Allow
-8 GiB and 4 CPU (the floors and the recommendation are `KIND_MIN_MEMORY_GIB` /
-`KIND_MIN_CPUS` and `KIND_WANT_MEMORY_GIB` / `KIND_WANT_CPUS`, if you need to move them):
-
-```sh
-colima start --cpu 4 --memory 8 --disk 40
-```
-
-**Or run the trimmed stack instead.** `LITE=1` drops Alertmanager, kube-state-metrics,
-node-exporter and the chart's ~100 default rules, and puts Prometheus on 256Mi/512Mi. That
-lowers the floor to 3 GiB and the recommendation to 4:
-
-```sh
-LITE=1 task local:up
-```
-
-It keeps everything `local` exists to prove: ServiceMonitor discovery, PrometheusRule
-evaluation, the Grafana sidecar import, and scheduling on `nvidia.com/gpu`. Both
-dashboards render and every acceptance check in `verify.sh` still runs and still passes,
-because none of them touches what was removed.
-[`values-lite.yaml`](helm/kube-prometheus-stack/values-lite.yaml) lists exactly what
-you give up.
-
-## Quick start
+> Needs `kubectl`, `helm` and `task`, plus `kind` + a container runtime for `local` —
+> see [Prerequisites](#prerequisites). ⚠️ **Size your container runtime first**: colima's
+> 2 CPU / 2 GiB default cannot run this. `task tools` checks the lot.
 
 Three targets (`local`, `eks`, `gke`), each with two phases. **Phase 1** creates the
 cluster with the GPU-sim node label (`scripts/kind-up.sh` locally, `terraform apply` on
@@ -271,6 +228,55 @@ script prints the generated password. Use `GRAFANA_PORT=3001` if 3000 is taken, 
 
 If a board 404s or its panels come up empty, see
 [docs/troubleshooting.md](docs/troubleshooting.md).
+
+## Prerequisites
+
+| Tool | Notes |
+|------|-------|
+| `kubectl`, `helm`, `curl`, `python3` | required on every target |
+| [`kind`](https://kind.sigs.k8s.io) + Docker, colima or podman | local only, and all it needs |
+| [`task`](https://taskfile.dev/docs/installation) | the front door. `brew install go-task/tap/go-task`; needs >= 3.32 |
+| `terraform` >= 1.6, plus `aws` or `gcloud` | EKS/GKE only. GKE also needs `gke-gcloud-auth-plugin`, a [common silent miss](docs/gke.md#prerequisites) |
+| `promtool` | optional, for `task rule-tests`. Ships inside the Prometheus release |
+| `docker compose` | optional, for the [no-Kubernetes path](compose/). Nothing else on the host |
+| `docker` | optional, for `task image` (build the simulator image) and `task chart` (which needs `helm` and network too) |
+
+`task tools` checks all of the above, and only fails on the target-agnostic ones.
+
+**Size your container runtime first.** Colima's 2 CPU / 2 GiB default cannot run this:
+Prometheus alone requests 1Gi and limits 2Gi. `scripts/kind-up.sh` refuses below 5 GiB and
+prints the exact `colima` / Docker Desktop / `podman machine` command to fix it. Allow
+8 GiB and 4 CPU (the floors and the recommendation are `KIND_MIN_MEMORY_GIB` /
+`KIND_MIN_CPUS` and `KIND_WANT_MEMORY_GIB` / `KIND_WANT_CPUS`, if you need to move them):
+
+```sh
+colima start --cpu 4 --memory 8 --disk 40
+```
+
+**Or run the trimmed stack instead.** `LITE=1` drops Alertmanager, kube-state-metrics,
+node-exporter and the chart's ~100 default rules, and puts Prometheus on 256Mi/512Mi. That
+lowers the floor to 3 GiB and the recommendation to 4:
+
+```sh
+LITE=1 task local:up
+```
+
+It keeps everything `local` exists to prove: ServiceMonitor discovery, PrometheusRule
+evaluation, the Grafana sidecar import, and scheduling on `nvidia.com/gpu`. Both
+dashboards render and every acceptance check in `verify.sh` still runs and still passes,
+because none of them touches what was removed.
+[`values-lite.yaml`](helm/kube-prometheus-stack/values-lite.yaml) lists exactly what
+you give up.
+
+## Why not just…
+
+| | Why not |
+|--|--|
+| …use a real GPU node? | That is the goal, not the starting point. It costs money and quota, and you can't put one in CI. This repo's own CI stands the whole stack up on a free runner. |
+| …use [kwok](https://kwok.sigs.k8s.io)? | kwok fakes the kubelet, so pods never really run. Excellent for scheduler and scale testing; it emits no DCGM or vLLM metrics, so there is nothing to point a dashboard at. |
+| …use Grafana's TestData datasource? | Gives you panels with data, but no metric names, labels or PromQL, so nothing you build against it transfers to a real deployment. |
+| …push synthetic series straight into Prometheus? | Gets you series without the Kubernetes half: no device plugin, no `nvidia.com/gpu` scheduling, no ServiceMonitor discovery, no operator wiring to get wrong. |
+| …run real vLLM with a tiny model? | Real metrics, but it needs a GPU to be meaningful, and you cannot ask it for a saturated tenant on demand. Here, saturation is a line in a JSON profile. |
 
 ## Documentation
 

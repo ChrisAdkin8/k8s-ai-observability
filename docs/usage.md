@@ -2,8 +2,8 @@
 
 [Task](https://taskfile.dev/docs/installation) is a thin front door over `scripts/`, not a
 replacement for it — every task shells out to the same script. This page is the script-level
-equivalent of [Quick start](../README.md#quick-start), for when you would rather not install
-Task, or want to see exactly what each phase runs.
+equivalent of the README's [Install](../README.md#install) section, for when you would
+rather not install Task, or want to see exactly what each phase runs.
 
 
 Task only wraps them, and needs no extra tooling to skip. `scripts/` stays the source of truth
