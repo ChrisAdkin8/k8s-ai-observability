@@ -44,9 +44,14 @@ cluster, exactly as `gpu-busy` keeps `GPUHighUtilization` firing on the GPU side
 | `llm-sim-overview-dashboard` | `monitoring` | The Grafana board, generated from `manifests/dashboards/llm-sim-overview.json` and loaded by the sidecar |
 
 The simulator itself is [`scripts/llm-sim.py`](../scripts/llm-sim.py) — one standard-library
-Python file, no dependencies, no image to build. `install.sh` loads it into ConfigMap
-`llm-sim-script` and runs it on a stock `python:3.12-slim` image, so there is no registry and
-no `pip install` anywhere in the path.
+Python file, no dependencies. `install.sh` loads it into ConfigMap `llm-sim-script` and runs
+it on a stock `python:3.12-slim` image, so **the cluster path builds nothing and needs no
+registry**, and there is no `pip install` anywhere in it.
+
+There is also a [published image](#the-container-image) for people consuming the simulator
+from *outside* this repo. It changes nothing above: the rig deliberately keeps mounting the
+file, because an image-based Deployment would pin a tag and a local edit would stop reaching
+the cluster silently.
 
 ## Metrics
 
@@ -76,9 +81,12 @@ Prometheus sees.
 | `vllm:request_inference_time_seconds` | histogram | Time spent in the RUNNING phase — prefill + decode |
 | `vllm:request_success_total` | counter | Completions, by `finished_reason` |
 
-Those five request-scoped histograms share **one** bucket list. Upstream declares a single
-`request_latency_buckets` and passes it to all of them, so this repo holds one
-`E2E_BUCKETS` constant and the weekly drift check watches it on behalf of every one.
+The five **request-scoped** histograms — `e2e_request_latency`, `request_queue_time`,
+`request_prefill_time`, `request_decode_time` and `request_inference_time` — share **one**
+bucket list. Upstream declares a single `request_latency_buckets` and passes it to all five,
+so this repo holds one `E2E_BUCKETS` constant and the weekly drift check watches it on
+behalf of every one. (`time_to_first_token_seconds` and `inter_token_latency_seconds` have
+their own lists, `TTFT_BUCKETS` and `TPOT_BUCKETS`.)
 
 ### The phase decomposition
 
@@ -185,7 +193,7 @@ python3 scripts/check-vllm-buckets.py
 That check watches the metric **set** as well, in both directions: a `vllm:` name this
 repo emits that upstream has dropped is drift and fails, while an upstream metric this
 simulator does not emit is printed as a gap and passes. The gap list is long on purpose —
-upstream declares around 40 series and this file emits 10 — and keeping it printed is what
+upstream declares around 40 series and this file emits 16 — and keeping it printed is what
 stops that distance from growing back silently. See
 [versions.md](versions.md#keeping-them-honest).
 

@@ -122,7 +122,25 @@ be undetectable from outside, which is exactly what
 | Sample workloads | `default` | Deployments requesting `nvidia.com/gpu`; pod-template annotation drives simulated utilisation. |
 | LLM simulators | `llm-sim` | `llm-steady` (healthy) and `llm-saturated` (overloaded on purpose) run `scripts/llm-sim.py`, emitting the real **vLLM** metric surface. A polled JSON profile drives load without restarting the pod. Opt-in `llm-driven` is the target for `drive-llm-load.sh`. |
 | ServiceMonitor `llm-sim` | `monitoring` | Scrapes the simulators every 15s. |
-| PrometheusRule `llm-simulation-alerts` | `monitoring` | `llm:*` recording rules aggregated `by (model_name)`, plus `LLMHighTTFT`, `LLMQueueBacklog`, `LLMKVCacheSaturated`, `LLMMetricsAbsent`. |
+| PrometheusRule `llm-simulation-alerts` | `monitoring` | `llm:*` recording rules aggregated `by (model_name)` — the TTFT/TPOT percentiles, the prefix-cache ratio, the token rates, and the four **means** the request phase breakdown is built from — plus `LLMHighTTFT`, `LLMQueueBacklog`, `LLMKVCacheSaturated`, `LLMMetricsAbsent`. |
+
+### Two artefacts that are not part of a cluster install
+
+Both are *derived* from files already in the tree, on the same terms as `dist/` and the
+dashboard ConfigMaps: one source, several forms. Neither is a second copy, and CI fails if
+one appears.
+
+| Artefact | Built by | What it is for |
+|--|--|--|
+| `ghcr.io/<owner>/vllm-metrics-sim` | `Dockerfile`, pushed by `publish-image.yml` on a release tag | Pointing **someone else's** dashboards at a realistic vLLM metric surface without cloning this repo. ⚠️ *Not* how this rig runs the simulator — see [llm-simulation.md](llm-simulation.md#-what-this-image-is-not). |
+| `charts/k8s-ai-observability` | `task chart`, assembled into gitignored `dist/` | Installing the rules, boards, simulators and workloads onto a cluster that **already runs Prometheus**, without `install.sh` touching its monitoring stack. |
+
+⚠️ **The chart is the one place the simulator runs from the image rather than the
+ConfigMap**, and that is a consequence of Helm rather than a preference: `.Files.Get`
+cannot read outside the chart directory, so the chart cannot reach `scripts/llm-sim.py`
+where it lives, and a second committed copy is refused. Referencing a published image needs
+a *tag* instead of the file, which is what makes the constraint tractable at all — see the
+chart's [README](../charts/k8s-ai-observability/README.md).
 
 ## Data flow
 

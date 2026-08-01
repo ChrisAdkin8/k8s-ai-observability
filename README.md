@@ -140,6 +140,7 @@ In short: build the *pipeline* here, tune the *numbers* on real hardware.
 | `terraform` >= 1.6, plus `aws` or `gcloud` | EKS/GKE only. GKE also needs `gke-gcloud-auth-plugin`, a [common silent miss](docs/gke.md#prerequisites) |
 | `promtool` | optional, for `task rule-tests`. Ships inside the Prometheus release |
 | `docker compose` | optional, for the [no-Kubernetes path](compose/). Nothing else on the host |
+| `docker` | optional, for `task image` (build the simulator image) and `task chart` (which needs `helm` and network too) |
 
 `task tools` checks all of the above, and only fails on the target-agnostic ones.
 
@@ -201,6 +202,8 @@ Every command below takes any of the three prefixes ( `local` | `eks` | `gke` ):
 | `task prefix:teardown` / `prefix:destroy` | remove the stacks / and the cluster too |
 | `task rule-tests` / `task selftest` | no cluster needed, see [tests/](tests/) |
 | `task compose` | no cluster at all: both boards in ~1 min, see [compose/](compose/) |
+| `task chart` | assemble the [Helm chart](charts/k8s-ai-observability/README.md) into `dist/`, lint and render it |
+| `task image` | build the simulator container image and smoke-test it |
 
 Both load drivers target opt-in Deployments that `install.sh` does *not* apply, so apply
 the one you need first or the task fails its precondition:
@@ -297,6 +300,7 @@ If a board 404s or its panels come up empty, see
 | [docs/architecture.md](docs/architecture.md) | how the pieces fit at runtime, what the stack deliberately omits, install ordering, every EKS↔GKE difference, and the naming invariant to read before editing |
 | [docs/observability.md](docs/observability.md) | where each metric comes from, reading the GPU board, eight PromQL queries that also work against real hardware, derived temperature and power, driving load |
 | [docs/llm-simulation.md](docs/llm-simulation.md) | the vLLM simulator, load profiles, LLM alerts |
+| [charts/k8s-ai-observability/](charts/k8s-ai-observability/README.md) | the Helm chart: the BYO story, the build step and why it exists, the two labels that fail silently, and where each invariant is caught |
 | [tests/](tests/) | the rule tests and the simulator selftest: what they cover and how to add one |
 | [compose/](compose/) | the no-Kubernetes path: what it shares with the cluster, and what it cannot exercise |
 | [CONTRIBUTING.md](CONTRIBUTING.md) | the invariants that fail *silently* if broken, what to re-check when bumping a pinned version, and what is deliberately out of scope |

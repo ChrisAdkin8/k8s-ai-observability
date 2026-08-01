@@ -7,6 +7,13 @@ Everything here runs in **seconds, with no cluster and no network**.
 | `task rule-tests` (or `./scripts/rule-tests.sh`) | every recording rule and alert in `manifests/alerts/` |
 | `task selftest` (or `python3 scripts/llm-sim.py --selftest`) | the simulator's Prometheus exposition — bucket monotonicity, `+Inf` consistency, `HELP`/`TYPE`, and that rendering `/metrics` observes nothing |
 | `task drift-test` (or `python3 scripts/check-vllm-buckets.py --selftest`) | the matching rules of the weekly upstream drift check, against a fixture |
+| `task compose-selftest` (or `python3 compose/gpu-metrics-sim.py --selftest`) | the compose GPU producer against `tests/contracts/dcgm-surface.json` — the same contract `verify.sh` check 3b holds the cluster's exporter to |
+
+Two more need docker, so they are not in the `fast` job: `task image` builds the simulator
+image and scrapes it, and `task chart` assembles and renders the Helm chart. The chart's
+**negative** cases — every render-time assertion driven to its failure — live in the
+`chart` CI job rather than here, because they need `helm` and a built chart rather than
+promtool. If you add an assertion to the chart, add its negative case there.
 
 `scripts/verify.sh` is the third check and a different kind of thing: it asserts the
 whole path end to end against a running cluster, and takes about six minutes because
@@ -134,8 +141,18 @@ docker run --rm --platform linux/amd64 -v "$PWD":/w -w /w \
 Expectations currently verified green on both: `0.09`, `0.099`, `0.0998`, `0.9875`,
 `0.02425`, `4.875`, `78`.
 
-The prefix-cache ratio expectations (`0.5`, `0.25`, `0`) are deliberately **not** in that
-list, because nothing can put them at risk: the counters feeding them are in power-of-two
-ratios and `rate()` applies the same window and extrapolation to numerator and denominator,
-so the division is exact everywhere. Where you can choose the shape of a test, choose that
-one — the caution above only applies to an interpolated percentile.
+Two families of expectation are deliberately **not** in that list, because nothing can put
+them at risk:
+
+- **the prefix-cache ratios** (`0.5`, `0.25`, `0`) — the counters feeding them are in
+  power-of-two ratios, and `rate()` applies the same window and extrapolation to numerator
+  and denominator, so the division is exact everywhere;
+- **the request-phase means** (`2`, `0.5`, `4`, `6.5`, `16`, `20.5`, `0`) — `_sum / _count`
+  involves no interpolation at all, so `histogram_quantile`'s ULP divergence simply does
+  not arise. The test file says so inline, or the next person adds a pointless caveat to it.
+
+Where you can choose the shape of a test, choose one of those — the caution above applies
+only to an interpolated percentile. That is also why the breakdown panel is built from
+means and the one recorded percentile is scoped to decode: `llm:decode:p95_5m` reuses the
+`(2.5, 5.0]` pair already verified on both architectures above, rather than introducing a
+boundary nobody has checked.

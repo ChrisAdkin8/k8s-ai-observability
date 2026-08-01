@@ -346,7 +346,24 @@ histogram_quantile(0.95, sum by (model_name, le) (rate(vllm:time_to_first_token_
 #    ServiceMonitor scrape interval is 15s and must stay <= 30s.
 sum by (model_name) (rate(vllm:generation_tokens_total[5m]))
 
-# 7. Attribution: which real GPU is a simulator pod actually on? Joined on the POD,
+# 7. Where did a request's time actually GO? queue -> prefill -> decode, and the
+#    three sum to the end-to-end mean exactly.
+#    ⚠️ MEANS, not percentiles, and both reasons are measured: quantiles are not
+#    additive (a p95 breakdown does not reach the p95 total), and these buckets
+#    cannot resolve prefill at all — the first boundary is 0.3s against a modelled
+#    0.08s, so a p95 reads ~3x high. That second effect TRANSFERS to real vLLM,
+#    because the boundaries are upstream's. A histogram mean has no bucket
+#    dependence, `_sum` and `_count` being exact.
+#    ⚠️ A regex on __name__, NOT `a or b or c`. PromQL's set operators match on
+#    labels EXCLUDING the metric name, so with all three carrying the same
+#    {model_name, source} the `or` form returns only the FIRST series — silently,
+#    and it looks like the other two rules are missing. Verified with promtool.
+{__name__=~"llm:(queue|prefill|decode):mean5m"}
+
+#    ...and the assertion that it adds up, which is what `verify.sh` L8 checks:
+(llm:queue:mean5m + llm:prefill:mean5m + llm:decode:mean5m) - llm:e2e:mean5m
+
+# 8. Attribution: which real GPU is a simulator pod actually on? Joined on the POD,
 #    because llmsim_gpu_binding_info's device_id is the device plugin's allocation id
 #    and never matches a DCGM UUID (see the note below).
 llmsim_gpu_binding_info * on (namespace, pod) group_left(UUID, gpu)
@@ -354,7 +371,7 @@ llmsim_gpu_binding_info * on (namespace, pod) group_left(UUID, gpu)
     "namespace", "$1", "exported_namespace", "(.*)"),
     "pod", "$1", "exported_pod", "(.*)")
 
-# 8. What the rig is complaining about right now.
+# 9. What the rig is complaining about right now.
 ALERTS{alertstate="firing"}
 ```
 
@@ -362,7 +379,7 @@ ALERTS{alertstate="firing"}
 > id as `MOCK_NVIDIA_VISIBLE_DEVICES`: a bare random v4, minted fresh every time a pod is
 > scheduled. The exporter labels that same GPU differently, with a deterministic
 > `GPU-`-prefixed id from the topology ConfigMap. The two come from different code paths
-> and never match, so an `on (UUID)` join returns nothing, silently and forever. Query 7
+> and never match, so an `on (UUID)` join returns nothing, silently and forever. Query 8
 > is the join that does work, and the `L4b` check in `verify.sh` asserts that exact
 > expression.
 
