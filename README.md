@@ -71,7 +71,7 @@ See [compose/](compose/) for what it deliberately cannot cover.
 - **A path for clusters that already run Prometheus**, so panels blank for want of the
   `llm:*` recording rules are a two-minute fix rather than a reason to hand your monitoring
   stack to an install script. Either
-  [bring your own Prometheus](#bring-your-own-prometheus) or the
+  [bring your own Prometheus](docs/byo-prometheus.md) or the
   [Helm chart](charts/k8s-ai-observability/README.md).
 
 ![Six panels comparing a healthy tenant and an overloaded one side by
@@ -155,46 +155,20 @@ the drift assertions; Task only wraps it. To drive the phases as scripts instead
 
 ### Bring your own Prometheus
 
-The default path installs `kube-prometheus-stack`. If you already run one, `--skip-monitoring`
-leaves it alone and installs only the simulators, rules, dashboards and workloads:
+The default path installs `kube-prometheus-stack`. **If you already run one**, this repo
+does not need to touch it — either `install.sh --skip-monitoring` or the
+[Helm chart](charts/k8s-ai-observability/README.md):
 
 ```sh
-./scripts/install.sh local --skip-monitoring
-task local:install -- --skip-monitoring        # same thing through the front door
-./scripts/verify.sh local --byo
-```
-
-**If your Helm release is not named `kube-prometheus-stack`, say so** — one variable
-covers every script, because they all read it from `scripts/config.sh`:
-
-```sh
-export KPS_RELEASE=my-monitoring
 ./scripts/install.sh local --skip-monitoring
 ./scripts/verify.sh   local --byo
-./scripts/grafana.sh  local                    # port-forwards svc/$KPS_RELEASE-grafana
 ```
 
-⚠️ **Two labels decide whether any of this works, and both fail with no error at all** —
-no scrape, no rule evaluation, empty boards, every object reporting itself as created:
-
-| | Default | Set it with | If it is wrong |
-|--|--|--|--|
-| the `release:` selector on the two ServiceMonitors and two PrometheusRules | follows `KPS_RELEASE` | `RELEASE_LABEL` | your Prometheus never adopts them |
-| the Grafana sidecar's discovery label | `grafana_dashboard=1` | `GRAFANA_DASHBOARD_LABEL` and `GRAFANA_DASHBOARD_LABEL_VALUE` | the boards are never imported |
-
-The selector default is the upstream chart's: `ruleSelectorNilUsesHelmValues` and its two
-siblings default to `true`, making the selector `release=<your release name>`. So you have
-two possible fixes — set `RELEASE_LABEL` here, or set those three values `false` on your
-side. The second is often not yours to change.
-
-`verify.sh --byo` is what tells you. It still asserts everything about the simulators,
-scrapes, rules and dashboards — those are exactly what a wrong label breaks — and relaxes
-only the anonymous-Grafana claim, which follows from this repo's own Helm values rather
-than from anything it installed. A board Grafana has never heard of stays a hard failure.
-
-The monitoring stack must live in the `monitoring` namespace, and its Grafana sidecar must
-watch that namespace; `install.sh` refuses up front, naming the fix, if the namespace or
-the Prometheus Operator CRDs are missing.
+⚠️ **Two labels decide whether that works, and both fail with no error at all** — no
+scrape, no rule evaluation, empty boards, every object reporting itself as created. The
+`release:` selector on the rules and ServiceMonitors, and the Grafana sidecar's discovery
+label. **[docs/byo-prometheus.md](docs/byo-prometheus.md)** has both, what to set them to,
+and why `verify.sh --byo` is what tells you.
 
 ### Cost and time
 
@@ -285,6 +259,7 @@ you give up.
 | [docs/architecture.md](docs/architecture.md) | how the pieces fit at runtime, what the stack deliberately omits, install ordering, every EKS↔GKE difference, and the naming invariant to read before editing |
 | [docs/observability.md](docs/observability.md) | where each metric comes from, reading the GPU board, eight PromQL queries that also work against real hardware, derived temperature and power, driving load |
 | [docs/llm-simulation.md](docs/llm-simulation.md) | the vLLM simulator, load profiles, LLM alerts |
+| [docs/byo-prometheus.md](docs/byo-prometheus.md) | installing against a Prometheus you already run, and the two labels that fail silently |
 | [charts/k8s-ai-observability/](charts/k8s-ai-observability/README.md) | the Helm chart: the BYO story, the build step and why it exists, the two labels that fail silently, and where each invariant is caught |
 | [tests/](tests/) | the rule tests and the simulator selftest: what they cover and how to add one |
 | [compose/](compose/) | the no-Kubernetes path: what it shares with the cluster, and what it cannot exercise |

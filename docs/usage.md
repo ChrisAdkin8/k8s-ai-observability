@@ -37,7 +37,7 @@ second monitoring stack over the top of yours. `install.sh` refuses up front, na
 fix, if the `monitoring` namespace or the Prometheus Operator CRDs are absent — and
 creates nothing when it does. The two labels that decide whether a BYO install actually
 works, and fail silently when wrong, are in
-[the README](../README.md#bring-your-own-prometheus).
+[docs/byo-prometheus.md](byo-prometheus.md).
 
 Only Phase 1 differs between targets:
 
