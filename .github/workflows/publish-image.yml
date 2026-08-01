@@ -56,6 +56,12 @@ jobs:
 
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          # chart-build.py --strict-version resolves the release tag with
+          # `git describe --tags`, which finds nothing in a shallow clone — and
+          # would then SKIP the check rather than fail it, which is the quiet
+          # half of the bug this step exists to prevent.
+          fetch-depth: 0
 
       # The tag being published, from whichever trigger fired. Resolved in one
       # place so the image tag and the OCI version label cannot disagree.
@@ -83,20 +89,31 @@ jobs:
       # wrong, which is the failure class this repo builds assertions against.
       # Checked HERE as well as in `task chart`, because this is the step that
       # makes a tag real.
-      - name: The chart's default image tag matches this release
+      # ⚠️ Delegated to scripts/chart-build.py rather than re-implemented here,
+      # and the first version of this step is why. It grepped values.yaml for
+      # `tag:` with a regex requiring at least one character — which cannot match
+      # `tag: ""`, the value that means "track appVersion" and therefore the
+      # CORRECT one. It raised AttributeError and, under `set -e`, would have
+      # failed every release that was configured properly. A guard that rejects
+      # the good state is worse than no guard.
+      #
+      # chart-build.py already gets this right, checks the dependency pins
+      # against scripts/config.sh at the same time, and is exercised by `task
+      # chart` and the `chart` CI job — so this is one implementation on three
+      # paths instead of a second copy that can rot unnoticed.
+      #
+      # --strict-version turns the appVersion-vs-release-tag comparison FATAL.
+      # It only warns during development, where appVersion legitimately leads
+      # the tag on an unreleased branch; here it is the last chance to catch a
+      # chart that would install green and run an old simulator.
+      # --skip-deps because this job needs neither helm nor the subcharts.
+      - name: The chart's version and pins agree with this release
         run: |
           set -euo pipefail
-          v='${{ steps.v.outputs.version }}'
-          f=charts/k8s-ai-observability/values.yaml
-          if [ ! -f "$f" ]; then
-            echo "::notice::$f does not exist yet — nothing to cross-check."; exit 0
+          if [ ! -d charts/k8s-ai-observability ]; then
+            echo "::notice::no chart in this tree — nothing to cross-check."; exit 0
           fi
-          got=$(python3 -c 'import sys,re;print(re.search(r"^\s+tag:\s*\"?([^\"\s#]+)",open(sys.argv[1]).read(),re.M).group(1))' "$f")
-          echo "chart default tag: $got   release tag: $v"
-          [ "$got" = "$v" ] || {
-            echo "$f pins simulator.image.tag=$got but this release is $v." >&2
-            echo "A chart on a stale tag installs green and runs an old simulator." >&2
-            exit 1; }
+          python3 scripts/chart-build.py --strict-version --skip-deps
 
       - name: Set up QEMU
         uses: docker/setup-qemu-action@29109295f81e9208d7d86ff1c6c12d2833863392 # v3
