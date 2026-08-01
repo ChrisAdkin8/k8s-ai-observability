@@ -14,16 +14,33 @@ task rule-tests        # promtool over every alert and recording rule — needs 
 task drift-test        # the drift check's matching rules, against a fixture — no network, ~1s
 ```
 
-All four run in CI as the `fast` job, so a failure here is a failure there. The full stack
-job takes ~6 minutes and stands up a real kind cluster; you do not need to run it locally
-to open a PR, but `task local:up` does exactly what CI does if you want to.
+All four run in CI as the `fast` job, so a failure here is a failure there. If you touched
+the chart or the simulator image, two more are worth running — both need docker, and
+`task chart` also needs helm and network:
+
+```sh
+task chart             # assemble into dist/, lint, render both ways — ~20s
+task image             # build the simulator image and smoke-test it — ~30s
+```
+
+The full stack job takes ~6 minutes and stands up a real kind cluster; you do not need to
+run it locally to open a PR, but `task local:up` does exactly what CI does if you want to.
 
 If you changed shell, `bash -n scripts/*.sh` is the next thing CI checks; every `*.py` in
 the repo goes through `python3 -m py_compile` beside it, so a syntax error in the release
 tooling no longer waits until someone tries to cut a release.
 
-There is also a `compose` job that stands the no-Kubernetes stack up and asserts it
-through Prometheus and Grafana. It needs docker, not kind, and takes about a minute.
+CI runs six jobs beyond `fast`: `changes` (which gates the expensive ones on a non-markdown
+diff), `compose`, `chart`, `image`, and the two `stack` legs. Only `upstream-drift` is not
+on pull requests — it is scheduled and dispatch-only, so an upstream vLLM release never
+reddens someone's unrelated PR.
+
+⚠️ **The `chart` job does more than lint and render, and that is the point.** It drives
+every one of the chart's render-time assertions to its failure and fails if a broken input
+renders *successfully* — an assertion that has quietly stopped firing looks exactly like
+one that passes. Then it rebuilds and proves the clean chart still renders, so those
+results cannot be explained by the chart being broken outright. If you add an assertion to
+the chart, add its negative case there.
 
 ## The invariants
 
@@ -36,11 +53,23 @@ rather than comments, and why the assertions run before anything is created.
 | The node-pool label or name | keep `terraform/modules/contract`, `scripts/config.sh` and `helm/fake-gpu-operator/values.yaml` in step | `assert_gpu_contract`, `assert_terraform_contract`, `assert_kind_contract` |
 | A namespace in `scripts/config.sh` | change the static manifests to match | `assert_manifest_namespaces` |
 | `LLM_STEADY_MODEL` / `LLM_SATURATED_MODEL` | change the profile ConfigMaps, and keep them distinct | `assert_llm_contract` |
-| `FAKE_GPU_CHART_VERSION` | re-verify the three bullets above it in `config.sh` — the exporter's three series, the ServiceMonitor's selector, and the labels the dashboards and rules join on | **nothing.** A bad bump is green with blank panels |
+| `FAKE_GPU_CHART_VERSION` | re-verify the three bullets above it in `config.sh` — the exporter's three series, the ServiceMonitor's selector, and the labels the dashboards and rules join on | **nothing** checks those three. A bad bump is green with blank panels. (The pin's *duplication* in `Chart.yaml` is checked — separate row below) |
 | `LLM_VLLM_VERSION`, any bucket list, or any `vllm:` name emitted | run `python3 scripts/check-vllm-buckets.py`, then re-derive the expected values in `tests/rules/llm-rules_test.yaml` | the drift check, weekly in CI |
 | `K8S_VERSION` | move `kind/gpu-sim.yaml`'s node image onto the same minor | `assert_kind_contract` |
 | The DCGM series or labels either producer emits | update `tests/contracts/dcgm-surface.json` and **both** producers — `compose/gpu-metrics-sim.py` and whatever the chart pin gives you | `gpu-metrics-sim.py --selftest` (exact match, in `fast`) and `verify.sh` check 3b (subset, on a cluster) |
 | The `release:` label or the sidecar label on anything in `manifests/` | leave them alone — `install.sh` rewrites both at apply time from `RELEASE_LABEL` and `GRAFANA_DASHBOARD_LABEL` | **nothing.** A wrong selector is silent: no scrape, no rules, empty boards |
+| `KPS_CHART_VERSION` or `FAKE_GPU_CHART_VERSION` | move the matching `version:` in `charts/k8s-ai-observability/Chart.yaml` — Helm cannot read a shell variable, so this pin genuinely exists twice | `scripts/chart-build.py`, in `task chart` and the `chart` CI job |
+| `Chart.yaml`'s `appVersion`, or `llm.image.tag` in the chart's `values.yaml` | keep them tracking the repo's release tag — leave `tag: ""` so it follows `appVersion` | `scripts/chart-build.py` (warns), and the publish workflow (**fails**) |
+| Anything the chart templates — a dashboard `uid`, a `model_name`, the node-pool values, the profile arithmetic | the chart re-checks each of these at render time, so `helm template` is the fastest way to find out | the chart's `_assertions.tpl` at `--dry-run`; negative cases in the `chart` CI job |
+
+⚠️ **Two of those rows are about a copy that could not be assembled away.** The dashboards
+and the rule files reach the chart through `task chart`, so no second copy of them is ever
+committed. The two Helm chart *versions* cannot work that way — `scripts/config.sh` is
+shell and `Chart.yaml` is YAML, and neither can read the other. So the copies exist and
+the divergence fails the build instead, which is the fallback this repo allows only when
+a single source genuinely is not reachable. The `fake-gpu-operator` pin is the dangerous
+half: `config.sh` records that this repo hard-codes facts true of `0.0.59` specifically,
+none of which has a plan-time check.
 
 The three-way naming invariant is the one to read first if you are touching Terraform or
 the fake operator: [docs/architecture.md](docs/architecture.md#the-naming-invariant-read-before-editing).
@@ -56,8 +85,8 @@ are listed here because none of them is discoverable until it happens to you.
   itself. If you touch anything under `vllm:`, the question is not "do the tests pass" but
   "does this match a real deployment". `scripts/check-vllm-buckets.py` is the only thing
   here that points upstream — it watches the metric *set* as well as the bucket
-  boundaries, and prints the ~28 upstream metrics this simulator does not emit so that
-  distance stays visible rather than silent.
+  boundaries, and prints the upstream metrics this simulator does not emit — 22 at the
+  last check — so that distance stays visible rather than silent.
 - **A promtool expected percentile can be architecture-dependent.** `histogram_quantile`
   returned `2.4250000000000003` on arm64 and `2.425` on amd64 for the same input; promtool
   compares exactly, so the test passed locally and went red in CI. If you add or change an
@@ -120,8 +149,8 @@ does is noise, one that says why the obvious alternative was wrong is not.
 - One logical change per commit. If two things are genuinely independent, they are two
   commits, even when they arrive together.
 - Say why in the body, not just what. The diff already says what.
-- CI must be green. The `fast` job is seconds; the two full-stack legs are ~6 minutes each
-  and run in parallel.
+- CI must be green. The `fast` job is seconds, `chart` and `image` about a minute each, and
+  the two full-stack legs are ~6 minutes each and run in parallel.
 
 ## What is deliberately out of scope
 
@@ -149,5 +178,22 @@ published image it can. "Nothing to build, push or patch" stops being free at th
 would ship the same stdlib-only file. The two are usually stated in one breath; only one
 of them was reversed.
 
-Scope decision only — **no image is published yet**, and the build must derive from
-`scripts/llm-sim.py` rather than committing a second copy of it.
+**It has since shipped.** `Dockerfile` builds it, `.github/workflows/publish-image.yml`
+pushes `ghcr.io/<owner>/vllm-metrics-sim` on every release tag for `linux/amd64` and
+`linux/arm64`, and `task image` builds and smoke-tests it locally. The build derives from
+`scripts/llm-sim.py` rather than committing a second copy, and CI fails if a second copy
+appears or if the image's payload stops matching that file byte for byte.
+
+⚠️ **The image is for consumers outside this repo, and the cluster path deliberately did
+NOT move onto it.** `install.sh` still builds the `llm-sim-script` ConfigMap from the file
+and the compose stack still mounts it — an image-based Deployment pins a *tag*, so a local
+edit would stop reaching the cluster silently with the pod still `Running`. That is the
+failure the checksum annotation exists to prevent, one layer up. Someone will eventually
+propose "simplifying" the Deployment onto the image; this is the reason not to.
+
+Still out of scope, and worth knowing before proposing them:
+
+- Publishing the Helm chart to Artifact Hub, or a `helm repo` on GitHub Pages. The chart
+  works; distributing it is separate, mostly-administrative work.
+- Replacing `scripts/install.sh` with the chart. It remains the source of truth for
+  install ordering and the wrong-context guard, and it is what CI exercises end to end.

@@ -175,6 +175,62 @@ def check_image_tag_agrees(app_version, strict):
         print(f"  ok    appVersion {app_version} == the repo's latest tag")
 
 
+def check_dependency_pins_agree():
+    """⚠️ THE TWO CHART VERSIONS ARE NOW PINNED IN TWO PLACES.
+
+    `scripts/config.sh` pins kube-prometheus-stack and fake-gpu-operator for the
+    SCRIPT install path; `charts/k8s-ai-observability/Chart.yaml` pins the same
+    two as dependencies for the CHART path. Helm cannot read a shell variable and
+    the shell cannot read Chart.yaml, so unlike the dashboards and the rules this
+    duplication cannot be assembled away — it is genuinely two copies of one
+    number.
+
+    That makes it exactly the kind this repo refuses to leave unchecked. Bump one
+    and not the other and BOTH installs still succeed, while the two paths
+    silently deploy different versions of the same operator: `verify.sh` passes on
+    each, CI passes on each, and the only symptom is that a chart bump verified
+    through one path was never verified through the other. The fake-gpu-operator
+    pin is the dangerous half — `config.sh` records that this repo hard-codes
+    facts true of 0.0.59 specifically (the exporter's three series, the
+    ServiceMonitor's selector, the labels the dashboards join on), none of which
+    has a plan-time check.
+
+    So the copies exist and the divergence fails here, which is the option W-C2
+    demands whenever a second copy is unavoidable.
+    """
+    cfg = os.path.join(ROOT, "scripts", "config.sh")
+    with open(cfg, "r", encoding="utf-8") as fh:
+        cfg_text = fh.read()
+    with open(os.path.join(SRC_CHART, "Chart.yaml"), "r", encoding="utf-8") as fh:
+        chart_text = fh.read()
+
+    for shell_var, dep in (("KPS_CHART_VERSION", "kube-prometheus-stack"),
+                           ("FAKE_GPU_CHART_VERSION", "fake-gpu-operator")):
+        m = re.search(rf'^{shell_var}="([^"]+)"', cfg_text, re.M)
+        if not m:
+            fail(f"could not read {shell_var} from {cfg} — has it been restructured? "
+                 f"Without it this check cannot compare the two pins.")
+        want = m.group(1)
+        # The `version:` belonging to this dependency's block, not the first one
+        # in the file: the two entries are structurally identical and matching
+        # loosely would compare kube-prometheus-stack against fake-gpu-operator's
+        # pin and pass on a coincidence.
+        d = re.search(rf'^  - name: {re.escape(dep)}\n((?:    .*\n)+)', chart_text, re.M)
+        if not d:
+            fail(f"no `- name: {dep}` dependency found in Chart.yaml.")
+        v = re.search(r'^    version:\s*"?([^"\s#]+)"?', d.group(1), re.M)
+        if not v:
+            fail(f"the {dep} dependency in Chart.yaml has no version.")
+        if v.group(1) != want:
+            fail(f"chart dependency pin disagrees with scripts/config.sh:\n"
+                 f"         Chart.yaml   {dep} => {v.group(1)}\n"
+                 f"         config.sh    {shell_var} => {want}\n"
+                 f"       The script path and the chart path would install DIFFERENT\n"
+                 f"       versions of the same operator, and both installs would still\n"
+                 f"       go green. Move them together.")
+        print(f"  ok    {dep} {want} matches config.sh {shell_var}")
+
+
 def copy_dashboards(files_dir):
     out = os.path.join(files_dir, "dashboards")
     os.makedirs(out, exist_ok=True)
@@ -321,6 +377,7 @@ def main(argv=None):
     chart_version = read_chart_field("version")
     print(f"chart {chart_version}, appVersion {app_version}")
     check_image_tag_agrees(app_version, args.strict_version)
+    check_dependency_pins_agree()
     print()
 
     # Rebuilt from scratch every time: a file deleted from manifests/ must

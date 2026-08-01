@@ -13,7 +13,12 @@ in `scripts/config.sh` at install time.
 | fake-gpu-operator chart | `scripts/config.sh` | `0.0.59` |
 | vLLM metric surface mirrored | `scripts/config.sh` (`LLM_VLLM_VERSION`) | `v1` — names and buckets, drift-checked weekly, see below |
 | promtool (rule tests) | `.github/workflows/ci.yml` (`PROMETHEUS_VERSION`) | `3.7.3` — CI only; locally any promtool works |
-| LLM simulator base image | `manifests/llm/20-simulators.yaml` | `python:3.12-slim` |
+| LLM simulator base image (cluster) | `manifests/llm/20-simulators.yaml` | `python:3.12-slim` — the ConfigMap-mounted path, which is how the rig itself runs it |
+| LLM simulator base image (published) | `Dockerfile` | `python:3.12-slim` — the same base for `ghcr.io/<owner>/vllm-metrics-sim` |
+| Published simulator image tag | `charts/.../Chart.yaml` (`appVersion`) | the repo's release tag. The chart's `llm.image.tag` defaults to it; see below |
+| Helm chart version | `charts/.../Chart.yaml` (`version`) | `0.1.0` — moves independently of `appVersion` |
+| Helm (CI) | `.github/workflows/ci.yml` (`HELM_VERSION`) | `3.21.3` — **v3, not the v4 line.** Helm 4 is a major this repo has not been validated against, and CI should exercise what users run |
+| `kubectl` image for `helm test` | `charts/.../values.yaml` (`tests.image`) | `bitnami/kubectl:1.31` |
 | DCGM dashboard | `manifests/dashboards/gpu-sim-dcgm.json` | shipped in-repo, published as grafana.com [25618](https://grafana.com/grafana/dashboards/25618-gpu-simulation-dcgm-overview/) (board 12239 is an optional swap-in) |
 | vLLM dashboard | `manifests/dashboards/llm-sim-overview.json` | shipped in-repo, published as grafana.com [25620](https://grafana.com/grafana/dashboards/25620-llm-simulation-vllm-serving-overview/) |
 | aws provider | `terraform/eks/versions.tf` | `~> 6.55` |
@@ -21,6 +26,31 @@ in `scripts/config.sh` at install time.
 | vpc module | `terraform/eks/main.tf` | `~> 5.21.0` — patch-level on purpose, same reason |
 | EKS node OS | `terraform/eks/main.tf` (`ami_type`) | AL2023 (`AL2023_x86_64_STANDARD`) |
 | google provider | `terraform/gke` | `~> 7.40` |
+
+## ⚠️ Two pins exist in two places, and could not be made to exist in one
+
+`scripts/config.sh` pins **kube-prometheus-stack** and **fake-gpu-operator** for the script
+install path. `charts/k8s-ai-observability/Chart.yaml` pins the same two as chart
+dependencies. Helm cannot read a shell variable and the shell cannot read `Chart.yaml`, so
+unlike the dashboards and the rule files — which reach the chart through `task chart`, and
+are therefore never committed twice — this is genuinely one number written down twice.
+
+**Bump one and not the other and both installs still succeed**, while the two paths deploy
+different versions of the same operator. `verify.sh` passes on each. CI passes on each. The
+only symptom is that a chart bump verified through one path was never verified through the
+other.
+
+The `fake-gpu-operator` pin is the dangerous half. `config.sh` records that this repo
+hard-codes facts true of `0.0.59` specifically — the exporter's three series, the
+ServiceMonitor's selector, and the labels the dashboards and rules join on — and none of
+those has a plan-time check.
+
+So the divergence fails the build instead: `scripts/chart-build.py` compares the two on
+every `task chart` and in the `chart` CI job, matching each dependency by name rather than
+by position (the two blocks are structurally identical, and a loose match would compare one
+against the other's pin and pass on a coincidence). Move them together.
+
+## The vLLM surface
 
 The vLLM version matters more than it looks: the simulator copies that release's histogram
 bucket boundaries, and `histogram_quantile()` accuracy depends entirely on bucket placement.
@@ -82,7 +112,7 @@ The two directions are **not** treated alike, and the asymmetry is the point:
 | We emit a name upstream no longer declares | drift — the rename case that cost two releases | **1** |
 | Upstream declares a name we do not emit | a gap, printed in full | **0** |
 
-Upstream declares around 40 `vllm:` metrics and this simulator emits 10 of them, so the
+Upstream declares around 40 `vllm:` metrics and this simulator emits 16 of them, so the
 gap list is long by design. Reddening a weekly run for each metric vLLM adds would train
 everyone to ignore it; printing the list keeps the distance visible, which is the thing
 that was previously invisible. It is also the list to pick from when closing one.
