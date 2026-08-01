@@ -1,0 +1,49 @@
+apiVersion: v2
+name: k8s-ai-observability
+description: GPU and vLLM observability simulation — dashboards, recording rules and alerts for a cluster that already runs Prometheus
+type: application
+
+# ⚠️ TWO VERSIONS, MOVING INDEPENDENTLY, and they mean different things.
+#
+#   version    — the CHART's own version. Bump it for a templating change even
+#                when nothing about the rig moved.
+#   appVersion — the REPO's release tag. It is what simulator.image.tag defaults
+#                to (see values.yaml), so a stale appVersion here installs
+#                cleanly and runs an OLD simulator: green, with something
+#                silently wrong. `task chart` and the publish workflow both
+#                cross-check it against the release tag rather than trusting it.
+version: 0.1.0
+appVersion: "v0.5.0"
+
+home: https://github.com/ChrisAdkin8/k8s-ai-observability
+sources:
+  - https://github.com/ChrisAdkin8/k8s-ai-observability
+keywords: [gpu, vllm, llm, prometheus, grafana, dcgm, observability, simulation]
+maintainers:
+  - name: Chris Adkin
+    url: https://github.com/ChrisAdkin8
+
+# ⚠️ CONDITIONAL DEPENDENCIES, NOT VENDORED COPIES. Both are fetched by
+# `helm dependency update`; neither is committed into charts/.
+#
+# kubePrometheusStack defaults to FALSE, which is the entire premise of this
+# chart: the audience is someone who ALREADY runs Prometheus and will not hand
+# their monitoring stack to an install script. Turning it on serves a greenfield
+# cluster from the same chart.
+#
+# fakeGpuOperator defaults to TRUE because without it nothing advertises
+# nvidia.com/gpu, the sample workloads stay Pending, and the GPU board is blank —
+# the chart would install successfully and demonstrate nothing.
+dependencies:
+  - name: kube-prometheus-stack
+    version: "87.17.0"
+    repository: https://prometheus-community.github.io/helm-charts
+    condition: kubePrometheusStack.enabled
+  - name: fake-gpu-operator
+    version: "0.0.59"
+    repository: https://runai.jfrog.io/artifactory/api/helm/fake-gpu-operator-charts-prod
+    condition: fakeGpuOperator.enabled
+
+annotations:
+  artifacthub.io/license: MIT
+  artifacthub.io/prerelease: "true"

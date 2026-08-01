@@ -1,0 +1,166 @@
+{{- if .Values.llm.enabled }}
+---
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: {{ .Values.namespaces.llmSim }}
+  labels:
+    {{- include "k8s-ai-observability.labels" . | nindent 4 }}
+    app.kubernetes.io/part-of: gpu-sim-llm
+{{- if .Values.createMonitoringNamespace }}
+---
+# Off by default. On a BYO cluster the monitoring namespace already exists and
+# belongs to someone else — creating it here would make `helm uninstall` delete
+# their namespace, taking their Prometheus with it.
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: {{ .Values.namespaces.monitoring }}
+  labels:
+    {{- include "k8s-ai-observability.labels" . | nindent 4 }}
+{{- end }}
+
+{{- range $name, $tenant := dict "steady" .Values.llm.steady "saturated" .Values.llm.saturated }}
+---
+# The load profile — the simulator's entire control surface. Polled every 10s
+# and applied WITHOUT a restart, so counters and histograms stay continuous;
+# `kubectl edit` one of these and watch llmsim_profile_generation tick up.
+#
+# Built from values rather than shipped as a file, so the numbers in values.yaml
+# are genuinely reachable. A verbatim copy would freeze every one of them at its
+# default while appearing configurable.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "k8s-ai-observability.fullname" $ }}-profile-{{ $name }}
+  namespace: {{ $.Values.namespaces.llmSim }}
+  labels:
+    {{- include "k8s-ai-observability.labels" $ | nindent 4 }}
+    app.kubernetes.io/part-of: gpu-sim-llm
+    app.kubernetes.io/component: {{ $name }}
+data:
+  profile.json: |
+{{ include "k8s-ai-observability.profileJson" (dict "profile" $.Values.llm.profile "tenant" $tenant) | indent 4 }}
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "k8s-ai-observability.fullname" $ }}-{{ $name }}
+  namespace: {{ $.Values.namespaces.llmSim }}
+  labels:
+    {{- include "k8s-ai-observability.labels" $ | nindent 4 }}
+    app.kubernetes.io/name: llm-sim
+    app.kubernetes.io/part-of: gpu-sim-llm
+    app.kubernetes.io/component: {{ $name }}
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: llm-sim
+      app.kubernetes.io/instance: {{ $.Release.Name }}
+      app.kubernetes.io/component: {{ $name }}
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: llm-sim
+        app.kubernetes.io/instance: {{ $.Release.Name }}
+        app.kubernetes.io/part-of: gpu-sim-llm
+        app.kubernetes.io/component: {{ $name }}
+      annotations:
+        # Static, and deliberately never varied. GPU load and LLM load are
+        # decoupled in this rig — see docs/llm-simulation.md. Vary GPU load with
+        # the gpu-driven workload instead.
+        run.ai/simulated-gpu-utilization: {{ if eq $name "steady" }}"25-40"{{ else }}"70-85"{{ end }}
+        # Rolls the pods when the profile changes. Unlike the script path — where
+        # the simulator polls the file and needs no restart — a changed profile
+        # here also changes the ConfigMap NAME's contents only, and the polling
+        # loop does pick that up. This annotation is belt-and-braces for the case
+        # where the mount itself is replaced.
+        checksum/profile: {{ include "k8s-ai-observability.profileJson" (dict "profile" $.Values.llm.profile "tenant" $tenant) | sha256sum }}
+    spec:
+      # ⚠️ NOT OPTIONAL. kubelet injects Docker-link-compatible env vars for
+      # every Service in this namespace, so the `llm-sim` Service below sets
+      # LLM_SIM_PORT=tcp://<clusterIP>:9401 into this container. The simulator
+      # once read that exact name as its listen port and every pod died at
+      # startup — a CrashLoopBackOff whose only symptom was an empty LLM
+      # dashboard. It reads LLM_SIM_LISTEN_PORT now; this line removes the whole
+      # injected set rather than leaving the next collision to chance.
+      enableServiceLinks: false
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 65532
+        runAsGroup: 65532
+        seccompProfile: { type: RuntimeDefault }
+      containers:
+        - name: sim
+          # ⚠️ AN IMAGE, not a mounted ConfigMap — and that is the ONE structural
+          # difference between this chart and scripts/install.sh. Helm's
+          # .Files.Get cannot reach scripts/llm-sim.py outside the chart
+          # directory, and a second committed copy of the simulator is refused
+          # (a drifted one would be undetectable from outside). The published
+          # image resolves that: the chart needs a TAG, not the file.
+          image: {{ include "k8s-ai-observability.llmImage" $ }}
+          imagePullPolicy: {{ $.Values.llm.image.pullPolicy }}
+          args: ["--profile", "/etc/llm-sim/profile.json"]
+          env:
+            - name: PYTHONUNBUFFERED
+              value: "1"
+            - name: PYTHONDONTWRITEBYTECODE   # required by readOnlyRootFilesystem
+              value: "1"
+          ports:
+            - { name: llm-metrics, containerPort: {{ $.Values.llm.service.port }} }
+          readinessProbe:
+            httpGet: { path: /metrics, port: llm-metrics }
+            initialDelaySeconds: 3
+            periodSeconds: 10
+          resources:
+            requests:
+              {{- toYaml $.Values.llm.resources.requests | nindent 14 }}
+            limits:
+              {{- toYaml $.Values.llm.resources.limits | nindent 14 }}
+              {{- if $tenant.requestGpu }}
+              # The ONLY reason this tenant asks for a GPU: the device plugin
+              # injects MOCK_NVIDIA_VISIBLE_DEVICES, which the simulator turns
+              # into llmsim_gpu_binding_info's device_id. Nothing load-bearing
+              # depends on it — with no simulated GPU free it runs unbound, and
+              # the saturated tenant runs unbound deliberately to exercise that.
+              nvidia.com/gpu: "1"
+              {{- end }}
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities: { drop: ["ALL"] }
+          volumeMounts:
+            # ⚠️ A DIRECTORY mount, never subPath. subPath mounts are resolved
+            # once at container start and are NEVER updated by kubelet, so the
+            # simulator's polling loop would read the same bytes forever: the
+            # ConfigMap would show the new profile, the pod would be healthy,
+            # and nothing would change. It reads as a broken simulator.
+            - { name: profile, mountPath: /etc/llm-sim, readOnly: true }
+      volumes:
+        - name: profile
+          configMap:
+            name: {{ include "k8s-ai-observability.fullname" $ }}-profile-{{ $name }}
+{{- end }}
+---
+# One Service in front of both pods. Prometheus tells them apart by `pod`, and
+# the metrics themselves by `model_name`.
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "k8s-ai-observability.fullname" . }}-llm-sim
+  namespace: {{ .Values.namespaces.llmSim }}
+  labels:
+    {{- include "k8s-ai-observability.labels" . | nindent 4 }}
+    app.kubernetes.io/name: llm-sim
+    app.kubernetes.io/part-of: gpu-sim-llm
+spec:
+  type: ClusterIP
+  selector:
+    app.kubernetes.io/name: llm-sim
+    app.kubernetes.io/instance: {{ .Release.Name }}
+  ports:
+    - name: llm-metrics
+      port: {{ .Values.llm.service.port }}
+      targetPort: llm-metrics
+{{- end }}

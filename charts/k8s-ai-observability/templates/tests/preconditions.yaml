@@ -1,0 +1,277 @@
+{{/*
+═══════════════════════════════════════════════════════════════════════════════
+`helm test <release>` — the half of install.sh's safety net that NEEDS A LIVE
+CLUSTER, and the only thing that can tell you the two silent selectors actually
+matched.
+
+⚠️ THIS IS THE MOST IMPORTANT PART OF THIS CHART, and it is opt-in — `helm
+install` alone does not run it. That is a real weakness, stated rather than
+hidden; the chart's NOTES tell you to run it, in the imperative, for exactly
+this reason.
+
+WHY IT CANNOT BE A RENDER-TIME CHECK. Whether `releaseLabel` matches is a fact
+about someone ELSE's Prometheus — its `ruleSelector`, which this chart never
+sees. Whether `grafana.dashboardLabel` matches is a fact about someone else's
+Grafana sidecar. Both fail with NO ERROR ANYWHERE: every object reports itself
+created, and the only symptom is an empty board several minutes later, which
+reads as the user's fault. This test is what turns that into a sentence.
+
+⚠️ EVERYTHING HERE USES kubectl AND jsonpath, deliberately. jsonpath's `{...}`
+is single-braced, so Helm leaves it alone; a Go `-o go-template` would have to
+be escaped brace-by-brace through the chart renderer, which is exactly the kind
+of unreadable that stops being maintained. No jq, no python — bitnami/kubectl
+is not guaranteed to have either.
+═══════════════════════════════════════════════════════════════════════════════
+*/}}
+{{- $sa := printf "%s-test" (include "k8s-ai-observability.fullname" .) }}
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: {{ $sa }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "k8s-ai-observability.labels" . | nindent 4 }}
+  annotations:
+    helm.sh/hook: test
+    helm.sh/hook-weight: "-5"
+    helm.sh/hook-delete-policy: before-hook-creation,hook-succeeded
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: {{ $sa }}
+  labels:
+    {{- include "k8s-ai-observability.labels" . | nindent 4 }}
+  annotations:
+    helm.sh/hook: test
+    helm.sh/hook-weight: "-5"
+    helm.sh/hook-delete-policy: before-hook-creation,hook-succeeded
+rules:
+  # Read-only, and scoped to exactly what the assertions below inspect. The
+  # services/proxy verb is what lets this scrape the simulator through the
+  # Service — the same path Prometheus takes — without creating a second pod or
+  # needing pod-create permission.
+  - apiGroups: [""]
+    resources: [nodes, configmaps, services, pods]
+    verbs: [get, list]
+  - apiGroups: [""]
+    resources: [services/proxy]
+    verbs: [get]
+  - apiGroups: [apiextensions.k8s.io]
+    resources: [customresourcedefinitions]
+    verbs: [get, list]
+  - apiGroups: [monitoring.coreos.com]
+    resources: [prometheuses, prometheusrules, servicemonitors]
+    verbs: [get, list]
+  - apiGroups: [apps]
+    resources: [deployments]
+    verbs: [get, list]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: {{ $sa }}
+  labels:
+    {{- include "k8s-ai-observability.labels" . | nindent 4 }}
+  annotations:
+    helm.sh/hook: test
+    helm.sh/hook-weight: "-5"
+    helm.sh/hook-delete-policy: before-hook-creation,hook-succeeded
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: {{ $sa }}
+subjects:
+  - kind: ServiceAccount
+    name: {{ $sa }}
+    namespace: {{ .Release.Namespace }}
+---
+apiVersion: v1
+kind: Pod
+metadata:
+  name: {{ include "k8s-ai-observability.fullname" . }}-test-preconditions
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "k8s-ai-observability.labels" . | nindent 4 }}
+  annotations:
+    helm.sh/hook: test
+    helm.sh/hook-weight: "0"
+    # NOT hook-succeeded: on a failure the pod's logs ARE the diagnostic, and
+    # deleting it would take them with it.
+    helm.sh/hook-delete-policy: before-hook-creation
+spec:
+  serviceAccountName: {{ $sa }}
+  restartPolicy: Never
+  containers:
+    - name: preconditions
+      image: {{ .Values.tests.image }}
+      command: ["/bin/bash", "-c"]
+      args:
+        - |
+          set -uo pipefail
+          fails=0
+          pass() { printf '  \033[32mPASS\033[0m %s\n' "$1"; }
+          fail() { printf '  \033[31mFAIL\033[0m %s\n' "$1"; fails=$((fails+1)); }
+          warn() { printf '  \033[33mWARN\033[0m %s\n' "$1"; }
+
+          MON={{ .Values.namespaces.monitoring | quote }}
+          LLM_NS={{ .Values.namespaces.llmSim | quote }}
+          WANT={{ .Values.releaseLabel | quote }}
+          DASH_KEY={{ .Values.grafana.dashboardLabel | quote }}
+          DASH_VAL={{ .Values.grafana.dashboardLabelValue | quote }}
+          POOL_KEY={{ .Values.nodePoolLabelKey | quote }}
+          POOL_VAL={{ .Values.nodePoolName | quote }}
+          INSTANCE={{ .Release.Name | quote }}
+
+          echo "k8s-ai-observability — install preconditions"
+          echo "  release label : $WANT"
+          echo "  sidecar label : $DASH_KEY=$DASH_VAL"
+          echo
+
+          # ---- 1. the Prometheus Operator CRDs -----------------------------
+          # "CRD not found" sends people looking for a broken manifest rather
+          # than a missing operator, so this names the fix instead.
+          echo "Prometheus Operator:"
+          for crd in servicemonitors.monitoring.coreos.com prometheusrules.monitoring.coreos.com; do
+            if kubectl get crd "$crd" >/dev/null 2>&1; then
+              pass "$crd present"
+            else
+              fail "$crd is NOT installed. This chart's ServiceMonitors and PrometheusRules need the Prometheus Operator. Install a monitoring stack that provides it, or set kubePrometheusStack.enabled=true to have this chart bring its own."
+            fi
+          done
+
+          # ---- 2. ⚠️ THE SILENT SELECTOR, against the real Prometheus ------
+          # The check this whole test exists for. A Prometheus whose
+          # ruleSelector demands release=<x> while this chart applied
+          # release=<y> adopts NOTHING and says NOTHING.
+          #
+          # An EMPTY result from the jsonpath means the selector is absent or
+          # keys on something other than `release` — in both of those cases
+          # `release=` does not decide adoption, so there is nothing to
+          # mismatch. Only a present-and-different value is a failure.
+          echo
+          echo "The release selector (the one that fails silently):"
+          if ! kubectl get prometheus -A >/dev/null 2>&1; then
+            warn "no Prometheus custom resource is readable from here — cannot verify the selector. If the boards stay empty, suspect this first."
+          else
+            found=0; matched=0
+            while IFS=$'\t' read -r name got; do
+              [ -z "${name:-}" ] && continue
+              found=$((found+1))
+              if [ -z "${got:-}" ]; then
+                echo "        note  $name: ruleSelector does not key on 'release' (or is empty) — it adopts on other terms, so releaseLabel cannot be wrong here"
+                matched=$((matched+1))
+              elif [ "$got" = "$WANT" ]; then
+                echo "        ok    $name: wants release=$got"
+                matched=$((matched+1))
+              else
+                echo "        MISMATCH $name: wants release='$got', this chart applied release='$WANT'"
+              fi
+            done < <(kubectl get prometheus -A -o jsonpath='{range .items[*]}{.metadata.namespace}/{.metadata.name}{"\t"}{.spec.ruleSelector.matchLabels.release}{"\n"}{end}' 2>/dev/null)
+
+            if [ "$found" -eq 0 ]; then
+              warn "no Prometheus objects found on this cluster at all"
+            elif [ "$matched" -gt 0 ]; then
+              pass "the release selector is satisfied by $matched of $found Prometheus object(s)"
+            else
+              fail "releaseLabel='$WANT' matches NO Prometheus ruleSelector on this cluster.
+
+              Your Prometheus will not adopt this chart's rules or ServiceMonitors.
+              Nothing errors. The rules never evaluate, the scrapes never happen,
+              and every panel reading an llm:* or a derived DCGM series is empty.
+
+              Fix it with EITHER:
+                  helm upgrade ... --set releaseLabel=<the name printed above>
+              or, on your side, set ruleSelectorNilUsesHelmValues and its
+              serviceMonitor/podMonitor siblings to false."
+            fi
+          fi
+
+          # ---- 3. our own objects exist and carry that label ---------------
+          echo
+          echo "This chart's objects:"
+          n=$(kubectl get prometheusrule -n "$MON" -l "release=$WANT,app.kubernetes.io/instance=$INSTANCE" -o name 2>/dev/null | grep -c .)
+          [ "${n:-0}" -gt 0 ] && pass "$n PrometheusRule(s) labelled release=$WANT" \
+                              || fail "no PrometheusRule from release '$INSTANCE' found in $MON"
+          n=$(kubectl get servicemonitor -n "$MON" -l "release=$WANT,app.kubernetes.io/instance=$INSTANCE" -o name 2>/dev/null | grep -c .)
+          [ "${n:-0}" -gt 0 ] && pass "$n ServiceMonitor(s) labelled release=$WANT" \
+                              || fail "no ServiceMonitor from release '$INSTANCE' found in $MON"
+
+          # ---- 4. ⚠️ THE OTHER SILENT SELECTOR: the Grafana sidecar --------
+          echo
+          echo "The Grafana dashboard label (the other silent one):"
+          n=$(kubectl get cm -n "$MON" -l "$DASH_KEY=$DASH_VAL,app.kubernetes.io/part-of=gpu-sim-dashboards" -o name 2>/dev/null | grep -c .)
+          if [ "${n:-0}" -gt 0 ]; then
+            pass "$n dashboard ConfigMap(s) labelled $DASH_KEY=$DASH_VAL"
+            echo "        ⚠️ LABELLED is not the same as IMPORTED. This cannot see whether your"
+            echo "           sidecar watches that key — grafana_dashboard=1 is"
+            echo "           kube-prometheus-stack's convention, not a universal one. If"
+            echo "           /d/llm-sim-overview 404s, this label is the first thing to check."
+          else
+            fail "no dashboard ConfigMaps labelled $DASH_KEY=$DASH_VAL in $MON — the boards will never be imported and /d/<uid> will 404"
+          fi
+
+          {{- if .Values.fakeGpuOperator.enabled }}
+          # ---- 5. the three-way naming invariant, live ---------------------
+          echo
+          echo "GPU simulation:"
+          n=$(kubectl get nodes -l "$POOL_KEY=$POOL_VAL" -o name 2>/dev/null | grep -c .)
+          if [ "${n:-0}" -gt 0 ]; then
+            pass "$n node(s) carry $POOL_KEY=$POOL_VAL"
+          else
+            fail "NO NODE carries $POOL_KEY=$POOL_VAL.
+
+            A chart cannot label nodes, so this is a PREREQUISITE rather than
+            something the install can fix. The fake operator is watching a pool
+            no node belongs to: nothing advertises nvidia.com/gpu, every sample
+            workload stays Pending, and the GPU board is blank.
+
+                kubectl label node <node> $POOL_KEY=$POOL_VAL"
+          fi
+
+          # The end-to-end form of the same invariant, and what verify.sh
+          # check 1 asserts: a label that matches is not proof the device plugin
+          # actually came up.
+          max=$(kubectl get nodes -o jsonpath='{range .items[*]}{.status.allocatable.nvidia\.com/gpu}{"\n"}{end}' 2>/dev/null | grep -vE '^$' | sort -rn | head -1)
+          if [ -n "${max:-}" ] && [ "${max:-0}" -gt 0 ] 2>/dev/null; then
+            pass "nvidia.com/gpu allocatable = $max (no physical GPU involved)"
+          else
+            fail "no node advertises nvidia.com/gpu — the device plugin has not started, or the node label does not match the operator's topology pool"
+          fi
+          {{- end }}
+
+          {{- if .Values.llm.enabled }}
+          # ---- 6. the simulators are serving the surface -------------------
+          echo
+          echo "LLM simulators:"
+          ready=$(kubectl get deploy -n "$LLM_NS" -l "app.kubernetes.io/name=llm-sim,app.kubernetes.io/instance=$INSTANCE" -o jsonpath='{range .items[*]}{.status.readyReplicas}{"\n"}{end}' 2>/dev/null | grep -c '^[1-9]')
+          [ "${ready:-0}" -ge 2 ] \
+            && pass "$ready simulator Deployment(s) have a ready replica" \
+            || fail "fewer than 2 simulator Deployments are ready in $LLM_NS — is {{ include "k8s-ai-observability.llmImage" . }} pullable? (kubectl -n $LLM_NS get pods)"
+
+          # Scraped THROUGH THE SERVICE, over the API server's service proxy —
+          # the same path Prometheus takes. That makes this a test of the wiring
+          # and not just of the image: a wrong port name or a selector that
+          # matches no pod fails here.
+          SVC={{ include "k8s-ai-observability.fullname" . }}-llm-sim
+          body=$(kubectl get --raw "/api/v1/namespaces/${LLM_NS}/services/${SVC}:llm-metrics/proxy/metrics" 2>/dev/null)
+          if echo "$body" | grep -q '^vllm:num_requests_running{'; then
+            pass "the Service serves the vllm: metric surface"
+            for m in prefill decode inference; do
+              echo "$body" | grep -q "^# HELP vllm:request_${m}_time_seconds " \
+                && pass "  the $m phase histogram is present" \
+                || fail "  vllm:request_${m}_time_seconds is missing — the image tag is probably older than this chart (llm.image.tag / Chart.appVersion)"
+            done
+          else
+            fail "the llm-sim Service returned no vllm: series through the API proxy — check the Service selector and the llm-metrics port name"
+          fi
+          {{- end }}
+
+          echo
+          if [ "$fails" -eq 0 ]; then
+            echo "ALL PRECONDITIONS PASSED"
+            exit 0
+          fi
+          echo "$fails PRECONDITION(S) FAILED — see above."
+          echo "The install itself succeeded. These are the things that fail SILENTLY afterwards."
+          exit 1

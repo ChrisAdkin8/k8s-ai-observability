@@ -1,0 +1,54 @@
+{{ .Chart.Name }} {{ .Chart.Version }} installed as "{{ .Release.Name }}" (appVersion {{ .Chart.AppVersion }}).
+
+  monitoring namespace : {{ .Values.namespaces.monitoring }}
+  release label        : release={{ .Values.releaseLabel }}
+  dashboard label      : {{ .Values.grafana.dashboardLabel }}={{ .Values.grafana.dashboardLabelValue }}
+{{- if .Values.llm.enabled }}
+  simulator image      : {{ include "k8s-ai-observability.llmImage" . }}
+{{- end }}
+
+══════════════════════════════════════════════════════════════════════════════
+⚠️  RUN THE TESTS. THE TWO LABELS ABOVE FAIL WITH NO ERROR AT ALL.
+
+    helm test {{ .Release.Name }} --namespace {{ .Release.Namespace }} --logs
+
+A wrong `releaseLabel` means your Prometheus never adopts the rules or the
+ServiceMonitors: they never evaluate, the scrapes never happen, and every panel
+that reads an llm:* or a derived DCGM series is empty. A wrong
+`grafana.dashboardLabel` means the sidecar never imports the boards, and
+/d/llm-sim-overview 404s.
+
+Nothing warns you. Every object above reports itself successfully created. This
+install has NOT verified either of them — `helm test` is what does.
+══════════════════════════════════════════════════════════════════════════════
+
+{{- if .Values.fakeGpuOperator.enabled }}
+
+⚠️  PREREQUISITE THIS CHART CANNOT SATISFY: at least one node must carry
+
+      {{ .Values.nodePoolLabelKey }}={{ .Values.nodePoolName }}
+
+    A chart cannot label nodes. Without it the fake GPU operator watches a pool
+    no node belongs to, nothing advertises nvidia.com/gpu, the sample workloads
+    stay Pending and the GPU board is blank — a green install with ZERO GPUs.
+
+      kubectl label node <node> {{ .Values.nodePoolLabelKey }}={{ .Values.nodePoolName }}
+{{- end }}
+
+The boards, once your Grafana has imported them:
+
+  GPU:  /d/gpu-sim-dcgm
+  LLM:  /d/llm-sim-overview
+
+Recording rules fill in GOING FORWARD from when they were applied, and rate()
+over [5m] under-reads until the window fills — expect a few minutes of climb on
+a fresh install rather than a jump to the true value.
+{{- if not .Values.kubePrometheusStack.enabled }}
+
+Reaching Grafana and Prometheus is your monitoring stack's business, not this
+chart's. If yours is kube-prometheus-stack under a release named something other
+than "kube-prometheus-stack", the scripts in this repo take it from the
+environment:
+
+  KPS_RELEASE={{ .Values.releaseLabel }} ./scripts/grafana.sh <target>
+{{- end }}

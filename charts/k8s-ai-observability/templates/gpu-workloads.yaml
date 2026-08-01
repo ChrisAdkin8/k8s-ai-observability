@@ -1,0 +1,45 @@
+{{- if .Values.workloads.enabled }}
+{{/* Three Deployments driving simulated GPU utilisation. The container does no
+     real work — a busybox sleep — and the ANNOTATION is what moves the DCGM
+     metrics. `gpu-busy` is what keeps GPUHighUtilization permanently firing, so
+     the alert is exercised by the install itself rather than by a check that
+     mutates something to make its own assertion true. */}}
+{{- range $name, $util := dict "idle" "0-5" "steady" "40-60" "busy" "85-99" }}
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "k8s-ai-observability.fullname" $ }}-gpu-{{ $name }}
+  namespace: {{ $.Values.workloads.namespace }}
+  labels:
+    {{- include "k8s-ai-observability.labels" $ | nindent 4 }}
+    app.kubernetes.io/part-of: gpu-sim-workloads
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: {{ include "k8s-ai-observability.fullname" $ }}-gpu-{{ $name }}
+  template:
+    metadata:
+      labels:
+        app: {{ include "k8s-ai-observability.fullname" $ }}-gpu-{{ $name }}
+        app.kubernetes.io/part-of: gpu-sim-workloads
+      annotations:
+        # ⚠️ MUST be on the POD TEMPLATE, not on the Deployment's own metadata.
+        # Misplace it and you get scheduled pods with flat, zero metrics — an
+        # install that looks entirely healthy and demonstrates nothing.
+        run.ai/simulated-gpu-utilization: {{ $util | quote }}
+    spec:
+      containers:
+        - name: workload
+          image: {{ $.Values.workloads.image }}
+          command: ["sh", "-c", "sleep infinity"]
+          resources:
+            limits:
+              # Satisfied by the fake operator's device plugin. ⚠️ If no node
+              # carries {{ $.Values.nodePoolLabelKey }}={{ $.Values.nodePoolName }},
+              # nothing advertises nvidia.com/gpu and these stay Pending forever
+              # — the green-install-with-zero-GPUs failure. `helm test` checks it.
+              nvidia.com/gpu: "1"
+{{- end }}
+{{- end }}

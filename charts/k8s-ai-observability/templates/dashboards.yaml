@@ -1,0 +1,34 @@
+{{/* Every assertion runs here, on the first template Helm renders alphabetically,
+     so a `--dry-run` fails before anything downstream is even evaluated. */}}
+{{- include "k8s-ai-observability.assertions" . -}}
+{{- if .Values.dashboards.enabled }}
+{{- range $path, $_ := .Files.Glob "files/dashboards/*.json" }}
+{{- $uid := base $path | trimSuffix ".json" }}
+---
+# Built from the .json under manifests/dashboards/ by `task chart`, exactly as
+# scripts/install.sh builds the same ConfigMap with `kubectl create configmap
+# --from-file`. The board is ONE artefact used several ways — the file Grafana
+# provisioning mounts in the compose path, the file uploaded to grafana.com, and
+# the file this ConfigMap wraps — so they cannot disagree.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ $uid }}-dashboard
+  namespace: {{ $.Values.namespaces.monitoring }}
+  labels:
+    {{- include "k8s-ai-observability.labels" $ | nindent 4 }}
+    # ⚠️ THE SIDECAR SELECTOR. Without a key/value the sidecar actually watches,
+    # this ConfigMap is created successfully and never imported — the board
+    # simply does not exist in Grafana and /d/{{ $uid }} 404s, with no error
+    # anywhere. `helm test` is what says so out loud.
+    {{ $.Values.grafana.dashboardLabel }}: {{ $.Values.grafana.dashboardLabelValue | quote }}
+    # Ownership, so a user's own cleanup can remove OUR boards without touching
+    # the several kube-prometheus-stack ships under the same sidecar label.
+    # Deleting by the sidecar label alone would take the chart's with them —
+    # the trap teardown.sh:67-71 avoids for the script path.
+    app.kubernetes.io/part-of: gpu-sim-dashboards
+data:
+  {{ base $path }}: |
+{{ $.Files.Get $path | indent 4 }}
+{{- end }}
+{{- end }}

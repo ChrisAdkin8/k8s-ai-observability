@@ -457,6 +457,184 @@ jobs:
         run: docker compose down -v --remove-orphans || true
 
   # ---------------------------------------------------------------------------
+  # The Helm chart: lint, render both ways, and — the part that matters — prove
+  # the render-time assertions FIRE on deliberately broken values.
+  #
+  # ⚠️ A LINT-AND-RENDER JOB WOULD BE NEARLY WORTHLESS HERE. The chart's whole
+  # claim is that it reproduces install.sh's safety net, whose entire purpose is
+  # catching inputs that would otherwise produce a GREEN INSTALL with something
+  # silently wrong. An assertion that has quietly stopped firing looks exactly
+  # like an assertion that passes. So each one is driven to its failure here,
+  # and a broken input that RENDERS SUCCESSFULLY fails this job.
+  #
+  # ⚠️ THE `fast` JOB HAS NO HELM — it installs promtool and nothing else. This
+  # is its own job with the version pinned the same way the stack job pins it:
+  # v3, NOT the v4 line, because Helm 4 is a major version this repo has not
+  # been validated against and CI should exercise what users actually run.
+  # Leaving it to whatever Helm happens to be on the runner is how a green run
+  # stops meaning anything.
+  # ---------------------------------------------------------------------------
+  chart:
+    name: helm chart (lint, render, assertions fire)
+    needs: changes
+    if: needs.changes.outputs.code == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          # The build cross-checks Chart.yaml's appVersion against the repo's
+          # latest tag, and `git describe` finds nothing in a shallow clone —
+          # which would silently skip the check rather than fail it.
+          fetch-depth: 0
+
+      - name: Install pinned Helm
+        run: |
+          set -euo pipefail
+          mkdir -p "$HOME/.local/bin"
+          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+          curl -fsSL "https://get.helm.sh/helm-${HELM_VERSION}-linux-amd64.tar.gz" \
+            | tar -xz -C /tmp linux-amd64/helm
+          mv /tmp/linux-amd64/helm "$HOME/.local/bin/helm"
+          chmod +x "$HOME/.local/bin/helm"
+          helm version --short
+
+      # Assembles into gitignored dist/ from the canonical files in manifests/.
+      # This is also where the dashboard uid/filename contract and the rule
+      # extraction are checked, so a broken board fails before Helm sees it.
+      - name: task chart (assemble into dist/)
+        run: python3 scripts/chart-build.py
+
+      - name: helm lint
+        run: helm lint dist/charts/k8s-ai-observability
+
+      # Both ways round. `=false` is the BYO case the chart exists for; `=true`
+      # additionally renders the subchart's own templates, which is a different
+      # code path and the one a values typo in the pass-through block breaks.
+      - name: helm template, both stack settings
+        run: |
+          set -euo pipefail
+          for v in false true; do
+            echo "--- kubePrometheusStack.enabled=$v"
+            helm template rig dist/charts/k8s-ai-observability \
+              --set kubePrometheusStack.enabled=$v > "/tmp/render-$v.yaml"
+            echo "    $(grep -c '^kind:' "/tmp/render-$v.yaml") objects"
+          done
+          # A render that succeeds and produces nothing would satisfy the step
+          # above. Assert the objects this chart is FOR are actually in it.
+          for kind in PrometheusRule ServiceMonitor ConfigMap Deployment Service; do
+            grep -q "^kind: $kind$" /tmp/render-false.yaml \
+              || { echo "no $kind in the default render" >&2; exit 1; }
+          done
+
+      # THE POINT OF THIS JOB. Every render-time assertion, driven to its
+      # failure. A broken input that renders successfully is the regression to
+      # catch — it means install.sh's safety net has a hole on the chart path
+      # that nothing else would report.
+      - name: The render-time assertions fire on broken values
+        run: |
+          set -uo pipefail
+          C=dist/charts/k8s-ai-observability
+          rc=0
+          must_fail() {
+            desc="$1"; shift
+            if helm template rig "$C" "$@" >/dev/null 2>&1; then
+              echo "  FAIL  rendered successfully but should NOT have: $desc"
+              rc=1
+            else
+              echo "  ok    fires: $desc"
+            fi
+          }
+          # ---- assert_llm_contract, ported -----------------------------------
+          must_fail "two tenants sharing a model_name" \
+            --set llm.saturated.modelName=sim-llama-3-8b-steady
+          # ---- the capacity arithmetic (no install.sh equivalent — the script
+          #      path's profiles are static files, so this hazard is new here) --
+          must_fail "steady tenant above modelled capacity" \
+            --set llm.steady.arrivalRateRps=9
+          must_fail "saturated tenant below modelled capacity" \
+            --set llm.saturated.arrivalRateRps=1.0
+          must_fail "maxInFlight below maxConcurrency" \
+            --set llm.profile.maxInFlight=4
+          must_fail "prefix cache hit rate given as a percentage" \
+            --set llm.steady.prefixCacheHitRate=35
+          # ---- the two silent selectors --------------------------------------
+          must_fail "empty releaseLabel" --set releaseLabel=
+          must_fail "empty grafana.dashboardLabel" --set grafana.dashboardLabel=
+          # ---- assert_gpu_contract, ported (the three-way naming invariant) ---
+          must_fail "node-pool label key disagrees with the subchart's" \
+            --set nodePoolLabelKey=nvidia.com/something-else
+          must_fail "nodePoolName is not one of the topology pools" \
+            --set nodePoolName=nonexistent
+
+          # ---- assert_dashboard_contract, ported -----------------------------
+          # Both halves, and they need DIFFERENT messages: an unparseable board
+          # once reported as a uid mismatch against "<nil>", which sends the
+          # reader to rename a file when the real fault is a bad edit.
+          mv "$C/files/dashboards/llm-sim-overview.json" "$C/files/dashboards/renamed.json"
+          must_fail "dashboard filename disagrees with the uid inside it"
+          mv "$C/files/dashboards/renamed.json" "$C/files/dashboards/llm-sim-overview.json"
+
+          echo 'not json {' > "$C/files/dashboards/broken.json"
+          must_fail "a board that does not parse as JSON"
+          rm "$C/files/dashboards/broken.json"
+
+          echo '{"title":"no uid here"}' > "$C/files/dashboards/nouid.json"
+          must_fail "valid JSON with no top-level uid"
+          rm "$C/files/dashboards/nouid.json"
+
+          # ---- the build step is not silently doing nothing ------------------
+          rm -rf "$C/files/rules"
+          must_fail "no rule files (the chart was not assembled)"
+
+          # And the clean chart must STILL render, or every `ok` above could be
+          # explained by the chart being broken outright.
+          python3 scripts/chart-build.py >/dev/null
+          helm template rig "$C" >/dev/null \
+            || { echo "  FAIL  the clean chart no longer renders"; rc=1; }
+          echo "  ok    the clean chart still renders"
+          exit $rc
+
+      # values.schema.json is a second layer over the same inputs, and it can
+      # rot independently of the assertions — a schema that accepts anything
+      # passes every test above. Driven to a type failure specifically.
+      - name: values.schema.json rejects a wrong TYPE
+        run: |
+          set -uo pipefail
+          C=dist/charts/k8s-ai-observability
+          rc=0
+          for bad in "llm.profile.maxConcurrency=notanumber" "llm.steady.prefixCacheHitRate=2.5"; do
+            if helm template rig "$C" --set "$bad" >/dev/null 2>&1; then
+              echo "  FAIL  schema accepted $bad"; rc=1
+            else
+              echo "  ok    schema rejects $bad"
+            fi
+          done
+          exit $rc
+
+      # ⚠️ The rule the whole build step exists to keep. If a dashboard, a rule
+      # file or the simulator ever appears under charts/, the
+      # single-source-of-truth constraint has been quietly abandoned and
+      # assembling into dist/ is doing nothing.
+      - name: No second committed copy of any canonical file
+        run: |
+          set -euo pipefail
+          echo "tracked files under charts/:"
+          git ls-files charts/ | sed 's/^/  /'
+          bad=$(git ls-files \
+                | grep -E '(^|/)(llm[-_]sim\.py|.*-rules\.yaml|.*-prometheusrule\.yaml)$|^charts/.*\.json$' \
+                | grep -vE '^(scripts/llm-sim\.py|manifests/alerts/.*-prometheusrule\.yaml|tests/rules/.*_test\.yaml|charts/.*/values\.schema\.json)$' \
+                || true)
+          if [ -n "$bad" ]; then
+            echo "second copies of canonical files are committed:" >&2
+            echo "$bad" | sed 's/^/  /' >&2
+            echo "These are assembled into dist/ by scripts/chart-build.py precisely so" >&2
+            echo "no copy exists in the tree. Delete them." >&2
+            exit 1
+          fi
+          echo "none — the chart is assembled, not vendored"
+
+  # ---------------------------------------------------------------------------
   # The simulator image — BUILT for both architectures, RUN on one.
   #
   # ⚠️ A BUILD-ONLY JOB WOULD PROVE THE DOCKERFILE PARSES AND NOTHING ELSE. The
