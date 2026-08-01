@@ -455,7 +455,6 @@ class Simulator:
         self.generation_tokens_total = 0
         self.success_total = {r: 0 for r in profile["finish_reasons"]}
         self.rejected_total = 0
-        self.preemptions_total = 0
         self.prefix_cache_queries_total = 0
         self.prefix_cache_hits_total = 0
         # Fractional hits carried between requests, so the emitted ratio is the
@@ -728,8 +727,17 @@ class Simulator:
                 "Number of prefill tokens processed.")
         counter("vllm:generation_tokens_total", self.generation_tokens_total,
                 "Number of generation tokens processed.")
-        counter("vllm:num_preemptions_total", self.preemptions_total,
-                "Cumulative number of preemptions from the engine.")
+
+        # ⚠️ vllm:num_preemptions_total is deliberately NOT emitted, and putting
+        # it back means modelling KV pressure first. Preemption is what a real
+        # engine does when the KV cache runs out; nothing here creates that
+        # condition, because _admit() gates on max_concurrency alone and
+        # kv_cache_usage() therefore peaks near 0.43 even on the saturated
+        # profile. It was previously exported as a hardcoded zero, which is not
+        # an absence but a claim — "no preemptions are happening" — on a board
+        # someone may be reading through the published image. It is listed as a
+        # gap by scripts/check-vllm-buckets.py, which is where an unmodelled
+        # upstream metric belongs.
 
         # Prefix cache. Which names appear depends on the surface: two counters
         # on V1, one gauge of the ratio on v0. Every reading below is computed
