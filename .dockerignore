@@ -1,0 +1,11 @@
+# The build context is the repo root, because the Dockerfile COPYs
+# scripts/llm-sim.py from where it LIVES rather than from a vendored second copy
+# (see the header there). That would otherwise ship the whole repo — two Helm
+# value trees, Terraform state, the dashboards, .git — to the daemon on every
+# build.
+#
+# Deny everything, then re-admit the one file the image actually needs. An
+# allowlist rather than a denylist on purpose: a new top-level directory is
+# excluded by default instead of silently enlarging the context.
+*
+!scripts/llm-sim.py

@@ -74,6 +74,54 @@ Comparison links are at the foot of this file, one per released version.
   three histograms are receiving observations. An untested design decision is one that gets
   reverted by someone who does not know why it was made.
 
+- **The simulator is published as a container image**, `ghcr.io/<owner>/vllm-metrics-sim`,
+  for `linux/amd64` and `linux/arm64` on every release tag.
+
+  ```sh
+  docker run --rm -p 9401:9401 ghcr.io/chrisadkin8/vllm-metrics-sim:latest
+  ```
+
+  **This reverses a stated non-goal, and the reversal is narrower than it looks.** The old
+  rule — *stdlib-only Python mounted into a stock image, so there is nothing to build, push
+  or patch* — was reasoning about how **this rig** runs the simulator, and remains true of
+  that path. It said nothing about how **anyone else** consumes it, which is the case an
+  image serves: as a file inside this repo, `llm-sim.py` cannot be pointed at someone's own
+  vLLM dashboards without cloning. The stdlib-only constraint is what makes the image
+  trivial — a `FROM` and a `COPY` — and **`pip install` remains a non-goal**, unchanged.
+  The two are habitually stated in one breath; only one of them moved.
+
+  ⚠️ **Nothing about how the rig runs changes.** `install.sh` still builds the
+  `llm-sim-script` ConfigMap from `scripts/llm-sim.py`, and the compose stack still mounts
+  the same file. An image-based Deployment would pin a **tag**, so a local edit would stop
+  reaching the cluster *silently* with the pod still `Running` — the exact failure the
+  checksum annotation below was just added to fix, one layer up. The image is for external
+  consumers, and both the Dockerfile and the docs say so, because someone will otherwise
+  helpfully "simplify" the Deployment onto it.
+
+  Built **from `scripts/llm-sim.py`** rather than a vendored copy, and CI fails if a second
+  copy appears in the tree or if the image's payload stops matching the file byte for byte.
+  A drifted copy of the simulator would be undetectable from the outside, which is precisely
+  the property `tests/contracts/` guarantees for the DCGM surface.
+
+  CI **runs** the image rather than only building it — building proves the Dockerfile
+  parses and nothing more. ⚠️ Both architectures are **built**; only `linux/amd64` is
+  **executed** on a GitHub runner, which is amd64. That is defensible while the payload is
+  one architecture-independent `.py` file with no compiled extension — an arm64-only
+  runtime failure would have to originate inside `python:3.12-slim` itself — and it stops
+  being defensible the moment this image grows a native dependency. (`linux/arm64` was
+  built and executed by hand during development, on Apple Silicon.)
+
+  ⚠️ **The port override is `LLM_SIM_LISTEN_PORT`, not `LLM_SIM_PORT`.** kubelet injects a
+  Docker-link-compatible `<SVCNAME>_PORT` for every Service in the namespace, so a Service
+  named `llm-sim` sets `LLM_SIM_PORT=tcp://<ip>:9401`; reading that name meant `int()` got
+  a URL and every pod died at startup. Verified against the built image: the correct name
+  moves the listener and the wrong one is silently ignored rather than fatal. Documented in
+  both directions, because someone will try the obvious name and conclude there is no
+  override — and because the obvious name is the bug.
+
+  `task image` builds and smoke-tests it locally. No new CI secrets: `GITHUB_TOKEN` is
+  sufficient for `ghcr.io`, which matters because fork PRs never receive secrets at all.
+
 - **A docs-only change no longer stands up two kind clusters and a compose stack.** A
   `changes` job diffs the push or the whole PR and gates the expensive jobs on the result:
   ~13 minutes down to seconds. Verified safe first — nothing under `scripts/`, `compose/`,

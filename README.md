@@ -61,6 +61,20 @@ See [compose/](compose/) for what it deliberately cannot cover.
   consistent with itself. A drifted boundary does not error or blank a panel; it returns a
   confident, plausible percentile that will not match real hardware, which no self-contained
   test suite can catch.
+- **The simulator as a container image**, for pointing your *own* dashboards at a realistic
+  vLLM metric surface without cloning anything:
+
+  ```sh
+  docker run --rm -p 9401:9401 ghcr.io/chrisadkin8/vllm-metrics-sim:latest
+  ```
+
+  No `--profile` needed — it falls back to a self-consistent steady tenant and serves on
+  `:9401`. Published on every release tag for `linux/amd64` and `linux/arm64`, and built
+  from [`scripts/llm-sim.py`](scripts/llm-sim.py) rather than a second copy of it. ⚠️ The
+  port override is **`LLM_SIM_LISTEN_PORT`**, not the more obvious `LLM_SIM_PORT` — see
+  [docs/llm-simulation.md](docs/llm-simulation.md#the-container-image) for why that is not
+  a matter of taste. This image is **not** how the rig itself runs the simulator, and
+  deliberately so.
 - **A path for clusters that already run Prometheus.** If you imported one of the boards
   from the catalog and found panels blank for want of the `llm:*` recording rules, you do
   not have to hand your monitoring stack to this repo — see

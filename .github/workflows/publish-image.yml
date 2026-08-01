@@ -1,0 +1,210 @@
+# Publish the LLM simulator to ghcr.io, from a release tag.
+#
+# The image exists so someone who has NOT cloned this repo can point their own
+# vLLM dashboards, recording rules and alert expressions at a realistic metric
+# surface. It is NOT how this rig runs the simulator — install.sh still builds
+# the ConfigMap from scripts/llm-sim.py and the compose stack still mounts it.
+# The reasoning is in the Dockerfile header; do not "simplify" the Deployment
+# onto this image.
+#
+# ⚠️ NO NEW SECRETS. GITHUB_TOKEN is sufficient for ghcr.io, and that matters
+# beyond convenience: pull requests from forks never receive repository secrets,
+# so anything gated on one is a step that silently cannot run for an external
+# contributor. Nothing here needs configuring before the first tag.
+name: Publish simulator image
+
+on:
+  push:
+    tags: ['v*']
+  # So the path can be exercised before a real tag exists. A dispatch run
+  # publishes under the tag you give it — see the `version` input below.
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Tag to publish as (e.g. v0.5.0). Required — there is no default, because a wrong default would publish over a real release.'
+        required: true
+        type: string
+
+# Least privilege at the workflow level; the publish job widens it for itself.
+permissions:
+  contents: read
+
+concurrency:
+  group: publish-image-${{ github.ref }}
+  cancel-in-progress: false   # never cancel a half-finished registry push
+
+env:
+  IMAGE: ghcr.io/${{ github.repository_owner }}/vllm-metrics-sim
+
+jobs:
+  publish:
+    name: build + push ghcr.io/<owner>/vllm-metrics-sim
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    # ⚠️ THIS BLOCK IS LOAD-BEARING AND ITS ABSENCE IS MISLEADING.
+    #
+    # The workflow-level default above is `contents: read` — the same default
+    # ci.yml sets. Under it, a push to ghcr.io fails with a 403 that reads
+    # exactly like a missing or expired credential, and the natural response is
+    # to spend an afternoon configuring a PAT that was never the problem.
+    # Job-level permissions REPLACE the workflow default rather than adding to
+    # it, so `contents: read` has to be restated here alongside packages: write.
+    permissions:
+      contents: read
+      packages: write
+
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      # The tag being published, from whichever trigger fired. Resolved in one
+      # place so the image tag and the OCI version label cannot disagree.
+      - name: Resolve the version
+        id: v
+        env:
+          REF_NAME: ${{ github.ref_name }}
+          INPUT_VERSION: ${{ inputs.version }}
+        run: |
+          set -euo pipefail
+          version="${INPUT_VERSION:-$REF_NAME}"
+          case "$version" in
+            v*) ;;
+            *) echo "version must start with 'v', got '$version'" >&2; exit 1 ;;
+          esac
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          # The registry namespace is the OWNER, lowercased: ghcr.io rejects an
+          # uppercase path component, and a GitHub username may contain one.
+          echo "image=$(echo "${IMAGE}" | tr '[:upper:]' '[:lower:]')" >> "$GITHUB_OUTPUT"
+          echo "publishing $version"
+
+      # ⚠️ The chart's default image tag must agree with the release tag, and
+      # nothing else enforces it. A chart pinned to a stale tag installs cleanly
+      # and runs an old simulator — a green install with something silently
+      # wrong, which is the failure class this repo builds assertions against.
+      # Checked HERE as well as in `task chart`, because this is the step that
+      # makes a tag real.
+      - name: The chart's default image tag matches this release
+        run: |
+          set -euo pipefail
+          v='${{ steps.v.outputs.version }}'
+          f=charts/k8s-ai-observability/values.yaml
+          if [ ! -f "$f" ]; then
+            echo "::notice::$f does not exist yet — nothing to cross-check."; exit 0
+          fi
+          got=$(python3 -c 'import sys,re;print(re.search(r"^\s+tag:\s*\"?([^\"\s#]+)",open(sys.argv[1]).read(),re.M).group(1))' "$f")
+          echo "chart default tag: $got   release tag: $v"
+          [ "$got" = "$v" ] || {
+            echo "$f pins simulator.image.tag=$got but this release is $v." >&2
+            echo "A chart on a stale tag installs green and runs an old simulator." >&2
+            exit 1; }
+
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@29109295f81e9208d7d86ff1c6c12d2833863392 # v3
+
+      - name: Set up buildx
+        uses: docker/setup-buildx-action@e468171a9de216ec08956ac3ada2f0791b6bd435 # v3
+
+      - name: Log in to ghcr.io
+        uses: docker/login-action@c94ce9fb468520275223c153574b00df6fe4bcc9 # v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      # MULTI-ARCH. The payload is one architecture-independent .py file, so the
+      # arm64 build costs almost nothing and an arm64 laptop is a first-class
+      # consumer of this image rather than an afterthought.
+      #
+      # ⚠️ THE OCI LABELS ARE THE POINT OF THIS STEP, not decoration. An image
+      # whose version cannot be tied back to a commit is one nobody can debug:
+      # "which simulator is this pod running" has to be answerable from the image
+      # alone, by someone who does not have this repo checked out.
+      # `docker inspect` reads them back.
+      - name: Build and push, with the provenance labels
+        run: |
+          set -euo pipefail
+          docker buildx build \
+            --platform linux/amd64,linux/arm64 \
+            --label "org.opencontainers.image.revision=${GITHUB_SHA}" \
+            --label "org.opencontainers.image.version=${{ steps.v.outputs.version }}" \
+            --label "org.opencontainers.image.source=${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}" \
+            --label "org.opencontainers.image.title=vllm-metrics-sim" \
+            --label "org.opencontainers.image.description=Simulated vLLM metric surface — real names, types and histogram bucket boundaries, no model weights." \
+            --label "org.opencontainers.image.licenses=MIT" \
+            -t "${{ steps.v.outputs.image }}:${{ steps.v.outputs.version }}" \
+            -t "${{ steps.v.outputs.image }}:latest" \
+            --push .
+
+      # Read the labels back off the PUSHED manifest rather than trusting the
+      # build. --push and --load are mutually exclusive for a multi-platform
+      # build, so there is no local image to inspect; `buildx imagetools` reads
+      # the registry, which is also what a consumer would see.
+      - name: The labels resolve to a real commit
+        run: |
+          set -euo pipefail
+          docker buildx imagetools inspect \
+            "${{ steps.v.outputs.image }}:${{ steps.v.outputs.version }}" \
+            --format '{{json .Image}}' > /tmp/img.json
+          python3 - <<'PY'
+          import json, os, sys
+          data = json.load(open("/tmp/img.json"))
+          # One entry per platform on a multi-arch manifest; a single-arch result
+          # is the flat config. Normalise so both shapes are checked.
+          entries = data.values() if isinstance(data, dict) and "config" not in data else [data]
+          want = ("org.opencontainers.image.revision",
+                  "org.opencontainers.image.version",
+                  "org.opencontainers.image.source")
+          seen = 0
+          for e in entries:
+              labels = (e.get("config", {}) or {}).get("Labels") or {}
+              missing = [k for k in want if not labels.get(k)]
+              if missing:
+                  sys.exit(f"missing OCI labels {missing} on one platform")
+              print({k: labels[k] for k in want})
+              if labels["org.opencontainers.image.revision"] != os.environ["GITHUB_SHA"]:
+                  sys.exit("revision label does not match the commit being built")
+              seen += 1
+          if not seen:
+              sys.exit("no platform entries found in the manifest")
+          print(f"{seen} platform(s) carry a revision that maps to a real commit")
+          PY
+
+      # ⚠️ SMOKE-TESTED ON amd64 ONLY, and this notice says so rather than
+      # letting the run summary imply both. `ubuntu-latest` is amd64; the arm64
+      # image was BUILT and PUSHED but not EXECUTED. That is defensible while the
+      # payload is one architecture-independent .py file — an arm64-only runtime
+      # failure would have to originate inside python:3.12-slim itself — and it
+      # stops being defensible the moment this image grows a native dependency.
+      - name: Pull the published image back and scrape it
+        run: |
+          set -euo pipefail
+          ref="${{ steps.v.outputs.image }}:${{ steps.v.outputs.version }}"
+          docker pull --platform linux/amd64 "$ref"
+          cid=$(docker run -d -p 9401:9401 "$ref")
+          trap 'docker logs "$cid" || true; docker rm -f "$cid" >/dev/null 2>&1 || true' EXIT
+          for i in $(seq 1 30); do
+            curl -sf http://localhost:9401/metrics -o /tmp/scrape.txt && break
+            sleep 1
+          done
+          test -s /tmp/scrape.txt || { echo "the published image served nothing" >&2; exit 1; }
+          grep -q '^# HELP vllm:num_requests_running ' /tmp/scrape.txt
+          grep -q '^vllm:num_requests_running{'        /tmp/scrape.txt
+          echo "::notice title=Architectures::linux/amd64 and linux/arm64 were BUILT and PUSHED. Only linux/amd64 was EXECUTED — ubuntu-latest is amd64."
+
+      - name: Summary
+        run: |
+          {
+            echo "### Published \`${{ steps.v.outputs.image }}:${{ steps.v.outputs.version }}\`"
+            echo
+            echo '```sh'
+            echo "docker run --rm -p 9401:9401 ${{ steps.v.outputs.image }}:${{ steps.v.outputs.version }}"
+            echo '```'
+            echo
+            echo "| | |"
+            echo "|--|--|"
+            echo "| built | \`linux/amd64\`, \`linux/arm64\` |"
+            echo "| smoke-tested | \`linux/amd64\` only — the runner is amd64 |"
+            echo "| revision | \`${GITHUB_SHA}\` |"
+            echo
+            echo "Port override is **\`LLM_SIM_LISTEN_PORT\`**, not \`LLM_SIM_PORT\` — see docs/llm-simulation.md."
+          } >> "$GITHUB_STEP_SUMMARY"

@@ -457,6 +457,149 @@ jobs:
         run: docker compose down -v --remove-orphans || true
 
   # ---------------------------------------------------------------------------
+  # The simulator image — BUILT for both architectures, RUN on one.
+  #
+  # ⚠️ A BUILD-ONLY JOB WOULD PROVE THE DOCKERFILE PARSES AND NOTHING ELSE. The
+  # failures worth catching here are runtime ones: a COPY that lands the script
+  # somewhere the ENTRYPOINT does not look, a non-root user that cannot read it,
+  # a base-image Python that the stdlib-only claim turns out to be wrong about.
+  # So this runs the image and scrapes it.
+  #
+  # ⚠️ WHICH ARCHITECTURE IS ACTUALLY EXECUTED, stated plainly rather than left
+  # to be inferred. `ubuntu-latest` is amd64, so the arm64 image CANNOT be run
+  # natively here. Two options were available and this job takes the second:
+  #
+  #   (a) docker/setup-qemu-action and run arm64 under emulation. Genuinely
+  #       exercises the arm64 layer, but is slower and adds QEMU's own failure
+  #       modes to the surface being tested.
+  #   (b) build both, smoke-test the runner's native arch. Honest and cheap.
+  #
+  # (b) is defensible HERE SPECIFICALLY because the two images differ only in
+  # base-image layers — the payload is one architecture-independent .py file
+  # with no compiled extension and no wheel — so an arm64-only runtime failure
+  # would have to originate inside python:3.12-slim itself. If the image ever
+  # grows a dependency with native code, this reasoning expires and (a) is what
+  # replaces it.
+  #
+  # Gated exactly as the compose job is, and for the same reason: this reads
+  # scripts/llm-sim.py, so a markdown-only change cannot move it.
+  # ---------------------------------------------------------------------------
+  image:
+    name: simulator image (build both arches, smoke-test amd64)
+    needs: changes
+    if: needs.changes.outputs.code == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      HAVE_DOCKERHUB: ${{ secrets.DOCKERHUB_USERNAME != '' && secrets.DOCKERHUB_TOKEN != '' }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      # python:3.12-slim is a Docker Hub image, so the same rate-limit reasoning
+      # as the other jobs applies. Gated on the secrets existing — fork PRs never
+      # receive them, and an ungated login fails every external contribution.
+      - name: Log in to Docker Hub (skipped without secrets)
+        if: env.HAVE_DOCKERHUB == 'true'
+        uses: docker/login-action@c94ce9fb468520275223c153574b00df6fe4bcc9 # v3
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+
+      - name: Set up buildx
+        uses: docker/setup-buildx-action@e468171a9de216ec08956ac3ada2f0791b6bd435 # v3
+
+      # Both platforms, so a Dockerfile change that only works on amd64 fails
+      # here rather than at publish time. --load cannot take a multi-platform
+      # result, so this build stays in the cache and the single-arch load below
+      # is what produces something runnable.
+      - name: Build linux/amd64 and linux/arm64
+        run: |
+          set -euo pipefail
+          docker buildx build --platform linux/amd64,linux/arm64 \
+            -t vllm-metrics-sim:ci .
+
+      - name: Load the amd64 image into the runner's docker
+        run: |
+          set -euo pipefail
+          docker buildx build --platform linux/amd64 --load \
+            -t vllm-metrics-sim:ci .
+
+      # THE SMOKE TEST. Run it, scrape it, and assert the surface — not merely
+      # that the container started. A simulator that serves an empty body, or
+      # exposition with no HELP lines, would satisfy "it ran".
+      - name: Run the image and scrape /metrics
+        run: |
+          set -euo pipefail
+          cid=$(docker run -d -p 9401:9401 vllm-metrics-sim:ci)
+          trap 'docker logs "$cid" || true; docker rm -f "$cid" >/dev/null 2>&1 || true' EXIT
+
+          # Bounded poll, not a fixed sleep: a container that never serves must
+          # fail rather than pass on a lucky timing.
+          for i in $(seq 1 30); do
+            if curl -sf http://localhost:9401/metrics -o /tmp/scrape.txt; then
+              echo "serving after ${i}s"; break
+            fi
+            sleep 1
+          done
+          test -s /tmp/scrape.txt || { echo "no scrape after 30s" >&2; exit 1; }
+
+          # One series and one HELP line, per the acceptance criterion — plus the
+          # three phase histograms specifically, since they are what this release
+          # adds and a stale image would serve a perfectly valid older surface.
+          grep -q '^# HELP vllm:num_requests_running ' /tmp/scrape.txt
+          grep -q '^vllm:num_requests_running{'        /tmp/scrape.txt
+          for m in prefill decode inference; do
+            grep -q "^# HELP vllm:request_${m}_time_seconds " /tmp/scrape.txt
+          done
+
+          # No `source` label on any vllm: series — the same invariant --selftest
+          # holds, asserted here against what the IMAGE actually serves.
+          if grep '^vllm:' /tmp/scrape.txt | grep -q 'source="'; then
+            echo "a vllm: series carries a source label" >&2; exit 1
+          fi
+          echo "scraped $(grep -c '^vllm:' /tmp/scrape.txt) vllm: sample lines"
+
+      # LLM_SIM_LISTEN_PORT is the documented override and LLM_SIM_PORT is the
+      # name that must NOT work — kubelet injects the latter for every Service in
+      # the namespace, and reading it meant int() got a URL and every pod died at
+      # startup. Both halves asserted, because the docs claim both.
+      - name: The port override is LLM_SIM_LISTEN_PORT, and LLM_SIM_PORT is ignored
+        run: |
+          set -euo pipefail
+          cid=$(docker run -d -e LLM_SIM_LISTEN_PORT=9999 -p 9999:9999 vllm-metrics-sim:ci)
+          for _ in $(seq 1 30); do curl -sf http://localhost:9999/metrics -o /dev/null && break; sleep 1; done
+          curl -sf http://localhost:9999/metrics -o /dev/null \
+            || { echo "LLM_SIM_LISTEN_PORT=9999 did not move the listener" >&2; docker logs "$cid"; exit 1; }
+          docker rm -f "$cid" >/dev/null
+
+          # Must be IGNORED rather than fatal: a pod in a namespace with an
+          # llm-sim Service receives this, and crashing on it is the original bug.
+          cid=$(docker run -d -e LLM_SIM_PORT=tcp://10.0.0.1:9401 -p 9402:9401 vllm-metrics-sim:ci)
+          for _ in $(seq 1 30); do curl -sf http://localhost:9402/metrics -o /dev/null && break; sleep 1; done
+          curl -sf http://localhost:9402/metrics -o /dev/null \
+            || { echo "LLM_SIM_PORT was not ignored — it must not be read" >&2; docker logs "$cid"; exit 1; }
+          docker rm -f "$cid" >/dev/null
+
+      # The image must be DERIVED from scripts/llm-sim.py, never a vendored copy.
+      # A drifted copy of the simulator would be undetectable from outside, which
+      # is the property tests/contracts/ guarantees for the DCGM surface. This is
+      # the automatic failure that keeps that true.
+      - name: No second copy of the simulator exists in the tree
+        run: |
+          set -euo pipefail
+          copies=$(git ls-files | grep -E '(^|/)llm[-_]sim\.py$' || true)
+          echo "tracked simulator files:"; echo "$copies" | sed 's/^/  /'
+          [ "$copies" = "scripts/llm-sim.py" ] \
+            || { echo "expected exactly scripts/llm-sim.py; the image must COPY it, not vendor it" >&2; exit 1; }
+
+          # And what the image serves must be that file, byte for byte.
+          docker run --rm --entrypoint sha256sum vllm-metrics-sim:ci /app/llm_sim.py | cut -d' ' -f1 > /tmp/in-image
+          sha256sum scripts/llm-sim.py | cut -d' ' -f1 > /tmp/in-repo
+          diff /tmp/in-image /tmp/in-repo \
+            || { echo "the image's llm_sim.py differs from scripts/llm-sim.py" >&2; exit 1; }
+          echo "image payload matches scripts/llm-sim.py ($(cat /tmp/in-repo))"
+
+  # ---------------------------------------------------------------------------
   # The real test: a kind cluster, both Helm releases, all the wiring, and every
   # acceptance check.
   # ---------------------------------------------------------------------------

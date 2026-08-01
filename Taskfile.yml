@@ -127,6 +127,43 @@ tasks:
     cmds:
       - python3 scripts/dashboard-publish.py
 
+  # Builds the simulator image from scripts/llm-sim.py and smoke-tests it the way
+  # CI does — run it, scrape it, assert the surface. Building alone would only
+  # prove the Dockerfile parses.
+  #
+  # ⚠️ THIS IS NOT HOW THE RIG RUNS THE SIMULATOR. install.sh builds the
+  # ConfigMap from the file and the compose stack mounts it; an image-based
+  # Deployment would pin a tag and a local edit would stop reaching the cluster
+  # silently. The image is for people consuming the simulator from outside this
+  # repo. See docs/llm-simulation.md#the-container-image.
+  image:
+    desc: Build the simulator container image and smoke-test it (needs docker)
+    preconditions:
+      - sh: docker info >/dev/null 2>&1
+        msg: |
+          docker is not available (`docker info` failed). This task builds and
+          RUNS the simulator image; there is no dockerless path.
+    cmds:
+      - docker build -t vllm-metrics-sim:local .
+      - |
+        set -eu
+        cid=$(docker run -d -p 9401:9401 vllm-metrics-sim:local)
+        trap 'docker rm -f "$cid" >/dev/null 2>&1 || true' EXIT
+        for _ in $(seq 1 30); do
+          curl -sf http://localhost:9401/metrics -o /tmp/llm-sim-scrape.txt && break
+          sleep 1
+        done
+        test -s /tmp/llm-sim-scrape.txt || { echo "the image served nothing" >&2; exit 1; }
+        grep -q '^# HELP vllm:num_requests_running ' /tmp/llm-sim-scrape.txt
+        grep -q '^vllm:num_requests_running{'        /tmp/llm-sim-scrape.txt
+        echo "  ok  $(grep -c '^vllm:' /tmp/llm-sim-scrape.txt) vllm: sample lines"
+        # The payload must BE scripts/llm-sim.py, not a copy that has drifted
+        # from it. A drifted simulator would be undetectable from outside.
+        a=$(docker run --rm --entrypoint sha256sum vllm-metrics-sim:local /app/llm_sim.py | cut -d' ' -f1)
+        b=$(python3 -c 'import hashlib,sys;print(hashlib.sha256(open(sys.argv[1],"rb").read()).hexdigest())' scripts/llm-sim.py)
+        [ "$a" = "$b" ] || { echo "image payload differs from scripts/llm-sim.py" >&2; exit 1; }
+        echo "  ok  payload matches scripts/llm-sim.py ($a)"
+
   # ---- the no-Kubernetes path ------------------------------------------------
   # Both boards and both alert sets in under a minute, reading the same dashboards,
   # rules, simulator and profiles the cluster does. See compose/README.md for what it
