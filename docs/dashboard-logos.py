@@ -1,11 +1,12 @@
 #!/usr/bin/env python3
-"""Build the grafana.com logo for each dashboard.
+"""Build the grafana.com logos: one per dashboard, plus the org mark.
 
     pip install pillow && python3 docs/dashboard-logos.py     # -> docs/logos/*.png
 
-One square PNG per board, generated rather than drawn by hand for the same reason
-the boards themselves are files rather than clicks: it is re-runnable, it diffs,
-and the two marks cannot drift apart into a mismatched pair.
+One square PNG per board and one for the organisation, generated rather than
+drawn by hand for the same reason the boards themselves are files rather than
+clicks: it is re-runnable, it diffs, and the marks cannot drift apart into a
+mismatched set.
 
 WHY 512x512. The catalog renders a dashboard's logo small — think listing-card
 size — but the upload wants something it can scale down itself, and a 512px master
@@ -30,9 +31,10 @@ follow from it, and they are why this looks sparser than it could:
 
   * few elements, none thin — strokes are >= 0.03 of the canvas, so nothing
     drops below ~2px on a small render;
-  * the two marks share a tile, a corner radius, a margin and a stroke weight, so
+  * the marks share a tile, a corner radius, a margin and a stroke weight, so
     they read as a set on an org page. What differs is the SUBJECT — a chip with
-    pins for the hardware board, a panel frame for the serving board;
+    pins for the hardware board, a panel frame for the serving board, and for the
+    org the two of them fused (see org_logo);
   * colour carries the meaning, and it is each board's own: DCGM green for GPU,
     and for LLM the story the first panel tells — a healthy tenant in green under
     the threshold, a saturated one in red above it.
@@ -157,11 +159,62 @@ def llm_logo():
     finish(img, "llm-sim-overview.png")
 
 
+# ---- ORG: the two boards' subjects fused -------------------------------------
+# This one sits ABOVE the other two on the org page, so it has a different job:
+# it must read as the thing they both came FROM, not as a third of the same kind.
+# The first attempt was a frame with a threshold and two tenants through it — and
+# that IS the LLM mark, so it read as a sibling. This is the union instead: the
+# GPU mark's die, with the LLM mark's signal running through it.
+#
+# ⚠️ THE DIE IS BLUE, NOT DIM, AND THAT IS A LEGIBILITY FIX RATHER THAN A
+# PREFERENCE. The LLM mark makes its container DIM so the frame does not compete
+# with the two tenants, and the same choice here was right at 512 and wrong at
+# 64: DIM (78,87,102) against this tile is too close in value to survive the
+# downsample, so the die dissolved and the mark became "a green squiggle".
+# Checked by rendering the 64px version, which is the only size that settles it.
+# Blue also belongs to neither board as a subject colour, so the family reading
+# survives — the parent is not wearing either child's colour.
+#
+# The signal runs EDGE TO EDGE, past the die on both sides. That is what makes it
+# read as passing THROUGH the hardware rather than as being drawn inside it,
+# which is the whole claim: this repo observes the thing, it does not contain it.
+#
+# TWO pins a side, not the GPU mark's three, because the middle offset is where
+# the signal crosses — a pin there collides with it at small sizes. They sit at
+# 0.365/0.635 rather than tighter, which keeps them off the frame's rounded
+# corners where they otherwise read as a smudge.
+def org_logo():
+    img, d = canvas()
+
+    frame, stroke = (0.255, 0.745), 0.044
+    d.rounded_rectangle(U(frame[0], frame[0], frame[1], frame[1]),
+                        radius=U(0.06), outline=BLUE, width=U(stroke))
+
+    pin_len, pin_w = 0.072, 0.040
+    for off in (0.365, 0.635):
+        a, b = off - pin_w / 2, off + pin_w / 2
+        d.rectangle(U(frame[0] - pin_len, a, frame[0], b), fill=BLUE)
+        d.rectangle(U(frame[1], a, frame[1] + pin_len, b), fill=BLUE)
+        d.rectangle(U(a, frame[0] - pin_len, b, frame[0]), fill=BLUE)
+        d.rectangle(U(a, frame[1], b, frame[1] + pin_len), fill=BLUE)
+
+    # ONE polyline for the whole path. Drawn as several overlapping calls it
+    # leaves a visible notch at each handover, because joint="curve" only
+    # smooths joints WITHIN a call — which is exactly what the first draft did.
+    curve(d, [(0.075, 0.50), (0.36, 0.50), (0.44, 0.50),
+              (0.50, 0.315), (0.575, 0.685), (0.635, 0.50),
+              (0.70, 0.50), (0.925, 0.50)], GREEN, 0.062)
+
+    finish(img, "org-chrisadkin.png")
+
+
 def main():
     os.makedirs(OUT_DIR, exist_ok=True)
     gpu_logo()
     llm_logo()
-    print("\nUpload these with the boards — see manifests/dashboards/README.md.")
+    org_logo()
+    print("\nBoard logos upload with their boards — see manifests/dashboards/README.md.")
+    print("org-chrisadkin.png is the ORG logo: grafana.com -> your org -> Settings.")
 
 
 if __name__ == "__main__":
