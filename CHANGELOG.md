@@ -90,6 +90,74 @@ Comparison links are at the foot of this file, one per released version.
   merely document them. A short pointer keeps the trail from `Install`, and the README
   drops from 306 lines to 280.
 
+### Removed
+
+- **`vllm:num_preemptions_total` is no longer emitted.** It was set to `0` in the
+  simulator's `__init__` and never incremented anywhere, so every scrape carried a
+  permanent flat zero.
+
+  ⚠️ **Removing an emitted metric name is a breaking change by the table at the top of
+  this file**, which is why this bumps the MINOR while the version is `0.x`. **The real
+  blast radius is much smaller than that classification suggests, and worth stating
+  plainly:** nothing in this repo referenced the series — no panel, recording rule, alert,
+  promtool case or `verify.sh` check. **No alert behaviour changes anywhere, for anyone**,
+  because an alert on a permanently-zero counter could never have fired. The only
+  observable difference is that a panel bound to it stops reading a flat zero and reads no
+  data instead.
+
+  That difference is the point rather than a regression. A blank panel says "not
+  measured"; a flat zero says "no preemptions are happening", which is a claim, and a false
+  one — on a rig whose saturated tenant exists to show a server under pressure, and via
+  `ghcr.io/<owner>/vllm-metrics-sim` to people who cannot read the simulator to find out.
+  The standard is already written down in
+  [`manifests/llm/10-profiles.yaml`](manifests/llm/10-profiles.yaml): an invented number
+  presented as a modelled one is the failure that file's arithmetic exists to prevent.
+  Unlike the KV-cache ceiling — unreachable on the shipped profiles, and documented as such
+  in four places — nothing recorded that this one was a stub.
+
+  **Emitting it honestly would mean modelling KV pressure first, and there is none:**
+  `_admit()` gates on `max_concurrency` alone, so `kv_cache_usage()` peaks near 0.43 even
+  on the saturated profile. Preemption is what a real engine does when the KV cache runs
+  out. That is a feature rather than a fix for one counter, and it would touch the most
+  delicate code in the simulator, so it stays out until someone builds it.
+
+  **Not deprecated first, deliberately.** Deprecation would keep a false zero on people's
+  boards for a release cycle to be polite about it, which is the harm rather than a
+  gentler path to fixing it.
+
+  The metric is not lost so much as reclassified: `scripts/check-vllm-buckets.py` now lists
+  `vllm:num_preemptions` among the upstream metrics this simulator does not emit — a list
+  that grew from 22 to 23 — which is the honest backlog and where an unmodelled upstream
+  metric belongs.
+
+### Fixed
+
+- **Counts in the prose that the two changes above had invalidated**, plus two that had
+  been wrong for longer. Nothing here changes behaviour, and every one of them is a number
+  a reader checks this repo's credibility against.
+
+  Made stale by the SLO and the preemptions removal: `llm-simulation.md` described the LLM
+  rule file as "Recording rules + **four** alerts" (six); it and `versions.md` both said
+  the simulator emits **16** of upstream's names (15); `CONTRIBUTING.md` quoted the drift
+  check's gap list at **22** (23); `architecture.md` enumerated the LLM alerts without
+  either burn alert; the chart README and `verify.sh`'s own section header still read
+  `L1–L8` while that script's file header had already moved to `L1–L9`; and
+  `tests/README.md` listed the alerts the shipped workloads drive without
+  `LLMTTFTErrorBudgetFastBurn`, which `llm-saturated` drives at ~100x.
+
+  Wrong for longer, and surfaced by the same sweep: the README advertised **eight** PromQL
+  queries in `observability.md`, which has carried nine since `ALERTS{alertstate="firing"}`
+  was added, and `manifests/dashboards/README.md` said `dashboard-publish.py` repoints
+  **22** `${datasource}` references on the LLM board — true when that board had nine
+  panels, 33 now.
+
+  ⚠️ **25620 has fallen behind this repo in both of its artefacts**, now recorded in
+  `manifests/dashboards/README.md` rather than left to be discovered. Published revision 2
+  predates the burn-rate panel and the live catalog page predates the SLO section, so
+  importing by id today gets neither. That file has always warned that the catalog does not
+  update itself; this is the first time it has applied to a **panel** rather than to prose,
+  which is the case someone actually notices.
+
 ## [0.5.0] — 2026-08-01
 
 **This release finishes the sentence 0.4.0 started.** That one gave a cluster with its own

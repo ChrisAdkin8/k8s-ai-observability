@@ -241,7 +241,9 @@ Three delays stack up, and none of them is a fault:
   minutes. That is the window filling, not the simulator ramping: its queue sits at the
   160-request plateau from the very first scrape.
 - **Alert `for:` durations.** 1m to 5m depending on the rule, stacked on top of the above,
-  so `/alerts` stays quiet for longer than the boards stay wrong.
+  so `/alerts` stays quiet for longer than the boards stay wrong. The two TTFT burn-rate
+  alerts are the exception: they carry no `for:` at all, because their own 1h and 6h
+  windows already supply that smoothing.
 - **First scrape, first evaluation.** ServiceMonitors scrape every 15s and rules evaluate
   every 30s, so the earliest sample for a newly started pod lands 20-45s behind it.
 

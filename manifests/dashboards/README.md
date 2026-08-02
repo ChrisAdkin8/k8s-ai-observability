@@ -16,7 +16,7 @@ into place, and no egress to grafana.com is needed at install time.
 | Board | File | uid | grafana.com id | Covers |
 |-------|------|-----|--|--------|
 | GPU Simulation — DCGM Overview | `gpu-sim-dcgm.json` | `gpu-sim-dcgm` | [25618](https://grafana.com/grafana/dashboards/25618-gpu-simulation-dcgm-overview/) | GPU util / memory / temp / power |
-| LLM Simulation — vLLM Serving Overview | `llm-sim-overview.json` | `llm-sim-overview` | [25620](https://grafana.com/grafana/dashboards/25620-llm-simulation-vllm-serving-overview/) | First-token latency, throughput, queue depth, KV cache, prefix-cache reuse |
+| LLM Simulation — vLLM Serving Overview | `llm-sim-overview.json` | `llm-sim-overview` | [25620](https://grafana.com/grafana/dashboards/25620-llm-simulation-vllm-serving-overview/) | First-token latency and its error budget, throughput, queue depth, KV cache, prefix-cache reuse |
 
 **The filename is the uid.** `install.sh` derives the ConfigMap name from it
 (`<uid>-dashboard`), and `scripts/config.sh` builds the `/d/<uid>` deep link that
@@ -77,7 +77,7 @@ task dashboards          # or: python3 scripts/dashboard-publish.py
 ```
 
 That writes `dist/grafana-com/*.json`, adding `__inputs` and `__requires`, repointing every
-`${datasource}` reference at `${DS_PROMETHEUS}` — 22 of them on the LLM board — and
+`${datasource}` reference at `${DS_PROMETHEUS}` — 33 of them on the LLM board — and
 dropping the now-redundant variable. `dist/` is generated and gitignored, on the same
 terms as the ConfigMaps: one source of truth, several derived forms.
 
@@ -113,9 +113,9 @@ it is absolute and the derived-series caveat is stated in full rather than refer
 
 **`llm-sim-overview.json`** — *LLM Simulation — vLLM Serving Overview*
 
-> Time to first token, inter-token latency, throughput, queue depth, KV-cache usage and
-> prefix-cache reuse for vLLM, broken out `by (model_name)` so a saturated tenant is never
-> averaged into a healthy one. Uses the **V1** engine's metric names
+> Time to first token and its error budget, inter-token latency, throughput, queue depth,
+> KV-cache usage and prefix-cache reuse for vLLM, broken out `by (model_name)` so a
+> saturated tenant is never averaged into a healthy one. Uses the **V1** engine's metric names
 > (`vllm:kv_cache_usage_perc`, `vllm:inter_token_latency_seconds`,
 > `vllm:prefix_cache_hits_total`). Prompts for your Prometheus datasource on import.
 
@@ -147,8 +147,14 @@ first — so a merged panel reaches nobody who imported by id until it is upload
 Always re-submit as a **new revision of the existing id**, never as a new dashboard: a
 second upload mints a second id, and everyone who already imported the first silently
 stops receiving fixes. 25620 is on **revision 2** — the phase breakdown — uploaded
-2026-08-01; 25618 is still on revision 1 from 2026-07-31. Both boards' JSON is in step
-with the repo, and so is 25620's catalog page.
+2026-08-01; 25618 is still on revision 1 from 2026-07-31.
+
+⚠️ **25620 has since fallen behind this repo, in both artefacts.** Revision 2 predates the
+TTFT error-budget burn-rate panel, and the live catalog page predates the SLO section that
+explains it — so importing 25620 today gets a board with no burn-rate panel and a page that
+never mentions the objective. Re-upload `dist/grafana-com/llm-sim-overview.json` as
+revision 3 and re-paste [`llm-sim-overview.grafana-com.md`](llm-sim-overview.grafana-com.md)
+next time that board is touched. 25618's JSON is still in step.
 
 ⚠️ **25618's catalog page text is not**, and it is worth re-pasting from
 [`gpu-sim-dcgm.grafana-com.md`](gpu-sim-dcgm.grafana-com.md) next time that board is

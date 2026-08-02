@@ -112,7 +112,7 @@ The two directions are **not** treated alike, and the asymmetry is the point:
 | We emit a name upstream no longer declares | drift — the rename case that cost two releases | **1** |
 | Upstream declares a name we do not emit | a gap, printed in full | **0** |
 
-Upstream declares around 40 `vllm:` metrics and this simulator emits 16 of them, so the
+Upstream declares around 40 `vllm:` metrics and this simulator emits 15 of them, so the
 gap list is long by design. Reddening a weekly run for each metric vLLM adds would train
 everyone to ignore it; printing the list keeps the distance visible, which is the thing
 that was previously invisible. It is also the list to pick from when closing one.

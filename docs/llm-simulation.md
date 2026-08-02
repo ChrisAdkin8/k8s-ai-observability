@@ -193,7 +193,7 @@ python3 scripts/check-vllm-buckets.py
 That check watches the metric **set** as well, in both directions: a `vllm:` name this
 repo emits that upstream has dropped is drift and fails, while an upstream metric this
 simulator does not emit is printed as a gap and passes. The gap list is long on purpose —
-upstream declares around 40 series and this file emits 16 — and keeping it printed is what
+upstream declares around 40 series and this file emits 15 — and keeping it printed is what
 stops that distance from growing back silently. See
 [versions.md](versions.md#keeping-them-honest).
 

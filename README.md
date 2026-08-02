@@ -181,8 +181,8 @@ Grafana stays ClusterIP, so there is no load balancer, no ingress and no cost.
 port-forward and opens both:
 
 - <http://localhost:3000/d/gpu-sim-dcgm> for utilisation, memory, temperature and power
-- <http://localhost:3000/d/llm-sim-overview> for first-token latency, throughput, queue
-  depth, KV cache and prefix-cache reuse
+- <http://localhost:3000/d/llm-sim-overview> for first-token latency and its error budget,
+  throughput, queue depth, KV cache and prefix-cache reuse
 
 Viewing needs no login: anonymous access is `Viewer`-only. To edit, log in as `admin`; the
 script prints the generated password. Use `GRAFANA_PORT=3001` if 3000 is taken, and
@@ -251,8 +251,8 @@ you give up.
 | Document | Covers |
 |--|--|
 | [docs/architecture.md](docs/architecture.md) | how the pieces fit at runtime, what the stack deliberately omits, install ordering, every EKS↔GKE difference, and the naming invariant to read before editing |
-| [docs/observability.md](docs/observability.md) | where each metric comes from, reading the GPU board, eight PromQL queries that also work against real hardware, derived temperature and power, driving load |
-| [docs/llm-simulation.md](docs/llm-simulation.md) | the vLLM simulator, load profiles, LLM alerts |
+| [docs/observability.md](docs/observability.md) | where each metric comes from, reading the GPU board, nine PromQL queries that also work against real hardware, derived temperature and power, driving load |
+| [docs/llm-simulation.md](docs/llm-simulation.md) | the vLLM simulator, load profiles, LLM alerts and the TTFT error budget |
 | [docs/byo-prometheus.md](docs/byo-prometheus.md) | installing against a Prometheus you already run, and the two labels that fail silently |
 | [charts/k8s-ai-observability/](charts/k8s-ai-observability/README.md) | the Helm chart: the BYO story, the build step and why it exists, the two labels that fail silently, and where each invariant is caught |
 | [tests/](tests/) | the rule tests and the simulator selftest: what they cover and how to add one |

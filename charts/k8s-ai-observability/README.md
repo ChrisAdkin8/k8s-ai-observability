@@ -139,7 +139,7 @@ each row is enforced here, so the two cannot drift silently.
 | dashboard ConfigMaps carry the sidecar label | — | `helm test` | live |
 | a node carries the GPU pool label | `assert_kind_contract` / `assert_terraform_contract` | `helm test` | live |
 | `nvidia.com/gpu` is advertised | `verify.sh` check 1 | `helm test` | live |
-| the simulators serve the `vllm:` surface | `verify.sh` L1–L8 | `helm test` | live |
+| the simulators serve the `vllm:` surface | `verify.sh` L1–L9 | `helm test` | live |
 
 The **capacity** row is the one with no `install.sh` counterpart, and it is new hazard
 rather than an oversight there: the script path's profiles are static files, so nobody can

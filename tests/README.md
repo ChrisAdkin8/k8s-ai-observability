@@ -22,10 +22,11 @@ it waits out real `for:` durations.
 ## Why the rules are unit-tested at all
 
 `verify.sh` can only observe the alerts the shipped workloads happen to drive —
-`GPUHighUtilization` and `LLMHighTTFT` — and only from the firing side. It can never
-show that a threshold *doesn't* fire one notch below, that `LLMKVCacheSaturated` works
-at all (nothing on the rig reaches 90% KV cache), or that the derived temperature
-curve has the right coefficients.
+`GPUHighUtilization`, `LLMHighTTFT` and `LLMTTFTErrorBudgetFastBurn` — and only from the
+firing side. It can never show that a threshold *doesn't* fire one notch below, that
+`LLMKVCacheSaturated` works at all (nothing on the rig reaches 90% KV cache), that
+`LLMTTFTErrorBudgetSlowBurn` works at all (its 6h window never fills on a rig that lives
+minutes), or that the derived temperature curve has the right coefficients.
 
 That gap matters more here than it would elsewhere. This repo's premise is that you can
 validate GPU and LLM alerts cheaply; alert rules it does not itself test would be an odd
@@ -141,7 +142,7 @@ docker run --rm --platform linux/amd64 -v "$PWD":/w -w /w \
 Expectations currently verified green on both: `0.09`, `0.099`, `0.0998`, `0.9875`,
 `0.02425`, `4.875`, `78`.
 
-Two families of expectation are deliberately **not** in that list, because nothing can put
+Three families of expectation are deliberately **not** in that list, because nothing can put
 them at risk:
 
 - **the prefix-cache ratios** (`0.5`, `0.25`, `0`) — the counters feeding them are in
@@ -150,6 +151,10 @@ them at risk:
 - **the request-phase means** (`2`, `0.5`, `4`, `6.5`, `16`, `20.5`, `0`) — `_sum / _count`
   involves no interpolation at all, so `histogram_quantile`'s ULP divergence simply does
   not arise. The test file says so inline, or the next person adds a pointless caveat to it.
+- **the TTFT SLO ratios** (`0`, `1`, `0.875`, `0.1`) — a single bucket count over `_count`,
+  taken *at* a boundary rather than interpolated inside one. Numerator and denominator come
+  from the same histogram on the same target, so `rate()`'s extrapolation is common to both
+  and cancels, exactly as it does for the prefix-cache ratios.
 
 Where you can choose the shape of a test, choose one of those — the caution above applies
 only to an interpolated percentile. That is also why the breakdown panel is built from

@@ -85,7 +85,7 @@ are listed here because none of them is discoverable until it happens to you.
   itself. If you touch anything under `vllm:`, the question is not "do the tests pass" but
   "does this match a real deployment". `scripts/check-vllm-buckets.py` is the only thing
   here that points upstream — it watches the metric *set* as well as the bucket
-  boundaries, and prints the upstream metrics this simulator does not emit — 22 at the
+  boundaries, and prints the upstream metrics this simulator does not emit — 23 at the
   last check — so that distance stays visible rather than silent.
 - **A promtool expected percentile can be architecture-dependent.** `histogram_quantile`
   returned `2.4250000000000003` on arm64 and `2.425` on amd64 for the same input; promtool
