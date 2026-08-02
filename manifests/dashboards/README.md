@@ -167,11 +167,26 @@ reader would copy — the per-pod attribution query lost the `)` after `gpu`, an
 rather than the paste-ready text above. That field is what the catalog search results show.
 
 A logo each, 512×512, is in [`docs/logos/`](../../docs/logos/) — `gpu-sim-dcgm.png` and
-`llm-sim-overview.png`, named for the boards they belong to. They are **generated**, not
-drawn: `python3 docs/dashboard-logos.py` re-renders both from
-[`docs/dashboard-logos.py`](../../docs/dashboard-logos.py), so the pair cannot drift into
+`llm-sim-overview.png`, named for the boards they belong to, plus `org-chrisadkin.png` for
+the **organisation** rather than a board. All three are **generated**, not drawn:
+`python3 docs/dashboard-logos.py` re-renders them from
+[`docs/dashboard-logos.py`](../../docs/dashboard-logos.py), so the set cannot drift into
 mismatched marks and a tweak is a diff rather than a re-export. Needs `pillow`, like the
 other two image scripts in `docs/`.
+
+⚠️ **The org logo is uploaded somewhere else** — grafana.com → your organisation →
+settings, not the dashboard upload form. It is deliberately not a third board mark: the
+two board logos are a die and a panel frame, and the org mark is those two fused, a die
+with the serving signal running through it, so it reads as the thing they came from rather
+than as a sibling on the same page.
+
+Three constraints govern all three marks, and they are not stylistic. **A dark tile rather
+than transparency**, because grafana.com renders light and dark and a transparent mark in
+dark strokes disappears on one of them. **No text**, because a wordmark turns to mud at
+listing size and the catalog prints the name beside the logo anyway. **Nothing thinner than
+0.03 of the canvas**, so no element drops below ~2px when it is scaled down. The generator's
+header has the full reasoning, including which colour choices were legibility fixes rather
+than preferences.
 
 You get a numeric dashboard id back — **put it in the table at the top of this file**, and
 in the README, so the published board and this repo stay connected.
