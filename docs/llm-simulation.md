@@ -40,7 +40,7 @@ cluster, exactly as `gpu-busy` keeps `GPUHighUtilization` firing on the GPU side
 | `llm-driven` | `llm-sim` | **Opt-in.** Target for `drive-llm-load.sh`; not installed by default |
 | `llm-sim` Service | `llm-sim` | One ClusterIP Service in front of all simulator pods |
 | `llm-sim` ServiceMonitor | `monitoring` | Tells Prometheus to scrape them every 15s |
-| `llm-simulation-alerts` | `monitoring` | Recording rules + four alerts |
+| `llm-simulation-alerts` | `monitoring` | Recording rules + six alerts |
 | `llm-sim-overview-dashboard` | `monitoring` | The Grafana board, generated from `manifests/dashboards/llm-sim-overview.json` and loaded by the sidecar |
 
 The simulator itself is [`scripts/llm-sim.py`](../scripts/llm-sim.py) — one standard-library
@@ -230,6 +230,11 @@ Their denominators clamp at `1e-9` rather than at `1`, exactly as
 one request per second, and flooring at 1 would silently under-report the mean of precisely
 the deployments least likely to notice. An idle tenant reads `0`, not `NaN`.
 
+Four more record the TTFT **service-level indicator**, `llm:ttft:slo_ratio5m` / `30m` /
+`1h` / `6h`, and clamp the same way for the same reason. They are a ratio at a bucket
+boundary rather than a percentile, which is the whole of their design — see
+[The TTFT error budget](#the-ttft-error-budget).
+
 `llm:tokens_per_watt:5m` is the exception on both counts. It is **cluster-aggregate** — a bare
 `sum()` over every tenant, with no `by (model_name)` — and it is *derived from derived*: the
 wattage in its denominator does not exist at source either, being synthesised from GPU
@@ -377,6 +382,26 @@ series and a zero one are different things to a panel.
 | `LLMQueueBacklog` | > 50 requests queued for 5m | **Yes** — same |
 | `LLMKVCacheSaturated` | KV cache > 90% for 5m | No — lower `kv_cache_tokens_capacity` in a profile to test |
 | `LLMMetricsAbsent` | No serving metrics for 5m | No — `kubectl -n llm-sim scale deploy/llm-steady --replicas=0` to test |
+| `LLMTTFTErrorBudgetFastBurn` | > 14.4x burn on the 1h **and** 5m windows | **Yes** — `llm-saturated` burns at ~100x |
+| `LLMTTFTErrorBudgetSlowBurn` | > 6x burn on the 6h **and** 30m windows | No — the 6h window never fills on a rig that lives minutes |
+
+### The TTFT error budget
+
+The two burn alerts sit over an objective — **99% of requests reach a first token within
+2.5s** — recorded as `llm:ttft:slo_ratio5m` / `30m` / `1h` / `6h`. It is deliberately a
+**ratio at a bucket boundary rather than a percentile**, which is why it carries none of
+the bucket caveats the rest of this page is full of: `histogram_quantile` interpolates
+*inside* a bucket, and a ratio taken *at* a boundary does not interpolate at all.
+
+⚠️ **2.5 is a real member of `TTFT_BUCKETS`, and 2.0 is not** — the list steps
+`… 1.0, 2.5, 5.0 …`. `le="2"` matches nothing and both alerts then stay green forever. The
+same reason the objective is not set at the 2s `LLMHighTTFT` threshold, which is an
+interpolated percentile and a different instrument.
+
+The full argument, and the four limits that come with it — what to do when the threshold
+you want is not a boundary, the condition under which "exact" holds, what a stall does to
+a latency objective, and the unexercised 6h window — is on the
+[catalog page](../manifests/dashboards/llm-sim-overview.grafana-com.md).
 
 Watch one reach `firing`:
 

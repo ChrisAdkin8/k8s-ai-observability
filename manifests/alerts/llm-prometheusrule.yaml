@@ -202,6 +202,81 @@ spec:
             / sum(DCGM_FI_DEV_POWER_USAGE)
           labels: { source: simulated }
 
+        # ---- the TTFT service-level indicator -------------------------------
+        #
+        # THE SLI IS A RATIO AT A BUCKET BOUNDARY, NOT A PERCENTILE, and that is
+        # the whole design. Everywhere else in this file a quantile carries a
+        # caveat: prefill reads 3.03x high, e2e 1.71x under saturation, ITL 1.08x
+        # — all of it because histogram_quantile INTERPOLATES INSIDE a bucket.
+        #
+        # A ratio evaluated AT a boundary does no interpolation and carries no
+        # bucket-width dependence, so none of those caveats apply to it. The
+        # bucket layout is therefore not an obstacle to an SLO; it is the
+        # constraint that says how to build one: the threshold must BE a boundary.
+        #
+        # ⚠️ THE BOUNDARY IS 2.5, AND `le="2.5"` IS NOT A FREE CHOICE OF SPELLING.
+        # TTFT_BUCKETS (scripts/llm-sim.py) steps ... 1.0, 2.5, 5.0 ... — there is
+        # NO 2.0 bucket. `le="2"` matches nothing, the ratio evaluates to nothing,
+        # and the burn-rate alerts below never fire: green forever on a rule that
+        # reads correctly. Same failure genre as `> 90` where `> 0.9` was meant.
+        # If you change the boundary it must be a member of that list, and the
+        # promtool cases in tests/rules/llm-rules_test.yaml must move with it.
+        #
+        # ⚠️ NOT 1.0, though it is also a real boundary: the steady tenant measures
+        # 99.368% there against a 99% target — 0.37 points of headroom, which
+        # ordinary jitter crosses. The healthy tenant would report a blown budget
+        # at random. At 2.5 it measures 100% and the saturated one 0.32%.
+        #
+        # ⚠️ "Exact" has a CONDITION. It holds because numerator and denominator
+        # are the same histogram, on the same target, at the same scrape
+        # timestamps, so rate()'s extrapolation factor is common to both and
+        # cancels. Across replicas whose scrapes are out of phase it does not.
+        # One pod per model here; see the catalog page before running four.
+        #
+        # ⚠️ Each rule uses ITS OWN window in BOTH range vectors. A slo_ratio6h
+        # built on [5m] returns a plausible number — the 5m ratio under a 6h name
+        # — so every threshold test still passes while the slow-burn alert
+        # watches the wrong window. Asserted in the promtool cases.
+        #
+        # clamp_min at an EPSILON, not at 1, for the reason given above for the
+        # prefix-cache denominator: flooring a rate at 1 under-reports exactly the
+        # low-traffic deployments least likely to notice. An idle tenant reads
+        # 0/1e-9 = 0 rather than NaN — which the alerts below must then guard for.
+        - record: llm:ttft:slo_ratio5m
+          expr: >-
+            sum by (model_name) (rate(vllm:time_to_first_token_seconds_bucket{le="2.5"}[5m]))
+            / clamp_min(sum by (model_name)
+                (rate(vllm:time_to_first_token_seconds_count[5m])), 1e-9)
+          labels: { source: simulated }
+
+        - record: llm:ttft:slo_ratio30m
+          expr: >-
+            sum by (model_name) (rate(vllm:time_to_first_token_seconds_bucket{le="2.5"}[30m]))
+            / clamp_min(sum by (model_name)
+                (rate(vllm:time_to_first_token_seconds_count[30m])), 1e-9)
+          labels: { source: simulated }
+
+        - record: llm:ttft:slo_ratio1h
+          expr: >-
+            sum by (model_name) (rate(vllm:time_to_first_token_seconds_bucket{le="2.5"}[1h]))
+            / clamp_min(sum by (model_name)
+                (rate(vllm:time_to_first_token_seconds_count[1h])), 1e-9)
+          labels: { source: simulated }
+
+        # ⚠️ NOT EXERCISED ON THIS RIG. A kind cluster lives minutes; this window
+        # needs six hours, so it never fills here and the slow-burn alert below
+        # cannot be watched moving. Same situation as LLMKVCacheSaturated, and
+        # handled the same way: the promtool cases synthesise six hours in about a
+        # second, with no cluster. To watch it on the rig, shorten both windows in
+        # a fork of this rule — do not shorten them here, or the burn multipliers
+        # stop meaning what the alert annotations say they mean.
+        - record: llm:ttft:slo_ratio6h
+          expr: >-
+            sum by (model_name) (rate(vllm:time_to_first_token_seconds_bucket{le="2.5"}[6h]))
+            / clamp_min(sum by (model_name)
+                (rate(vllm:time_to_first_token_seconds_count[6h])), 1e-9)
+          labels: { source: simulated }
+
     # ---- alerts ---------------------------------------------------------
     - name: llm.simulation.rules
       rules:
@@ -263,3 +338,91 @@ spec:
             description: >-
               vllm:num_requests_running absent for 5m — is the llm-sim
               ServiceMonitor matching, and are the simulator pods Running?
+
+        # ---- error-budget burn, over the SLI recorded above -----------------
+        #
+        # THE OBJECTIVE: 99% of requests reach a first token within 2.5s, over 30
+        # days. Two alerts, the standard fast/slow pair.
+        #
+        # ⚠️ THE 30d BUDGET APPEARS IN NO QUERY. It fixes what 14.4 and 6 MEAN —
+        # burning at 14.4x for 1h consumes 2% of a 30-day budget, and at 6x for 6h
+        # consumes 5% — but nothing here computes over 30 days, and this rig has
+        # minutes of data. Do not go looking for a 30d window.
+        #
+        # ⚠️ BOTH WINDOWS MUST BREACH. That is what makes a single spike not a
+        # page: the long window says the budget is genuinely burning, the short
+        # one says it is still burning NOW rather than hours ago.
+        #
+        # ⚠️ THE TARGET IS SPELLED THREE WAYS AND PromQL CANNOT FACTOR IT OUT:
+        # once in the prose above, once as the `0.01` divisor below, and once
+        # inside 14.4/6, which mean what they mean only against a 1% budget. The
+        # division is removable — `(1 - ratio) / 0.01 > 14.4` is algebraically
+        # `(1 - ratio) > 0.144` — but burn rate is the quantity operators reason
+        # about and the term the SRE literature uses, so it stays. WHAT HOLDS THE
+        # THREE SPELLINGS TOGETHER IS A TEST: llm-rules_test.yaml pins the
+        # effective threshold either side of an error ratio of 0.144, so a divisor
+        # and a multiplier drifting apart fails there however either is written.
+        #
+        # ⚠️ NO `for:` ON EITHER, AND THAT IS A DECISION, NOT AN OMISSION. Every
+        # other alert in this file carries one. Here the long window already
+        # provides exactly the smoothing a `for:` would add, and stacking both
+        # would delay a genuine fast burn by the `for:` on top of an hour of
+        # averaging. Do not "fix" this by adding one.
+        #
+        # ⚠️ THE TRAFFIC GUARD IS NOT OPTIONAL, AND ITS WINDOW IS PER-ALERT.
+        # With no traffic the clamp above gives 0/1e-9 = 0, so the error ratio is
+        # 1.0 and burn pins at 100x: WITHOUT THE GUARD THESE FIRE HARDEST ON A
+        # TENANT SERVING NOTHING AT ALL. The guard window must match the alert's
+        # own SHORT window — 5m here, 30m on the slow one. A 5m guard on the slow
+        # alert would silence a tenant that burned budget for hours and went idle
+        # ten minutes ago, which is a safety check disabling the alarm.
+        #
+        # ⚠️ `on (model_name)` IS LOAD-BEARING. The recorded ratios carry
+        # source="simulated"; the raw vllm: counter does not. A plain `and`
+        # matches on ALL labels, finds nothing, and silently suppresses the alert.
+        # Same mismatch documented for llm:e2e:mean5m above — though note `and`
+        # takes its result labels from the LEFT, so unlike the division case there
+        # `source` survives and nothing needs recovering.
+        #
+        # ⚠️ WHAT THIS OBJECTIVE DOES NOT COVER: requests that never reach a first
+        # token contribute no observation at all, so a total stall is SILENT here
+        # — and the guard then suppresses these alerts by design. LLMQueueBacklog
+        # is what fires when requests arrive and never complete; LLMMetricsAbsent
+        # when the series stop entirely. This is a latency objective, not an
+        # availability one.
+        #
+        # NOT EXERCISED BY DEFAULT on the slow alert: its 6h window never fills on
+        # this rig. Both are covered on both sides in llm-rules_test.yaml.
+        - alert: LLMTTFTErrorBudgetFastBurn
+          expr: >-
+            (1 - llm:ttft:slo_ratio1h) / 0.01 > 14.4
+            and
+            (1 - llm:ttft:slo_ratio5m) / 0.01 > 14.4
+            and on (model_name)
+            (sum by (model_name)
+              (rate(vllm:time_to_first_token_seconds_count[5m])) > 0)
+          labels:
+            severity: critical
+          annotations:
+            summary: "Model {{ $labels.model_name }} is burning TTFT error budget fast"
+            description: >-
+              Over 14.4x burn on both the 1h and 5m windows — at this rate 2% of
+              the 30d budget for "99% of requests reach a first token within
+              2.5s" goes in an hour ({{ $value | printf "%.1f" }}x).
+
+        - alert: LLMTTFTErrorBudgetSlowBurn
+          expr: >-
+            (1 - llm:ttft:slo_ratio6h) / 0.01 > 6
+            and
+            (1 - llm:ttft:slo_ratio30m) / 0.01 > 6
+            and on (model_name)
+            (sum by (model_name)
+              (rate(vllm:time_to_first_token_seconds_count[30m])) > 0)
+          labels:
+            severity: warning
+          annotations:
+            summary: "Model {{ $labels.model_name }} is burning TTFT error budget"
+            description: >-
+              Over 6x burn on both the 6h and 30m windows — at this rate 5% of the
+              30d budget for "99% of requests reach a first token within 2.5s"
+              goes in six hours ({{ $value | printf "%.1f" }}x).

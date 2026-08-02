@@ -10,7 +10,7 @@
     "vllm",
     "simulation"
   ],
-  "title": "LLM Simulation — vLLM Serving Overview",
+  "title": "LLM Simulation \u2014 vLLM Serving Overview",
   "uid": "llm-sim-overview",
   "time": {
     "from": "now-15m",
@@ -51,7 +51,7 @@
     {
       "id": 1,
       "type": "timeseries",
-      "title": "Time to first token — p95 (alert fires above 2s)",
+      "title": "Time to first token \u2014 p95 (alert fires above 2s)",
       "description": "The healthy tenant sits below the red line; the saturated one sits above it. That gap is the whole demonstration: same code, same dashboard, one tenant degraded.",
       "gridPos": {
         "h": 9,
@@ -111,7 +111,7 @@
     {
       "id": 4,
       "type": "timeseries",
-      "title": "Inter-token latency — p95",
+      "title": "Inter-token latency \u2014 p95",
       "description": "vllm:inter_token_latency_seconds. Degrades mildly with concurrency, unlike TTFT which is dominated by queueing. NOTE: p95 here reads high because of bucket resolution, not load. A full batch models ITL at 22.5ms, which falls inside the wide (10ms, 25ms] bucket, so histogram_quantile interpolates across a 15ms gap and reports ~24ms. Real vLLM uses the same bucket boundaries, so do not set an ITL SLO from this number.",
       "gridPos": {
         "h": 9,
@@ -145,8 +145,8 @@
     {
       "id": 2,
       "type": "timeseries",
-      "title": "Requests running vs waiting — $model",
-      "description": "One panel per model (repeats on $model), because the two tenants operate at very different scales and a shared panel hides that. Waiting is on the RIGHT axis: a saturated tenant queues ~160 against a running batch of 16, and on one axis the running series flattens to nothing. Waiting plateaus at max_in_flight - max_concurrency; a healthy tenant should sit near zero. If both tenants pin at the same numbers, arrival exceeds capacity for both — compare arrival_rate_rps against llmsim_capacity_rps.",
+      "title": "Requests running vs waiting \u2014 $model",
+      "description": "One panel per model (repeats on $model), because the two tenants operate at very different scales and a shared panel hides that. Waiting is on the RIGHT axis: a saturated tenant queues ~160 against a running batch of 16, and on one axis the running series flattens to nothing. Waiting plateaus at max_in_flight - max_concurrency; a healthy tenant should sit near zero. If both tenants pin at the same numbers, arrival exceeds capacity for both \u2014 compare arrival_rate_rps against llmsim_capacity_rps.",
       "gridPos": {
         "h": 9,
         "w": 12,
@@ -305,8 +305,8 @@
     {
       "id": 8,
       "type": "timeseries",
-      "title": "Cross-domain — generated tokens per GPU watt (cluster-wide)",
-      "description": "⚠️ These two signals are driven INDEPENDENTLY. Nothing in this rig makes GPU utilisation follow LLM load: GPU load comes from the pod annotations on the gpu-* workloads, LLM load from the simulator profiles. This panel demonstrates the query pattern and dashboard wiring across two metric families — it does NOT show causation. Note the denominator is itself a derived series (DCGM_FI_DEV_POWER_USAGE is synthesised from utilisation by gpu-prometheusrule.yaml).",
+      "title": "Cross-domain \u2014 generated tokens per GPU watt (cluster-wide)",
+      "description": "\u26a0\ufe0f These two signals are driven INDEPENDENTLY. Nothing in this rig makes GPU utilisation follow LLM load: GPU load comes from the pod annotations on the gpu-* workloads, LLM load from the simulator profiles. This panel demonstrates the query pattern and dashboard wiring across two metric families \u2014 it does NOT show causation. Note the denominator is itself a derived series (DCGM_FI_DEV_POWER_USAGE is synthesised from utilisation by gpu-prometheusrule.yaml).",
       "gridPos": {
         "h": 8,
         "w": 12,
@@ -340,7 +340,7 @@
       "id": 5,
       "type": "timeseries",
       "title": "KV cache utilisation",
-      "description": "vllm:kv_cache_usage_perc — active request tokens over kv_cache_tokens_capacity from the load profile.",
+      "description": "vllm:kv_cache_usage_perc \u2014 active request tokens over kv_cache_tokens_capacity from the load profile.",
       "gridPos": {
         "h": 8,
         "w": 8,
@@ -375,7 +375,7 @@
       "id": 6,
       "type": "timeseries",
       "title": "Request outcomes by finish reason",
-      "description": "vllm:request_success_total. Rejections (arrivals refused because max_in_flight was reached) are counted separately as llmsim_requests_rejected_total — a rejected request never ran, so it is not a vLLM 'success' of any reason.",
+      "description": "vllm:request_success_total. Rejections (arrivals refused because max_in_flight was reached) are counted separately as llmsim_requests_rejected_total \u2014 a rejected request never ran, so it is not a vLLM 'success' of any reason.",
       "gridPos": {
         "h": 8,
         "w": 8,
@@ -418,7 +418,7 @@
       "id": 7,
       "type": "stat",
       "title": "Profile generation",
-      "description": "Increments each time a simulator successfully reloads its load profile. This is how you confirm a drive-llm-load.sh edit actually landed — ConfigMap updates take up to ~60s to reach the pod. If it never moves after an edit, the profile is mounted with subPath (which kubelet never updates).",
+      "description": "Increments each time a simulator successfully reloads its load profile. This is how you confirm a drive-llm-load.sh edit actually landed \u2014 ConfigMap updates take up to ~60s to reach the pod. If it never moves after an edit, the profile is mounted with subPath (which kubelet never updates).",
       "gridPos": {
         "h": 8,
         "w": 8,
@@ -459,7 +459,7 @@
       "id": 10,
       "type": "timeseries",
       "title": "Prefix cache hit ratio",
-      "description": "rate(vllm:prefix_cache_hits_total) / rate(vllm:prefix_cache_queries_total) — the fraction of queried prompt tokens served from the prefix cache. Both counters are in TOKENS, so plot the ratio: on its own either counter mostly tracks traffic. On this rig the rates are set per profile and are decoupled from latency by construction — a hit here shortens nothing, because prefill is flat rather than token-proportional. Against a real deployment this is the query that replaces the superseded vllm:gpu_prefix_cache_hit_rate gauge.",
+      "description": "rate(vllm:prefix_cache_hits_total) / rate(vllm:prefix_cache_queries_total) \u2014 the fraction of queried prompt tokens served from the prefix cache. Both counters are in TOKENS, so plot the ratio: on its own either counter mostly tracks traffic. On this rig the rates are set per profile and are decoupled from latency by construction \u2014 a hit here shortens nothing, because prefill is flat rather than token-proportional. Against a real deployment this is the query that replaces the superseded vllm:gpu_prefix_cache_hit_rate gauge.",
       "gridPos": {
         "h": 8,
         "w": 12,
@@ -491,10 +491,66 @@
       ]
     },
     {
+      "id": 13,
+      "type": "timeseries",
+      "title": "TTFT error-budget burn rate (1h)",
+      "description": "(1 - llm:ttft:slo_ratio1h) / 0.01 \u2014 how fast the error budget for \"99% of requests reach a first token within 2.5s\" is being spent. 1x is exactly the rate that consumes the whole 30d budget in 30 days; the lines are the two alert thresholds, 6x (slow burn) and 14.4x (fast burn).\n\nThe SLI is a RATIO AT A BUCKET BOUNDARY, not a percentile, which is why it carries none of the bucket caveats the latency panels do: histogram_quantile interpolates inside a bucket and a ratio taken at a boundary does not interpolate at all. 2.5 is a real member of TTFT_BUCKETS; le=\"2\" would match nothing and the alerts would never fire.\n\nExpect this panel to look binary on the shipped profiles \u2014 steady sits at 0 and saturated is pinned near 100x, with nothing in between, because neither tenant occupies the partial-burn region where two-window alerting earns its keep. That is an accurate picture of these two profiles rather than a fault.\n\nA total stall reads as healthy here: requests that never reach a first token contribute no observation, and the alerts carry a traffic guard. LLMQueueBacklog covers that case.",
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 34
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "none",
+          "min": 0,
+          "custom": {
+            "thresholdsStyle": {
+              "mode": "line"
+            }
+          },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "orange",
+                "value": 6
+              },
+              {
+                "color": "red",
+                "value": 14.4
+              }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "expr": "(1 - llm:ttft:slo_ratio1h{model_name=~\"$model\"}) / 0.01",
+          "legendFormat": "{{model_name}}",
+          "refId": "A"
+        }
+      ]
+    },
+    {
       "id": 9,
       "type": "table",
       "title": "Simulated GPU attribution",
-      "description": "Which simulated GPU each simulator pod holds. The pod knows only the device plugin's allocation id (device_id, from MOCK_NVIDIA_VISIBLE_DEVICES — injected by Allocate(), not a webhook), which is NOT the GPU's DCGM UUID and never matches one. So this joins on the pod instead: the exporter labels each allocated GPU with its consumer, and Prometheus renames those to exported_* because target labels win the collision. Columns UUID and gpu therefore come from the DCGM side and are the real thing. Only pods that request nvidia.com/gpu appear — llm-saturated deliberately runs unbound, so its absence here is expected.",
+      "description": "Which simulated GPU each simulator pod holds. The pod knows only the device plugin's allocation id (device_id, from MOCK_NVIDIA_VISIBLE_DEVICES \u2014 injected by Allocate(), not a webhook), which is NOT the GPU's DCGM UUID and never matches one. So this joins on the pod instead: the exporter labels each allocated GPU with its consumer, and Prometheus renames those to exported_* because target labels win the collision. Columns UUID and gpu therefore come from the DCGM side and are the real thing. Only pods that request nvidia.com/gpu appear \u2014 llm-saturated deliberately runs unbound, so its absence here is expected.",
       "gridPos": {
         "h": 8,
         "w": 24,
@@ -524,8 +580,8 @@
     {
       "id": 11,
       "type": "timeseries",
-      "title": "Request phase breakdown — where the time went — $model",
-      "description": "MEANS, not percentiles, and both reasons are measured. (1) Quantiles are not additive: on the steady tenant p95 queue+prefill+decode = 7.473s against a p95 e2e of 7.468s, while the means sum to 5.101s against a mean e2e of 5.101s exactly. A stacked breakdown whose segments do not sum to the total reads as a bug in the rig. (2) A histogram mean has no bucket dependence at all — _sum and _count are exact — whereas p95 prefill is overstated ~3x here because base_ttft_seconds is 0.08s and the first bucket boundary is 0.3s. ⚠️ That second effect TRANSFERS to real vLLM: these boundaries are upstream's, so a real deployment with sub-300ms prefill reads just as high. Do not build a prefill SLO on a p95 from these buckets. Stacked, and one panel per model (repeats on $model), because the stack is only meaningful within a tenant — summing queue across tenants describes nothing.",
+      "title": "Request phase breakdown \u2014 where the time went \u2014 $model",
+      "description": "MEANS, not percentiles, and both reasons are measured. (1) Quantiles are not additive: on the steady tenant p95 queue+prefill+decode = 7.473s against a p95 e2e of 7.468s, while the means sum to 5.101s against a mean e2e of 5.101s exactly. A stacked breakdown whose segments do not sum to the total reads as a bug in the rig. (2) A histogram mean has no bucket dependence at all \u2014 _sum and _count are exact \u2014 whereas p95 prefill is overstated ~3x here because base_ttft_seconds is 0.08s and the first bucket boundary is 0.3s. \u26a0\ufe0f That second effect TRANSFERS to real vLLM: these boundaries are upstream's, so a real deployment with sub-300ms prefill reads just as high. Do not build a prefill SLO on a p95 from these buckets. Stacked, and one panel per model (repeats on $model), because the stack is only meaningful within a tenant \u2014 summing queue across tenants describes nothing.",
       "gridPos": {
         "h": 9,
         "w": 12,
@@ -695,8 +751,8 @@
     {
       "id": 12,
       "type": "timeseries",
-      "title": "Decode latency — p95",
-      "description": "The ONE phase these buckets resolve tolerably: measured 1.26x overstated on the steady tenant and 1.12x on the saturated one. There is deliberately no prefill p95 panel (3.03x — every observation lands in the first bucket) and no e2e p95 panel (1.71x under saturation, the worst of the three, on the tenant this board exists to show). Use the breakdown to the left for those; a mean carries no bucket dependence. Read alongside the inter-token latency caveat — same cause, same transfer to real vLLM.",
+      "title": "Decode latency \u2014 p95",
+      "description": "The ONE phase these buckets resolve tolerably: measured 1.26x overstated on the steady tenant and 1.12x on the saturated one. There is deliberately no prefill p95 panel (3.03x \u2014 every observation lands in the first bucket) and no e2e p95 panel (1.71x under saturation, the worst of the three, on the tenant this board exists to show). Use the breakdown to the left for those; a mean carries no bucket dependence. Read alongside the inter-token latency caveat \u2014 same cause, same transfer to real vLLM.",
       "gridPos": {
         "h": 9,
         "w": 12,

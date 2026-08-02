@@ -23,6 +23,49 @@ Comparison links are at the foot of this file, one per released version.
 
 ## [Unreleased]
 
+### Added
+
+- **A TTFT service-level objective, expressed as a ratio at a bucket boundary rather than
+  a percentile** — `llm:ttft:slo_ratio5m` / `30m` / `1h` / `6h`, with the standard
+  fast/slow burn-rate pair over them (`LLMTTFTErrorBudgetFastBurn`,
+  `LLMTTFTErrorBudgetSlowBurn`) and a burn-rate panel on the LLM board.
+
+  **This finishes an argument the repo had only half of.** Three separate places told you
+  *not* to build an SLO on a percentile here — not on prefill p95 (3.03x overstated), not
+  on ITL p95, not on the 2s threshold — and none said what to do instead. The resolution
+  is that every one of those caveats is a property of `histogram_quantile` interpolating
+  *inside* a bucket. A ratio evaluated *at* a boundary does not interpolate at all, so it
+  inherits none of them. The bucket layout was never an obstacle to an SLO; it is the
+  constraint that says how to build one, and the objective is **99% of requests reach a
+  first token within 2.5s**.
+
+  ⚠️ **2.5 rather than the existing alert's 2s, because `TTFT_BUCKETS` has no 2.0
+  boundary** — it steps `1.0, 2.5, 5.0`. `le="2"` matches nothing, the ratio records
+  empty, and both burn alerts stay green forever on rules that read correctly. Not 1.0
+  either: the steady tenant measures 99.368% there, 0.37 points of headroom against a 99%
+  target, so jitter alone would have the *healthy* tenant reporting a blown budget. At 2.5
+  it measures 100% and the saturated tenant 0.32%.
+
+  **`LLMHighTTFT` is untouched and stays at 2s.** The two are different instruments — one
+  an interpolated percentile that separates the shipped tenants, one a boundary that makes
+  a ratio exact — and reconciling them would re-derive the profile arithmetic, `verify.sh`
+  L3b's headroom and every existing promtool expectation. Nothing existing moved.
+
+  **Four limits ship with it**, on the catalog page rather than buried here: your threshold
+  is constrained to the boundaries you have; "exact" holds only because numerator and
+  denominator share a target and scrape timestamps; a total stall reads as *healthy*
+  because a request that never reaches a first token contributes no observation, so this is
+  a latency objective and not an availability one; and the 6h window never fills on a rig
+  that lives minutes.
+
+  **Upgrading needs no action** beyond re-running `install.sh` to apply the rules. The
+  alerts carry **no `for:`** — a deliberate break from the other seven alerts here, since
+  the long window already provides that smoothing — and a traffic guard whose window
+  matches each alert's own short window, without which an idle tenant reads `0/1e-9 = 0`
+  and both fire hardest on a model serving nothing at all. `verify.sh` gains **L9**,
+  asserting the four ratios record against a live Prometheus, which is the only place a
+  boundary that does not exist in your exposition shows up.
+
 ### Changed
 
 - **`What you get` tightened from 53 lines to 47**, by cutting justification the repo

@@ -1,6 +1,6 @@
 # LLM Simulation - vLLM Serving Overview
 
-Time to first token, inter-token latency, throughput, queue depth, KV-cache usage and prefix-cache reuse for vLLM - every panel broken out `by (model_name)`, so a saturated tenant is never averaged into a healthy one.
+Time to first token and its error budget, inter-token latency, throughput, queue depth, KV-cache usage and prefix-cache reuse for vLLM - every panel broken out `by (model_name)`, so a saturated tenant is never averaged into a healthy one.
 
 Built for a **simulated** vLLM fleet - it ships with [k8s-ai-observability](https://github.com/ChrisAdkin8/k8s-ai-observability), a rig that stands up GPU and LLM observability with no GPU and no model weights - but the queries are plain vLLM PromQL against the **V1** metric surface. Build the board and its alerts here, point them at a real deployment afterwards.
 
@@ -22,6 +22,7 @@ The first panel is the whole design: two tenants either side of the 2s alert thr
 | Simulated GPU attribution | `llmsim_gpu_binding_info` joined to `DCGM_FI_DEV_GPU_UTIL` | simulator-only |
 | Request phase breakdown | `llm:queue:mean5m`, `llm:prefill:mean5m`, `llm:decode:mean5m`, `llm:e2e:mean5m` | **repeats per model**, stacked; **means, not percentiles** - read the caveat below |
 | Decode latency - p95 | `llm:decode:p95_5m` | the only phase these buckets resolve; there is deliberately no prefill or e2e p95 |
+| TTFT error-budget burn rate | `llm:ttft:slo_ratio1h` | **the SLO panel** - a ratio at a bucket boundary, not a percentile - see below |
 
 **Running vs waiting repeats per model rather than sharing one panel**, because the two tenants operate at different scales: a saturated tenant queues ~160 against a running batch of 16, and on one shared axis the running series flattens to nothing. Waiting is on the right axis for the same reason. A healthy tenant should sit near zero waiting; a plateau means arrival has exceeded capacity.
 
@@ -29,12 +30,12 @@ The first panel is the whole design: two tenants either side of the 2s alert thr
 
 ## What it needs - read this before importing
 
-Unlike a pure `vllm:*` board, **seven panels read recording rules rather than raw series**, and two more read simulator-only metrics. Import without them and you get an empty board and no explanation.
+Unlike a pure `vllm:*` board, **eight panels read recording rules rather than raw series**, and two more read simulator-only metrics. Import without them and you get an empty board and no explanation.
 
 | Tier | Series | Against real vLLM |
 |--|--|--|
 | vLLM V1 | `vllm:num_requests_running`, `_waiting`, `kv_cache_usage_perc`, `prompt_tokens_total`, `generation_tokens_total`, `request_success_total`, `prefix_cache_queries_total`, `prefix_cache_hits_total`, and the `time_to_first_token_seconds` / `inter_token_latency_seconds` / `e2e_request_latency_seconds` / `request_queue_time_seconds` / `request_prefill_time_seconds` / `request_decode_time_seconds` histograms | emitted directly - nothing to do |
-| recording rules | `llm:ttft:p95_5m`, `llm:tpot:p95_5m`, `llm:decode:p95_5m`, `llm:tokens:generation_rate5m`, `llm:tokens:prompt_rate5m`, `llm:prefix_cache:hit_ratio5m`, `llm:tokens_per_watt:5m`, and the four phase means `llm:queue:mean5m` / `llm:prefill:mean5m` / `llm:decode:mean5m` / `llm:e2e:mean5m` | **you must apply these** (below), or inline the expressions into the panels |
+| recording rules | `llm:ttft:p95_5m`, `llm:tpot:p95_5m`, `llm:decode:p95_5m`, `llm:tokens:generation_rate5m`, `llm:tokens:prompt_rate5m`, `llm:prefix_cache:hit_ratio5m`, `llm:tokens_per_watt:5m`, the four phase means `llm:queue:mean5m` / `llm:prefill:mean5m` / `llm:decode:mean5m` / `llm:e2e:mean5m`, and the four SLO ratios `llm:ttft:slo_ratio5m` / `30m` / `1h` / `6h` | **you must apply these** (below), or inline the expressions into the panels |
 | simulator-only | `llmsim_profile_generation`, `llmsim_requests_rejected_total`, `llmsim_gpu_binding_info` | never emitted by vLLM - those panels stay blank, see [trimming](#trimming-it-for-a-real-deployment) |
 
 ⚠️ **The two prefix-cache counters are V1-only.** On an older engine they do not exist at all - v0 published a single gauge instead - so that panel is blank rather than wrong. See [V1 metric names](#-v1-metric-names---check-yours-before-blaming-the-board).
@@ -74,6 +75,21 @@ Quantiles are recorded once rather than repeated in every panel and alert, so a 
 # no prefill p95 (3.03x overstated) and no e2e p95 (1.71x under saturation).
 - record: llm:decode:p95_5m
   expr: histogram_quantile(0.95, sum by (model_name, le) (rate(vllm:request_decode_time_seconds_bucket[5m])))
+
+# The SLI, four windows of it. A RATIO AT A BUCKET BOUNDARY, not a percentile -
+# see "Building an SLO on this" below for why that distinction is the whole point.
+# le="2.5" is a real member of TTFT_BUCKETS and le="2" is not: a matcher that
+# misses returns nothing, and the burn alerts then never fire.
+# ⚠️ Each rule uses ITS OWN window in BOTH range vectors. A slo_ratio6h built on
+# [5m] returns a plausible number under the wrong name and nothing catches it.
+- record: llm:ttft:slo_ratio5m
+  expr: sum by (model_name) (rate(vllm:time_to_first_token_seconds_bucket{le="2.5"}[5m])) / clamp_min(sum by (model_name) (rate(vllm:time_to_first_token_seconds_count[5m])), 1e-9)
+- record: llm:ttft:slo_ratio30m
+  expr: sum by (model_name) (rate(vllm:time_to_first_token_seconds_bucket{le="2.5"}[30m])) / clamp_min(sum by (model_name) (rate(vllm:time_to_first_token_seconds_count[30m])), 1e-9)
+- record: llm:ttft:slo_ratio1h
+  expr: sum by (model_name) (rate(vllm:time_to_first_token_seconds_bucket{le="2.5"}[1h])) / clamp_min(sum by (model_name) (rate(vllm:time_to_first_token_seconds_count[1h])), 1e-9)
+- record: llm:ttft:slo_ratio6h
+  expr: sum by (model_name) (rate(vllm:time_to_first_token_seconds_bucket{le="2.5"}[6h])) / clamp_min(sum by (model_name) (rate(vllm:time_to_first_token_seconds_count[6h])), 1e-9)
 ```
 
 ⚠️ **`llm:e2e:mean5m` looks redundant and is not.** It is the right-hand side of *does the breakdown add up*, and the three phase means only mean something against it. It also has to be a **rule** rather than an inlined `rate(_sum)/rate(_count)` if you carry a `source`-style label on your recorded series: mixing a labelled left-hand side with an unlabelled right-hand side matches nothing, and the obvious repair (`on(model_name)`) then drops the label from the result - right arithmetic, wrong labels, reading as an arithmetic bug.
@@ -139,6 +155,37 @@ A histogram **mean** carries no bucket dependence at all (`_sum` and `_count` ar
 
 The one recorded percentile is `llm:decode:p95_5m`, scoped to decode because it is the only phase these buckets resolve tolerably (1.12x-1.26x). There is deliberately **no** `llm:prefill:p95_5m` and **no** `llm:e2e:p95_5m` - a recorded series is exactly how a wrong number acquires an air of authority, and e2e is the worst of the three on the saturated tenant, which is the tenant this board exists to show.
 
+## Building an SLO on this: a ratio at a bucket boundary, not a percentile
+
+Everything above says *don't* — don't set a prefill SLO on a p95, don't set an ITL SLO from a number in a wide bucket, don't ship the 2s threshold as an objective. Here is the other half, because the constraint that makes those warnings true is also the one that says how to build an objective that works.
+
+**Every caveat on this page is a property of `histogram_quantile` interpolating *inside* a bucket.** That is where the 3.03x on prefill and the 1.71x on e2e come from. A ratio evaluated *at* a boundary does no interpolation and carries no bucket-width dependence at all:
+
+```promql
+sum by (model_name) (rate(vllm:time_to_first_token_seconds_bucket{le="2.5"}[5m]))
+/ clamp_min(sum by (model_name) (rate(vllm:time_to_first_token_seconds_count[5m])), 1e-9)
+```
+
+That is "the proportion of requests that reached a first token within 2.5s", and it is exact. The bucket layout is not an obstacle to an SLO. It is the design constraint: **your threshold must be a boundary.**
+
+The board ships this as `llm:ttft:slo_ratio5m` / `30m` / `1h` / `6h` against a 99% objective, with the standard fast/slow burn-rate pair over it — `> 14.4x` on the 1h and 5m windows, `> 6x` on the 6h and 30m. Both are in [`manifests/alerts/llm-prometheusrule.yaml`](https://github.com/ChrisAdkin8/k8s-ai-observability/blob/main/manifests/alerts/llm-prometheusrule.yaml).
+
+⚠️ **`le="2"` matches nothing.** `TTFT_BUCKETS` steps `… 1.0, 2.5, 5.0 …` — there is no 2.0 boundary. A matcher that misses returns an empty vector, the ratio evaluates to nothing, and the burn alerts never fire: green forever, on a rule that reads correctly. Check the boundary you are asking for is in the list.
+
+### Four things this technique costs you
+
+**1. Your threshold is constrained to the boundaries you have.** If your business wants 2s, this method cannot express it. The honest options are to move the objective to a real boundary, to accept an interpolated percentile and carry its error bar, or to change the bucket list — which forfeits the transferability that made the query worth building here. This belongs to the approach, not to this rig, so you inherit it against real vLLM too.
+
+**2. "Exact" has a condition.** It holds because numerator and denominator are the same histogram, on the same target, at the same scrape timestamps — so `rate()`'s extrapolation factor is common to both and cancels. Sum across replicas whose scrapes are out of phase and the cancellation stops being exact. One pod per model here; if you run four, know why it might not hold.
+
+**3. It is a latency objective, not an availability one — a total stall reads as healthy.** A request that never reaches a first token contributes no observation at all: not a slow one, not a failed one. So a tenant whose queue has stopped draining produces nothing of either kind, and the burn alerts carry a traffic guard that then suppresses them by design. `LLMQueueBacklog` is what fires when requests arrive and never complete; `LLMMetricsAbsent` when the series stop entirely. An SLO whose scope is unstated gets read as covering availability. This one does not.
+
+⚠️ That guard is also a trade rather than a free win: it stops pages for idle models, and it stops a burned budget alerting once traffic stops. Its window must match each alert's own short window — 5m on the fast one, 30m on the slow — because a guard narrower than the alert it protects silences a real burn.
+
+**4. The 6h window is not exercised on this rig**, which lives minutes. The slow-burn alert transfers but cannot be watched moving here; it is covered on both sides by [`promtool` tests](https://github.com/ChrisAdkin8/k8s-ai-observability/tree/main/tests) instead, which synthesise six hours in about a second. To watch it on the rig, shorten both windows in a fork of the rule.
+
+Finally: **Prometheus native histograms would dissolve limit 1 entirely** — exponential buckets with configurable resolution mean any threshold is expressible. The constraint above is a property of classic histograms, not a law of nature. Real vLLM emits classic histograms today, which is why this board is built on them.
+
 ## Read the inter-token latency panel carefully
 
 **The p95 there is dominated by bucket resolution, not by load**, and this is one caveat that transfers to real hardware rather than being a simulation artifact - real vLLM uses the same bucket boundaries.
@@ -195,6 +242,10 @@ The rules that ship alongside the board, [unit-tested with `promtool`](https://g
 | `LLMQueueBacklog` | `vllm:num_requests_waiting > 50` | 5m |
 | `LLMKVCacheSaturated` | `vllm:kv_cache_usage_perc > 0.9` | 5m |
 | `LLMMetricsAbsent` | `absent(vllm:num_requests_running)` | 5m |
+| `LLMTTFTErrorBudgetFastBurn` | burn > 14.4 on `llm:ttft:slo_ratio1h` **and** `slo_ratio5m` | - |
+| `LLMTTFTErrorBudgetSlowBurn` | burn > 6 on `llm:ttft:slo_ratio6h` **and** `slo_ratio30m` | - |
+
+The two burn alerts carry **no `for:`**, and that is a decision rather than an omission: the long window already provides the smoothing a `for:` would add, and stacking both would delay a genuine fast burn by the `for:` on top of an hour of averaging. Both also carry a traffic guard whose window matches the alert's own short window - without it, an idle tenant reads `0/1e-9 = 0` and they fire hardest on a model serving nothing at all.
 
 `vllm:kv_cache_usage_perc` is a **fraction (0–1)**, so `> 0.9` is correct and `> 90` can never fire - an easy one to get wrong, and it fails by staying silent forever.
 

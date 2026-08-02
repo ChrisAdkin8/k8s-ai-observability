@@ -125,7 +125,7 @@ simulator would be undetectable from outside, which is exactly what
 | Sample workloads | `default` | Deployments requesting `nvidia.com/gpu`; pod-template annotation drives simulated utilisation. |
 | LLM simulators | `llm-sim` | `llm-steady` (healthy) and `llm-saturated` (overloaded on purpose) run `scripts/llm-sim.py`, emitting the real **vLLM** metric surface. A polled JSON profile drives load without restarting the pod. Opt-in `llm-driven` is the target for `drive-llm-load.sh`. |
 | ServiceMonitor `llm-sim` | `monitoring` | Scrapes the simulators every 15s. |
-| PrometheusRule `llm-simulation-alerts` | `monitoring` | `llm:*` recording rules aggregated `by (model_name)` — the TTFT/TPOT percentiles, the prefix-cache ratio, the token rates, and the four **means** the request phase breakdown is built from — plus `LLMHighTTFT`, `LLMQueueBacklog`, `LLMKVCacheSaturated`, `LLMMetricsAbsent`. |
+| PrometheusRule `llm-simulation-alerts` | `monitoring` | `llm:*` recording rules aggregated `by (model_name)` — the TTFT/TPOT percentiles, the prefix-cache ratio, the token rates, the four **means** the request phase breakdown is built from, and the four TTFT **SLO ratios** the error budget is measured against — plus `LLMHighTTFT`, `LLMQueueBacklog`, `LLMKVCacheSaturated`, `LLMMetricsAbsent` and the burn-rate pair `LLMTTFTErrorBudgetFastBurn` / `LLMTTFTErrorBudgetSlowBurn`. |
 
 ### Two artefacts that are not part of a cluster install
 

@@ -620,3 +620,252 @@ tests:
         exp_samples:
           - labels: 'llm:tokens_per_watt:5m{source="simulated"}'
             value: 0.1
+
+  # =========================================================================
+  # THE TTFT SLO — a ratio at a bucket boundary, and the burn-rate pair over it.
+  #
+  # ⚠️ ONLY TWO SERIES PER TENANT, and that is not a shortcut. The SLI reads
+  # exactly two things: the le="2.5" bucket and the _count. No other boundary and
+  # no +Inf participates, because there is no interpolation to feed — which is
+  # the entire reason this objective is a ratio rather than a percentile. The
+  # p95 rules elsewhere in this file need a bucket LADDER; this one does not.
+  #
+  # ⚠️ le="2.5" IS A REAL MEMBER OF TTFT_BUCKETS, and le="2" is not. Retyping
+  # these as le="2" makes the ratio match nothing, the recorded rules return
+  # empty, and both alerts go green forever. The `exp_samples` below are what
+  # catch that: an empty result fails them, where a threshold test would not.
+  #
+  # burn = (1 - ratio) / 0.01, so: ratio 1.0 -> 0x, 0.9 -> 10x, 0.0 -> 100x.
+  # Fast fires above 14.4 (1h and 5m), slow above 6 (6h and 30m).
+  # =========================================================================
+  - interval: 1m
+    name: SLO ratio and fast burn separate the two shipped tenants
+    input_series:
+      # steady: every request inside 2.5s, so good == total.
+      - series: 'vllm:time_to_first_token_seconds_bucket{model_name="sim-llama-3-8b-steady", le="2.5"}'
+        values: '0+10x70'
+      - series: 'vllm:time_to_first_token_seconds_count{model_name="sim-llama-3-8b-steady"}'
+        values: '0+10x70'
+      # saturated: nothing inside 2.5s. The le="2.5" bucket never moves.
+      - series: 'vllm:time_to_first_token_seconds_bucket{model_name="sim-llama-3-8b-saturated", le="2.5"}'
+        values: '0x70'
+      - series: 'vllm:time_to_first_token_seconds_count{model_name="sim-llama-3-8b-saturated"}'
+        values: '0+10x70'
+
+    promql_expr_test:
+      - expr: llm:ttft:slo_ratio1h
+        eval_time: 70m
+        exp_samples:
+          - labels: 'llm:ttft:slo_ratio1h{model_name="sim-llama-3-8b-saturated", source="simulated"}'
+            value: 0
+          - labels: 'llm:ttft:slo_ratio1h{model_name="sim-llama-3-8b-steady", source="simulated"}'
+            value: 1
+
+    alert_rule_test:
+      - eval_time: 70m
+        alertname: LLMTTFTErrorBudgetFastBurn
+        exp_alerts:
+          - exp_labels:
+              severity: critical
+              model_name: sim-llama-3-8b-saturated
+              source: simulated
+            exp_annotations:
+              summary: "Model sim-llama-3-8b-saturated is burning TTFT error budget fast"
+              description: >-
+                Over 14.4x burn on both the 1h and 5m windows — at this rate 2% of
+                the 30d budget for "99% of requests reach a first token within
+                2.5s" goes in an hour (100.0x).
+
+  # =========================================================================
+  # THE CASE THAT PROVES THE TWO ALERTS ARE DIFFERENT RULES.
+  #
+  # The two shipped tenants burn at 0x and 100x, so a suite built only on them
+  # passes even if fast and slow are wired to the SAME expression. This tenant
+  # sits between the thresholds — 87.5% good, so 12.5x burn — and must fire the slow
+  # alert and NOT the fast one. It is the only input here that can tell them
+  # apart. Synthetic, like sim-llama-3-8b-edge elsewhere in this file: no
+  # Deployment is tuned to burn partially, because that would put a third series
+  # on every panel of a published board to make one point.
+  # =========================================================================
+  - interval: 1m
+    name: a partial burn fires the slow alert and not the fast one
+    input_series:
+      - series: 'vllm:time_to_first_token_seconds_bucket{model_name="sim-llama-3-8b-edge", le="2.5"}'
+        values: '0+7x70'
+      - series: 'vllm:time_to_first_token_seconds_count{model_name="sim-llama-3-8b-edge"}'
+        values: '0+8x70'
+
+    promql_expr_test:
+      - expr: llm:ttft:slo_ratio6h
+        eval_time: 70m
+        exp_samples:
+          - labels: 'llm:ttft:slo_ratio6h{model_name="sim-llama-3-8b-edge", source="simulated"}'
+            value: 0.875
+
+    alert_rule_test:
+      - eval_time: 70m
+        alertname: LLMTTFTErrorBudgetSlowBurn
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+              model_name: sim-llama-3-8b-edge
+              source: simulated
+            exp_annotations:
+              summary: "Model sim-llama-3-8b-edge is burning TTFT error budget"
+              description: >-
+                Over 6x burn on both the 6h and 30m windows — at this rate 5% of the
+                30d budget for "99% of requests reach a first token within 2.5s"
+                goes in six hours (12.5x).
+      # 12.5x is under 14.4, so the fast alert must stay silent.
+      - eval_time: 70m
+        alertname: LLMTTFTErrorBudgetFastBurn
+        exp_alerts: []
+
+  # =========================================================================
+  # THE TRAFFIC GUARD, WHICH IS THE TRAP IN THIS PIECE OF WORK.
+  #
+  # With no traffic the clamp_min epsilon makes the ratio 0/1e-9 = 0, so the
+  # error ratio is 1.0 and burn pins at 100x. WITHOUT THE GUARD BOTH ALERTS FIRE
+  # HARDEST ON A TENANT SERVING NOTHING AT ALL. Deleting the `and on (model_name)
+  # ... > 0` clause from either rule turns the first case below red, which is the
+  # point of writing it: the guard reads as redundant and is not.
+  # =========================================================================
+  - interval: 1m
+    name: an idle tenant fires neither burn alert
+    input_series:
+      # Counters present and flat: scraped fine, serving nothing.
+      - series: 'vllm:time_to_first_token_seconds_bucket{model_name="sim-llama-3-8b-idle", le="2.5"}'
+        values: '100x70'
+      - series: 'vllm:time_to_first_token_seconds_count{model_name="sim-llama-3-8b-idle"}'
+        values: '100x70'
+
+    promql_expr_test:
+      # The ratio really is 0 — the guard is what stops that becoming a page.
+      - expr: llm:ttft:slo_ratio1h
+        eval_time: 70m
+        exp_samples:
+          - labels: 'llm:ttft:slo_ratio1h{model_name="sim-llama-3-8b-idle", source="simulated"}'
+            value: 0
+
+    alert_rule_test:
+      - eval_time: 70m
+        alertname: LLMTTFTErrorBudgetFastBurn
+        exp_alerts: []
+      - eval_time: 70m
+        alertname: LLMTTFTErrorBudgetSlowBurn
+        exp_alerts: []
+
+  # =========================================================================
+  # THE GUARD WINDOW IS PER-ALERT, AND A 5m GUARD ON THE SLOW RULE IS A BUG.
+  #
+  # This tenant burned budget hard for an hour, then went idle ten minutes ago.
+  # Its 30m window still holds twenty minutes of traffic, so the slow alert must
+  # STILL FIRE — the budget was genuinely spent and nothing has repaid it. Its 5m
+  # window holds none, so the fast alert correctly goes quiet.
+  #
+  # Wire the slow alert's guard to [5m] and the first expectation below goes red.
+  # That is the whole reason this case exists: a guard narrower than the alert it
+  # protects silences a real burn exactly when an operator wants to know.
+  # =========================================================================
+  - interval: 1m
+    name: idle for ten minutes, bad for an hour — slow fires, fast does not
+    input_series:
+      - series: 'vllm:time_to_first_token_seconds_bucket{model_name="sim-llama-3-8b-stopped", le="2.5"}'
+        values: '0x70'
+      - series: 'vllm:time_to_first_token_seconds_count{model_name="sim-llama-3-8b-stopped"}'
+        values: '0+10x60 600x10'
+
+    alert_rule_test:
+      - eval_time: 70m
+        alertname: LLMTTFTErrorBudgetSlowBurn
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+              model_name: sim-llama-3-8b-stopped
+              source: simulated
+            exp_annotations:
+              summary: "Model sim-llama-3-8b-stopped is burning TTFT error budget"
+              description: >-
+                Over 6x burn on both the 6h and 30m windows — at this rate 5% of the
+                30d budget for "99% of requests reach a first token within 2.5s"
+                goes in six hours (100.0x).
+      - eval_time: 70m
+        alertname: LLMTTFTErrorBudgetFastBurn
+        exp_alerts: []
+
+  # =========================================================================
+  # THE EFFECTIVE THRESHOLD, PINNED EITHER SIDE OF THE BOUNDARY.
+  #
+  # The 99% target is spelled three ways — the prose in the rule file, the `0.01`
+  # divisor, and the 14.4/6 multipliers, which mean what they mean only against a
+  # 1% budget. PromQL has no constants, so nothing in the rule file can hold those
+  # three together. THIS TEST IS WHAT HOLDS THEM TOGETHER: it asserts where the
+  # alert actually flips, so a divisor and a multiplier drifting apart fails here
+  # however either is written — and so would rewriting the whole thing as the
+  # algebraically identical `(1 - ratio) > 0.144`.
+  #
+  # over:  ratio 0.8559 -> error 0.1441 -> burn 14.41, just above 14.4 -> fires
+  # under: ratio 0.8561 -> error 0.1439 -> burn 14.39, just below      -> silent
+  # =========================================================================
+  - interval: 1m
+    name: the fast-burn threshold flips between 14.39x and 14.41x
+    input_series:
+      - series: 'vllm:time_to_first_token_seconds_bucket{model_name="sim-over", le="2.5"}'
+        values: '0+8559x70'
+      - series: 'vllm:time_to_first_token_seconds_count{model_name="sim-over"}'
+        values: '0+10000x70'
+      - series: 'vllm:time_to_first_token_seconds_bucket{model_name="sim-under", le="2.5"}'
+        values: '0+8561x70'
+      - series: 'vllm:time_to_first_token_seconds_count{model_name="sim-under"}'
+        values: '0+10000x70'
+
+    alert_rule_test:
+      - eval_time: 70m
+        alertname: LLMTTFTErrorBudgetFastBurn
+        exp_alerts:
+          - exp_labels:
+              severity: critical
+              model_name: sim-over
+              source: simulated
+            exp_annotations:
+              summary: "Model sim-over is burning TTFT error budget fast"
+              description: >-
+                Over 14.4x burn on both the 1h and 5m windows — at this rate 2% of
+                the 30d budget for "99% of requests reach a first token within
+                2.5s" goes in an hour (14.4x).
+
+  # =========================================================================
+  # EACH RULE READS ITS OWN WINDOW — the one regression the note at the top of
+  # this file says the other cases here cannot catch.
+  #
+  # Everywhere else every counter rises linearly, so rate(x[5m]) and rate(x[6h])
+  # agree and a narrowed window goes unnoticed. Here the slope CHANGES: ninety
+  # minutes of nothing-inside-2.5s, then ten minutes where every request is. The
+  # two windows must therefore disagree, and by a known amount.
+  #
+  #   [5m]  covers only the good tail          -> 50/50    = 1.0
+  #   [6h]  covers everything                  -> 100/1000 = 0.1
+  #
+  # A slo_ratio6h accidentally built on [5m] returns 1.0 here and fails. Nothing
+  # else in this suite would have noticed: it is a plausible number under the
+  # wrong name, and every threshold case still passes.
+  # =========================================================================
+  - interval: 1m
+    name: slo_ratio5m and slo_ratio6h read different windows
+    input_series:
+      - series: 'vllm:time_to_first_token_seconds_bucket{model_name="sim-recovering", le="2.5"}'
+        values: '0x90 10+10x9'
+      - series: 'vllm:time_to_first_token_seconds_count{model_name="sim-recovering"}'
+        values: '0+10x100'
+
+    promql_expr_test:
+      - expr: llm:ttft:slo_ratio5m
+        eval_time: 100m
+        exp_samples:
+          - labels: 'llm:ttft:slo_ratio5m{model_name="sim-recovering", source="simulated"}'
+            value: 1
+      - expr: llm:ttft:slo_ratio6h
+        eval_time: 100m
+        exp_samples:
+          - labels: 'llm:ttft:slo_ratio6h{model_name="sim-recovering", source="simulated"}'
+            value: 0.1

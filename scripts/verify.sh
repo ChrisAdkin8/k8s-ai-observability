@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # verify.sh <eks|gke|local> [--byo] — assert this repo's acceptance criteria: the GPU
-# checks 1-5 (including 3b/4b/4c/4d) and the LLM checks L1-L8. Both sets of numbers are
+# checks 1-5 (including 3b/4b/4c/4d) and the LLM checks L1-L9. Both sets of numbers are
 # cited elsewhere in the repo and in commit history — do not renumber them. New checks
 # get a letter suffix on the one they belong with, which is why 3b is 3b.
 #
@@ -347,7 +347,7 @@ done
   || fail "GPUHighUtilization did not fire within timeout (check the 'gpu-busy' workload util range 85-99 vs the rule's >80 threshold and 1m for:)"
 
 # ============================================================================
-# LLM simulation checks — numbered L1..L8 so they can never be confused with
+# LLM simulation checks — numbered L1..L9 so they can never be confused with
 # the GPU checks above (which already use 1..5 and 4b/4c/4d).
 #
 # ⚠️ EVERY check below is phrased so it returns ZERO SERIES on failure.
@@ -609,6 +609,42 @@ llm_ok_n="$(promql_count 'abs((llm:queue:mean5m + llm:prefill:mean5m + llm:decod
 llm_all_n="$(promql_count '(llm:queue:mean5m + llm:prefill:mean5m + llm:decode:mean5m) - llm:e2e:mean5m')"
 [[ "${llm_sums:-0}" -gt 0 ]] && pass "L8 the phase breakdown accounts for end-to-end latency (${llm_ok_n:-0}/${llm_all_n:-0} tenant(s) with a complete breakdown, within 0.1%)" \
   || fail "L8 only ${llm_ok_n:-0} of ${llm_all_n:-0} tenant(s) with a complete breakdown account for llm:e2e:mean5m to within 0.1% — all four recording rules applied, and none swapped back to a quantile? (means are additive, percentiles are not). ${llm_all_n:-0} = 0 means the four mean rules are not evaluating at all."
+
+# L9. the four SLO ratios exist and are evaluating.
+#
+#     EXISTENCE, DELIBERATELY NOT A THRESHOLD. The obvious check here is "the
+#     steady tenant is above the 99% objective", and it is the wrong one: five
+#     minutes after install rate() is still under-reading through the documented
+#     warm-up, so a 0.99 comparison passes most days and fails occasionally for
+#     reasons that have nothing to do with the rules. A check that flakes gets
+#     weakened rather than understood. L3b's bounds are loose for the same
+#     reason. If a value assertion is wanted later, bound it far from the
+#     threshold — the steady ratio is 1.0, so `> 0.5` catches a broken rule and
+#     never flakes.
+#
+#     WHAT THIS CATCHES THAT NOTHING ELSE DOES: promtool proves the PromQL is
+#     right over fixtures, and neither it nor --selftest leaves the repo. Only a
+#     live Prometheus can show that `le="2.5"` matched a bucket that really is
+#     exposed under that exact label string. A boundary that is not in
+#     TTFT_BUCKETS, or a client that formats `le` differently, produces an EMPTY
+#     ratio here while every promtool case still passes — which is exactly the
+#     silent failure the rule file's ⚠️ is about.
+#
+#     All four `and`-ed, so a single missing window fails: the slow-burn alert
+#     reads slo_ratio6h and slo_ratio30m, and those are the two least likely to
+#     be noticed missing because nothing on this rig drives that alert.
+llm_slo=0
+for _ in $(seq 1 24); do
+  llm_slo="$(promql_count 'count(llm:ttft:slo_ratio5m) > 0
+    and count(llm:ttft:slo_ratio30m) > 0
+    and count(llm:ttft:slo_ratio1h) > 0
+    and count(llm:ttft:slo_ratio6h) > 0')"
+  [[ "${llm_slo:-0}" -gt 0 ]] && break
+  sleep 5
+done
+llm_slo_n="$(promql_count 'llm:ttft:slo_ratio5m')"
+[[ "${llm_slo:-0}" -gt 0 ]] && pass "L9 all four TTFT SLO ratios are recorded (${llm_slo_n:-0} tenant(s) on the 5m window)" \
+  || fail "L9 one or more of llm:ttft:slo_ratio{5m,30m,1h,6h} is absent — is the current llm-prometheusrule.yaml applied, and does le=\"2.5\" match a bucket your exposition actually carries? A boundary not in TTFT_BUCKETS matches nothing and records an empty series while every promtool case still passes"
 
 graf_pf_stop
 prom_pf_stop
