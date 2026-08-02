@@ -23,6 +23,20 @@ Comparison links are at the foot of this file, one per released version.
 
 ## [Unreleased]
 
+## [0.6.0] — 2026-08-02
+
+**This release gives the rig an SLO, and then makes the docs tell the truth about it.**
+0.5.0 finished the phase breakdown and left three separate warnings not to build an
+objective on a percentile here, with no answer to what you should build instead. This one
+answers it: a ratio evaluated *at* a bucket boundary interpolates nothing, so it carries
+none of the caveats the rest of the board is full of. The bucket layout was never the
+obstacle — it is the constraint that tells you where the threshold has to sit.
+
+The rest is consequence. A metric that was always zero stopped being emitted, because a
+flat zero is a claim and a false one; every count in the prose that those two changes
+invalidated was found and corrected; and the board screenshot was retaken, which obsoleted
+a caveat and exposed a second figure worth explaining rather than editing away.
+
 ### Added
 
 - **A TTFT service-level objective, expressed as a ratio at a bucket boundary rather than
@@ -1148,7 +1162,8 @@ Initial public release. Build and test GPU and LLM observability without a GPU.
   a GPU, running the advertised `task local:up` end to end including every acceptance
   check, with a diagnostics bundle on failure and weekly upstream-drift detection.
 
-[Unreleased]: https://github.com/ChrisAdkin8/k8s-ai-observability/compare/v0.5.0...HEAD
+[Unreleased]: https://github.com/ChrisAdkin8/k8s-ai-observability/compare/v0.6.0...HEAD
+[0.6.0]: https://github.com/ChrisAdkin8/k8s-ai-observability/compare/v0.5.0...v0.6.0
 [0.5.0]: https://github.com/ChrisAdkin8/k8s-ai-observability/compare/v0.4.0...v0.5.0
 [0.4.0]: https://github.com/ChrisAdkin8/k8s-ai-observability/compare/v0.3.0...v0.4.0
 [0.3.0]: https://github.com/ChrisAdkin8/k8s-ai-observability/compare/v0.2.0...v0.3.0
