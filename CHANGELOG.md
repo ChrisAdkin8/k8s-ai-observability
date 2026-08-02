@@ -158,6 +158,56 @@ Comparison links are at the foot of this file, one per released version.
   update itself; this is the first time it has applied to a **panel** rather than to prose,
   which is the case someone actually notices.
 
+- **`docs/llm-dashboard.png` retaken and optimised**, 3456x1988 RGBA down to 2400x1381 at a
+  256-colour palette — **704K to 247K, 65% smaller** — through `docs/optimize-images.py`,
+  which `gpu-dashboard.png` had already been through and this one never had.
+
+  **The retake obsoleted a caveat, which is the part worth reading.** The README carried a
+  note saying its screenshots predated the vLLM V1 bucket sync, so the saturated tenant
+  read `1.20 mins` instead of 78s. The new capture reads **1.30 mins — which is 78s** — so
+  the note now contradicted the paragraph above it, and is gone. The board's alt text went
+  with it: it said "six panels" for a board that now shows twelve.
+
+  **A second discrepancy the retake exposed is documented rather than reconciled.** The
+  capture's *healthy* tenant reads a p95 of **~480 ms** where the README says `~120 ms`,
+  with its `waiting` gauge flat at zero throughout. Both are right, and the new
+  [Why an observed steady p95 runs higher than ~0.1s](docs/llm-simulation.md#why-an-observed-steady-p95-runs-higher-than-01s)
+  says why: Little's Law puts steady's mean concurrency at `1.8 × 5.84` = 10.5 against a
+  `max_concurrency` of 16, and arrivals are Poisson (`rng.expovariate`), so the batch
+  reaches 16 regularly and those arrivals wait. A gauge sampled once per 15s scrape misses
+  a queue that forms and drains between two of them; the TTFT histogram observes every
+  request and does not. **Neither figure was edited to match the other** — `~120 ms` is what
+  the profile arithmetic models, and `verify.sh` L3b and every promtool expectation are
+  built on that arithmetic.
+
+- **`docs/social-preview.py`'s crop re-tuned, and the comment justifying it corrected**,
+  then `docs/social-preview.png` regenerated from the new screenshot.
+
+  `FRAC` moves from `(0.1826, 0.1157, 0.9586, 0.4422)` to
+  `(0.0908, 0.0565, 0.9792, 0.3968)`, and the band from 310px to 282px. The card now shows
+  the top **two** rows — TTFT p95, ITL p95 and both running-vs-waiting repeats, four panels
+  complete — rather than one row, because one row of the retaken board is a 10:1 strip that
+  leaves the card mostly empty.
+
+  ⚠️ **The old comment's reasoning was wrong, which is why this needed re-tuning at all.**
+  It justified fractions-not-pixels by claiming "the top row occupies this proportion of the
+  board whatever size the window was". Fractions survive a **resize** — the reason they are
+  still fractions — but not a **re-capture**: the retake had a narrower Grafana sidebar and a
+  board one panel taller, so every boundary moved, the old fractions landed mid-panel, and
+  the card rendered cut through two rows.
+
+  **Nothing failed.** The script exited 0 and wrote a plausible, wrong card — the repo's own
+  worst category. The corrected comment now says to re-check the crop whenever
+  `llm-dashboard.png` is retaken, and records how the boundaries were measured (scan for
+  rows that are uniformly page-background; the gutters are `0.0565-0.2252` and
+  `0.2288-0.3968` on the current capture).
+
+  ⚠️ **The card now carries a rendering artefact from the capture itself**: both series in
+  each running-vs-waiting panel are labelled `running` in the legend, where the shipped
+  `llm-sim-overview.json` specifies `running` and `waiting` and git history shows it never
+  held anything else. It is in the screenshot, not in the board — and the social card is the
+  most public artefact here, so the next retake matters more than it usually would.
+
 ## [0.5.0] — 2026-08-01
 
 **This release finishes the sentence 0.4.0 started.** That one gave a cluster with its own

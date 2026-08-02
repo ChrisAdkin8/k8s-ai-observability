@@ -334,6 +334,31 @@ Three numbers interlock, and changing one means re-checking the others:
 | Steady p95 | ~0.1s | Must stay **below** the threshold or the healthy tenant alerts |
 | Saturated p95 | ~78s | Must stay **above** it, and under `verify.sh`'s 120s sanity bound. The underlying wait is `160 / 2.74 rps` ≈ 58s by Little's Law, so it moves if you change `max_in_flight` or capacity — but the *reported* figure is quantised by V1's `(40, 80]` bucket to `40 + 40×0.95 = 78`, and will read 78 for any true latency inside that band |
 
+### Why an observed steady p95 runs higher than ~0.1s
+
+`~0.1s` is what the arithmetic above **models**: with the queue empty, TTFT is
+`base_ttft_seconds` plus jitter. A live capture routinely reads several times that — the
+screenshot in the README shows **~480 ms** — and the reason is in the same arithmetic
+rather than in a fault.
+
+By Little's Law the steady tenant's mean concurrency is `arrival_rate_rps × service time`
+= `1.8 × 5.84` = **10.5, against a `max_concurrency` of 16**. That is a batch two-thirds
+full *on average*, and arrivals are Poisson (`_interarrival()` draws from
+`rng.expovariate`), so it reaches 16 regularly. Every arrival that lands while it is full
+waits, and reported TTFT is measured queue wait plus prefill.
+
+⚠️ **The `waiting` gauge can read flat zero throughout while that happens, and the two are
+not in contradiction.** `vllm:num_requests_waiting` is a **gauge**, sampled once per 15s
+scrape; `vllm:time_to_first_token_seconds` is a **histogram**, which observes *every*
+request. A queue that forms and drains between two scrapes is invisible to the first and
+fully recorded by the second. The gauge answers "is there a backlog right now"; the
+histogram answers "what did requests actually experience". When they disagree, the
+histogram is the one describing your users.
+
+None of this moves the demonstration, which is the point of the two tenants rather than the
+absolute figures: ~480 ms is still more than an order of magnitude below the 2s threshold,
+and the saturated tenant sits two orders above it.
+
 A malformed profile is never fatal: the simulator logs the problem, keeps the last good
 profile, and increments `llmsim_profile_reload_errors_total`.
 

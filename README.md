@@ -68,18 +68,21 @@ See [compose/](compose/) for what it deliberately cannot cover.
   [bring your own Prometheus](docs/byo-prometheus.md) or the
   [Helm chart](charts/k8s-ai-observability/README.md).
 
-![Six panels comparing a healthy tenant and an overloaded one side by
-side](docs/llm-dashboard.png)
+![The LLM board: a healthy tenant and an overloaded one side by side across first-token
+latency, queue depth, throughput, KV cache, prefix-cache reuse and the TTFT error-budget
+burn rate](docs/llm-dashboard.png)
 
 Two tenants sit either side of the 2s alert threshold, which is the point of running two
 simulators. `sim-llama-3-8b-steady` answers in ~120 ms; `sim-llama-3-8b-saturated` reports
 a p95 of 78s with 16 requests running and 160 queued behind it. Every panel aggregates
 `by (model_name)`, so the overloaded tenant is never averaged into the healthy one.
 
-> The screenshots above were captured before the vLLM V1 bucket sync, so the saturated
-> tenant reads `1.20 mins` rather than 78s. The simulated latency did not change, only the
-> histogram resolution it is reported at. See
-> [versions.md](docs/versions.md#keeping-them-honest).
+> **The screenshot's healthy tenant reads ~480 ms rather than ~120 ms**, with its queue flat
+> at zero throughout. Both are right: `~120 ms` is what the profile arithmetic models, while
+> a live capture catches a batch that fills often enough for some requests to wait — which a
+> 15s-sampled gauge misses and the TTFT histogram records in full. It is still an order of
+> magnitude under the 2s threshold, which is what the panel exists to show.
+> [The arithmetic](docs/llm-simulation.md#why-an-observed-steady-p95-runs-higher-than-01s).
 
 ## What transfers, and what doesn't
 

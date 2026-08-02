@@ -15,21 +15,35 @@ GREEN = (115, 191, 105)   # Grafana's series green, straight off the chart
 RULE = (38, 42, 51)
 
 # --- the panel band ------------------------------------------------------
-# Crop the whole top row of the board: "Time to first token - p95 (alert fires
-# above 2s)" and "Inter-token latency - p95". Both panels complete, no awkward cuts.
+# Crop the top TWO rows of the board: "Time to first token - p95 (alert fires above
+# 2s)" and "Inter-token latency - p95", then both "Requests running vs waiting"
+# repeats. Four panels complete, no awkward cuts. Two rows rather than one because
+# the band wants an aspect near 4.5 to fill the card's top third — one row of this
+# board is a 10:1 strip, which leaves the card mostly empty.
 #
-# Expressed as FRACTIONS of the source, not pixels. The invariant that actually
-# holds is "the top row occupies this proportion of the board" — Grafana lays the
-# panels out on a 24-column grid, so that stays true whatever size the window was
-# when the screenshot was taken, and whatever the file is later resized to. Pixel
-# coordinates held neither: the first optimisation pass over docs/*.png would have
-# silently moved the crop.
-FRAC = (0.1826, 0.1157, 0.9586, 0.4422)     # x0, y0, x1, y1
+# Expressed as FRACTIONS of the source, not pixels, because docs/optimize-images.py
+# resizes this file to 2400px wide: pixel coordinates would silently move the crop
+# on the next optimisation pass.
+#
+# ⚠️ FRACTIONS SURVIVE A RESIZE, NOT A RE-CAPTURE — and the difference cost a
+# release. These numbers used to be (0.1826, 0.1157, 0.9586, 0.4422), justified in a
+# comment claiming "the top row occupies this proportion of the board whatever size
+# the window was". It does not. The 2026-08-01 retake was taken with a narrower
+# Grafana sidebar and a board one panel taller, which moved every boundary: the old
+# fractions landed mid-panel, and the card rendered cut through two rows. NOTHING
+# FAILED — the script exited 0 and wrote a plausible, wrong card, which is the whole
+# reason this warning is here rather than a bare tuple.
+#
+# So: RE-CHECK THIS CROP WHENEVER llm-dashboard.png IS RETAKEN. The row boundaries
+# are measurable — scan the source for rows that are uniformly page-background and
+# take the gutters between panels. On the current capture they are 0.0565-0.2252
+# (row 1) and 0.2288-0.3968 (row 2), which is where the y values below come from.
+FRAC = (0.0908, 0.0565, 0.9792, 0.3968)     # x0, y0, x1, y1
 
 src = Image.open(SRC).convert("RGB")
 sw, sh = src.size
 box = (round(FRAC[0] * sw), round(FRAC[1] * sh), round(FRAC[2] * sw), round(FRAC[3] * sh))
-BAND_H = round(W / ((box[2] - box[0]) / (box[3] - box[1])))   # 310 at any source size
+BAND_H = round(W / ((box[2] - box[0]) / (box[3] - box[1])))   # 282 at any source size
 
 if box[2] - box[0] < W:
     print(f"WARN: crop is {box[2]-box[0]}px wide, upscaling to {W} — card text will be "
