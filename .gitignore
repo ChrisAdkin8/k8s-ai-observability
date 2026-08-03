@@ -50,6 +50,24 @@ venv/
 prompt.md
 prompt-*.md
 
+# ⚠️ CLAUDE.md IS TRACKED, and the distinction is the point. A brief is a one-off
+# specification for a single piece of work; CLAUDE.md is the repo's standing law —
+# the invariants, the working loop, the traps — and the live briefs now CITE it by
+# rule number instead of restating it, so a clone without it loses the half of each
+# brief that was deleted as duplication.
+#
+# The negation is documentation first and a guard second: nothing above matches
+# CLAUDE.md today, so it changes no current behaviour. It sits here because this block
+# is directly under the `.claude/` rule, and a tightening written as `.claude*` or
+# `CLAUDE*` in THIS block would otherwise swallow the file silently — it would simply
+# stop arriving in clones, with nothing to notice.
+#
+# ⚠️ It protects against a hostile rule ABOVE it and NOT below it — git takes the LAST
+# matching pattern, so a `CLAUDE*` appended to the end of this file still wins.
+# Verified both ways, 2026-08-03. If you add a broad markdown or CLAUDE rule later,
+# re-assert this negation beneath it.
+!CLAUDE.md
+
 # Unwrapped from the Kubernetes manifests by compose/compose.yaml at start-up. Never
 # edited by hand and never committed: manifests/ stays the single source of truth.
 compose/.generated/
