@@ -132,6 +132,34 @@ tasks:
     cmds:
       - python3 scripts/check-doc-claims.py
 
+  # Collects the open items that are already MARKED in the files that own them —
+  # CLAUDE.md rule 16. Derived, never a second copy: there is no TODO file here, and
+  # adding one would duplicate every line this prints.
+  #
+  # ⚠️ It matches PHRASES, not the ⚠️ glyph. There are 91 of those in tracked
+  # markdown and they are the repo's general warning marker, so keying on them would
+  # return almost the whole documentation set. The phrase list below is CURATED,
+  # which means it is also incomplete by construction: an open item written in new
+  # words is silently missed. Printing nothing is therefore "the matchers found
+  # nothing", not "there is no outstanding work" — and the task says so out loud
+  # rather than letting a clean run read as a clean slate.
+  #
+  # Struck-through items are done (`⚠️ ~~claim~~ **DONE — what, when**`) and excluded.
+  outstanding:
+    desc: List open items already marked in the docs (derived, not a TODO file)
+    silent: true
+    cmds:
+      - |
+        pat='Unverified:|still (needs|unproven|marked unverified)|has fallen behind|remains unproven|not yet (built|proven|verified)'
+        hits=$(git ls-files '*.md' | xargs grep -nE "$pat" 2>/dev/null | grep -v '~~' || true)
+        if [ -n "$hits" ]; then
+          printf '%s\n' "$hits" | sed 's/^/  /'
+          printf '\n  %s marked item(s).\n' "$(printf '%s\n' "$hits" | wc -l | tr -d ' ')"
+        else
+          echo "  no marked items matched."
+        fi
+        echo "  ⚠️ curated phrase matchers — absence is not proof. See CLAUDE.md rule 16."
+
   # THE PRE-PUSH GATE. One command, every check that needs no cluster, no cloud
   # and no docker — run it before landing anything. It exists because 12 of the
   # repo's first 76 commits were corrections of work already on main, and most
