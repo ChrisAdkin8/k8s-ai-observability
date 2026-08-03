@@ -1,0 +1,47 @@
+name: Something is wrong
+description: A check fails, a panel is empty, or the rig does not behave as documented.
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        ⚠️ **Most failures here are silent** — everything installs green and something
+        is quietly wrong. [docs/troubleshooting.md](../blob/main/docs/troubleshooting.md)
+        covers the common ones, and the two that catch nearly everybody are a wrong
+        `RELEASE_LABEL` (your Prometheus never adopts the rules, so derived panels are
+        empty) and a wrong `GRAFANA_DASHBOARD_LABEL` (the sidecar never imports the
+        board, so `/d/<uid>` 404s).
+  - type: dropdown
+    id: path
+    attributes:
+      label: Which path?
+      options:
+        - compose (docker compose, no Kubernetes)
+        - kind (task local:up)
+        - EKS
+        - GKE
+        - Helm chart into an existing cluster
+        - "--skip-monitoring / BYO Prometheus"
+    validations: {required: true}
+  - type: textarea
+    id: expected
+    attributes:
+      label: What you expected, and what happened instead
+      description: Quote the documented behaviour if there is one — a doc that is wrong is also a bug here.
+    validations: {required: true}
+  - type: textarea
+    id: verify
+    attributes:
+      label: "`./scripts/verify.sh <target>` output"
+      description: The numbered checks. A failing L-number tells us far more than a screenshot.
+      render: text
+  - type: textarea
+    id: preflight
+    attributes:
+      label: "`task preflight` output (if you have a clone)"
+      render: text
+  - type: input
+    id: version
+    attributes:
+      label: Version or commit
+      placeholder: "v0.6.0, or the SHA"
