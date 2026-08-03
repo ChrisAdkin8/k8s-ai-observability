@@ -766,6 +766,20 @@ those claims honest, and the CI legs that stop the alternative paths rotting.
   ~16 GB and nothing there is under memory pressure. The sizing claim still needs a
   constrained local run and is still marked unverified.
 
+  ⚠️ **What would settle it, precisely** (recorded 2026-08-04 so it is a ten-minute job rather
+  than an open question): size the runtime AT the floor the README advertises, then run
+  the trimmed stack and let it prove itself —
+
+  ```sh
+  colima stop && colima start --cpu 4 --memory 3 --disk 40   # or Docker Desktop -> 3 GiB
+  LITE=1 task local:up && ./scripts/verify.sh local
+  ```
+
+  Green means the claim holds and this marker can be struck. Pods stuck `Pending`, or an
+  OOMKill, means the README's "lowers the floor to 3 GiB" is wrong and `KIND_MIN_MEMORY_GIB`
+  is the edit. ⚠️ It **destroys any existing kind cluster**, which is why it has not been
+  run in passing — it needs a machine whose cluster is expendable.
+
 - **`.github/dependabot.yml`** for the SHA-pinned actions. Pinning by SHA is right, but a
   SHA pin never moves on its own — and this repo has a live instance, with
   `actions/upload-artifact` warning on every run that it targets Node 20. It cannot cover
@@ -823,10 +837,16 @@ those claims honest, and the CI legs that stop the alternative paths rotting.
   transparent mark disappears on one of them. Drawing is supersampled 4× and downsampled,
   since PIL has no antialiasing and a stepped diagonal is what a logo cannot afford.
 
-  ⚠️ **Unverified: grafana.com's own logo requirements.** 512×512 square is an assumption,
-  chosen because it downsamples cleanly; the upload form has not been checked for a stated
-  dimension or file-size limit. If it wants something else, `SIZE` in the script is the
-  whole edit.
+  ⚠️ ~~**Unverified: grafana.com's own logo requirements.**~~ **RESOLVED — 2026-08-04, and the
+  answer is that there is no requirement to meet.** Grafana's dashboard-publishing
+  documentation states no dimension, aspect ratio, file-size or format limit for a logo —
+  it lists the asset and specifies nothing about it. So the assumption could never have
+  been checked against a spec, because none is published.
+
+  What settles it instead is acceptance: `GET /api/dashboards/25618` and `/25620` both
+  report **`hasLogo: true`**, so the 512×512 PNGs were taken without complaint. The choice
+  stands on the reason it was made — it downsamples cleanly — and `SIZE` in the script is
+  still the whole edit if that ever changes.
 
 - **`scripts/dashboard-publish.py` and `task dashboards`**, deriving the grafana.com
   upload into a gitignored `dist/`.

@@ -158,11 +158,23 @@ time and is why this is struck rather than deleted: rebuild with `task dashboard
 [`llm-sim-overview.grafana-com.md`](llm-sim-overview.grafana-com.md). Both halves, every
 time — a board revision without its page leaves the panel unexplained.
 
-⚠️ **25618's catalog page text is still not**, and it is worth re-pasting from
-[`gpu-sim-dcgm.grafana-com.md`](gpu-sim-dcgm.grafana-com.md) next time that board is
-touched. Of the two paste corruptions recorded here, the attribution query now closes
-correctly on the live page; **the board 12239 link still lost its `]` and renders as
-literal text** (checked 2026-08-04). Both are intact in this repo.
+⚠️ **25618's catalog page still carries one paste corruption**, and it is a 30-second
+fix rather than a full re-paste. Of the two recorded here, the attribution query now closes
+correctly on the live page. The board 12239 link does not: the live copy reads
+
+```text
+[Board 12239 (https://grafana.com/grafana/dashboards/12239) covers that ground
+```
+
+— the `]` landed after the number instead of before the URL, so it renders as literal
+text. The correct form is in
+[`gpu-sim-dcgm.grafana-com.md`](gpu-sim-dcgm.grafana-com.md) and reads
+`[Board 12239](https://grafana.com/grafana/dashboards/12239)`. Checked against the API
+on 2026-08-04.
+
+⚠️ **This is why the page is re-pasted WHOLE rather than edited in the form.** A hand
+edit is what produced the corruption; pasting the file replaces it with something a diff
+can check.
 
 ⚠️ ~~**The short description on both boards is still the upload form's placeholder**~~
 **DONE — 2026-08-04.** Both now carry the paste-ready text: 25620 leads with the TTFT error
