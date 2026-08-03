@@ -16,12 +16,12 @@ body:
     attributes:
       label: Which path?
       options:
-        - compose (docker compose, no Kubernetes)
-        - kind (task local:up)
-        - EKS
-        - GKE
-        - Helm chart into an existing cluster
-        - "--skip-monitoring / BYO Prometheus"
+        - "compose — docker compose, no Kubernetes (no verify.sh on this path)"
+        - "local — kind (verify.sh local)"
+        - "eks (verify.sh eks)"
+        - "gke (verify.sh gke)"
+        - "Helm chart into an existing cluster (verify.sh <target> --byo)"
+        - "--skip-monitoring / BYO Prometheus (verify.sh <target> --byo)"
     validations: {required: true}
   - type: textarea
     id: expected
@@ -32,8 +32,13 @@ body:
   - type: textarea
     id: verify
     attributes:
-      label: "`./scripts/verify.sh <target>` output"
-      description: The numbered checks. A failing L-number tells us far more than a screenshot.
+      label: "`./scripts/verify.sh` output — or the equivalent for your path"
+      description: >-
+        The numbered checks; a failing L-number tells us far more than a screenshot.
+        Targets are `eks`, `gke` and `local` — add `--byo` on the chart and
+        skip-monitoring paths. ⚠️ The compose path has no verify.sh: paste
+        `docker compose ps` and the Prometheus targets page instead
+        (`localhost:9090/targets`), or say what you saw.
       render: text
   - type: textarea
     id: preflight
