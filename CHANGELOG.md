@@ -181,7 +181,10 @@ a caveat and exposed a second figure worth explaining rather than editing away.
   **22** `${datasource}` references on the LLM board — true when that board had nine
   panels, 33 now.
 
-  ⚠️ **25620 has fallen behind this repo in both of its artefacts**, now recorded in
+  ⚠️ ~~**25620 has fallen behind this repo in both of its artefacts**~~ **DONE — revision 3
+  uploaded and the catalog page re-pasted; confirmed live via grafana.com's API on 2026-08-04.**
+  Struck rather than deleted: the reasoning outlives the action, and the next panel will
+  need it again. Recorded at the time in
   `manifests/dashboards/README.md` rather than left to be discovered. Published revision 2
   predates the burn-rate panel and the live catalog page predates the SLO section, so
   importing by id today gets neither. That file has always warned that the catalog does not
