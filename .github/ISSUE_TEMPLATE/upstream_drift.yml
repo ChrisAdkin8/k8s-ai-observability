@@ -1,0 +1,31 @@
+name: Upstream drift
+description: vLLM, DCGM or a pinned chart has moved and this rig no longer matches it.
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        This rig's central claim is that what you build against the simulator transfers
+        unchanged to real hardware. Drift breaks that claim **silently** — a renamed
+        metric does not error, it just stops matching, and a changed bucket boundary
+        still returns a confident, plausible, wrong number.
+
+        `scripts/check-vllm-buckets.py` runs weekly and watches the metric set and the
+        bucket layout. If it missed something, that gap is itself worth reporting.
+  - type: dropdown
+    id: what
+    attributes:
+      label: What moved?
+      options:
+        - A vLLM metric name
+        - A vLLM histogram bucket layout
+        - The DCGM exporter surface
+        - kube-prometheus-stack or fake-gpu-operator
+        - Something else
+    validations: {required: true}
+  - type: textarea
+    id: evidence
+    attributes:
+      label: Evidence
+      description: The upstream source — a release note, a commit, or the declaration itself. This repo does not take a claim without one.
+    validations: {required: true}
