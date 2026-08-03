@@ -2,6 +2,9 @@
 [![Release](https://img.shields.io/github/v/release/ChrisAdkin8/k8s-ai-observability?color=blue)](https://github.com/ChrisAdkin8/k8s-ai-observability/releases)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 [![Kubernetes](https://img.shields.io/badge/kubernetes-v1.36.1-326ce5.svg)](kind/gpu-sim.yaml)
+[![GPU board](https://img.shields.io/badge/grafana.com-25618-F46800.svg)](https://grafana.com/grafana/dashboards/25618-gpu-simulation-dcgm-overview/)
+[![vLLM board](https://img.shields.io/badge/grafana.com-25620-F46800.svg)](https://grafana.com/grafana/dashboards/25620-llm-simulation-vllm-serving-overview/)
+[![Simulator image](https://img.shields.io/badge/ghcr.io-vllm--metrics--sim-2496ed.svg)](https://github.com/ChrisAdkin8/k8s-ai-observability/pkgs/container/vllm-metrics-sim)
 
 # k8s-ai-observability
 
