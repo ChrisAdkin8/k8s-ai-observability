@@ -77,11 +77,14 @@ tasks:
         [ $rc -eq 0 ] || echo "  one or more REQUIRED tools are missing"
         exit $rc
 
-  # ---- the three checks that need no cloud, no cluster and no network --------
-  # All run in seconds. Between them they cover the three things this repo produces
-  # that are worth testing on their own: what the simulator emits, what the PromQL
-  # over it computes, and how the weekly drift check decides those names still
-  # match upstream's.
+  # ---- the checks that need no cloud, no cluster and no network --------------
+  # All run in seconds. Between them they cover the things this repo produces that
+  # are worth testing on their own: what the simulator emits, what the PromQL over
+  # it computes, how the weekly drift check decides those names still match
+  # upstream's, and whether the prose numbers still match the code they describe.
+  # (Deliberately no count in this comment: a hardcoded "three" here went stale
+  # the moment a fourth check landed — the exact drift class doc-claims exists
+  # to catch.)
 
   # Validates the LLM simulator's Prometheus output: bucket monotonicity, +Inf
   # consistency, HELP/TYPE correctness, and that rendering /metrics observes
@@ -117,6 +120,38 @@ tasks:
     desc: Unit-test the vLLM drift check's matching rules (no cluster, no network)
     cmds:
       - python3 scripts/check-vllm-buckets.py --selftest
+
+  # Checks that numbers stated in prose still match the code they describe:
+  # dashboard ids against the catalog README, "emits N" claims against what
+  # `llm-sim.py --print` actually renders. Every check in the script is a
+  # correction commit that already happened (25619->25620, the emits-count
+  # corrections), mechanised. It holds no copy of any truth — see the script
+  # header for what it deliberately does not check.
+  doc-claims:
+    desc: Check prose claims (dashboard ids, metric counts) against derived truth
+    cmds:
+      - python3 scripts/check-doc-claims.py
+
+  # THE PRE-PUSH GATE. One command, every check that needs no cluster, no cloud
+  # and no docker — run it before landing anything. It exists because 12 of the
+  # repo's first 76 commits were corrections of work already on main, and most
+  # of them would have been caught by the targets below, run in this order.
+  #
+  # chart goes last: it is the only step that may touch the network (helm
+  # fetches the pinned dependencies on first run) and the only one needing a
+  # tool beyond python3 + promtool. NOT included, deliberately:
+  #   image / compose   need docker            (task image, task compose)
+  #   verify.sh         needs a cluster        (task <target>:verify)
+  #   the live drift check needs the network — its weekly CI job owns it
+  preflight:
+    desc: Run every no-cluster gate (selftests, rules, doc claims, chart) before pushing
+    cmds:
+      - task: selftest
+      - task: compose-selftest
+      - task: drift-test
+      - task: doc-claims
+      - task: rule-tests
+      - task: chart
 
   # Derives the grafana.com upload from manifests/dashboards/*.json into dist/.
   # The repo files cannot be uploaded as-is: they bind to a datasource VARIABLE,

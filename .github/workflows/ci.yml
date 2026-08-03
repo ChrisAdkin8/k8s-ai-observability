@@ -149,6 +149,22 @@ jobs:
       - name: Compose GPU producer vs the DCGM surface contract
         run: python3 compose/gpu-metrics-sim.py --selftest
 
+      # Numbers stated in prose, against the code that owns them: dashboard ids vs
+      # the catalog README, the emitted-metric / alert / L-check / query /
+      # ${datasource} counts vs what the files actually contain. Every check is a
+      # correction commit that already happened — the 0.6.0 "Fixed" entry alone
+      # corrected SEVEN of these by hand, and the ITL caveat wrong by 2x reached a
+      # PUBLISHED board the same way.
+      #
+      # Its own selftest runs first: the matchers are regexes over prose, so a
+      # reworded claim must fail LOUDLY as a dead check rather than quietly stop
+      # matching. Needs no cluster, no docker and no network.
+      - name: Doc-claim matchers selftest
+        run: python3 scripts/check-doc-claims.py --selftest
+
+      - name: Prose claims vs the code they describe
+        run: python3 scripts/check-doc-claims.py
+
       # The MATCHING RULES of the weekly drift check, against a committed fixture
       # rather than against upstream. The drift job below runs on a schedule and
       # needs network; this needs neither, and it covers the one piece of
