@@ -27,7 +27,9 @@ WHAT IT CHECKS
      stale range was in that script's own header.
   5. PromQL query count — vs the numbered queries in observability.md. Said eight, had
      nine since `ALERTS{alertstate="firing"}` was added.
-  6. `${datasource}` reference count — vs the LLM board. Said 22, "true when that board had
+  6. The pinned Kubernetes version — the README badge and docs/versions.md vs
+     kind/gpu-sim.yaml. A badge is prose with a colour, and nothing else verified it.
+  7. `${datasource}` reference count — vs the LLM board. Said 22, "true when that board had
      nine panels, 33 now".
 
 WHAT IT DELIBERATELY DOES NOT CHECK
@@ -128,13 +130,26 @@ def derive_datasource_refs() -> int:
     return n or die("datasource", "no ${datasource} references on the LLM board — dead")
 
 
-# ------------------------------------------------------------------- numeric checks
+def derive_kind_node_version() -> str:
+    """The pinned kind node image — the version the README's badge asserts.
+
+    A badge is prose with a colour: `kubernetes-v1.36.1` is hardcoded into an
+    img.shields.io URL and nothing else verifies it, so a node-image bump leaves the
+    most prominent line in the repo quietly lying. Same class as the ITL caveat that
+    reached a published board.
+    """
+    m = re.search(r"kindest/node:v([\d.]+)", read("kind/gpu-sim.yaml"))
+    return m.group(1) if m else die("k8s-version",
+                                    "no kindest/node pin in kind/gpu-sim.yaml — dead")
+
+
+# --------------------------------------------------------------------- claim checks
 # pattern  : must capture the claimed number as group 1
 # context  : the claim only counts on a line ALSO matching this — so a number about
 #            something else is never dragged into the comparison
 # extra    : non-markdown files to scan as well (L-range's stale copy was in verify.sh)
 
-NUMERIC_CHECKS = [
+CLAIM_CHECKS = [
     # ⚠️ The context names WHAT IS BEING COUNTED, and must. `upstream|vllm` was too
     # loose: "Real vLLM only ever emits one surface" is a true sentence about metric
     # SURFACES (v0/v1) on a line that mentions vLLM, and it was dragged into a families
@@ -151,6 +166,11 @@ NUMERIC_CHECKS = [
     dict(name="promql", pattern=rf"\b{NUM} PromQL queries\b", context=r".",
          derive=derive_promql_queries, unit="numbered queries in observability.md",
          hint="they are the `# N.` comments inside the promql block"),
+    # Two shapes, one truth: the README badge (`kubernetes-v1.36.1-326ce5`) and
+    # docs/versions.md's `kindest/node:v1.36.1` row. Neither is a count, hence cast=str.
+    dict(name="k8s-version", pattern=r"(?:kubernetes-|kindest/node:)v([\d.]+)", context=r".",
+         derive=derive_kind_node_version, cast=str, unit="pinned kind node image",
+         hint="the badge and docs/versions.md must both match kind/gpu-sim.yaml"),
     dict(name="datasource", pattern=rf"\b{NUM} of them\b", context=r"datasource",
          derive=derive_datasource_refs, unit="${datasource} refs on the LLM board",
          hint="count them in manifests/dashboards/llm-sim-overview.json"),
@@ -162,9 +182,9 @@ URL_ID = re.compile(r"grafana\.com/grafana/dashboards/(\d+)")
 PROSE_ID = re.compile(r"\b(?:board|id)\s+(\d{4,})\b", re.IGNORECASE)
 
 
-def claims(pattern: str, context: str, path: str, text: str) -> list[tuple[str, int, int]]:
+def claims(pattern: str, context: str, path: str, text: str, cast=to_int) -> list[tuple]:
     ctx, pat = re.compile(context, re.I), re.compile(pattern, re.I)
-    return [(path, n, to_int(m.group(1)))
+    return [(path, n, cast(m.group(1)))
             for n, line in enumerate(text.splitlines(), 1) if ctx.search(line)
             for m in pat.finditer(line)]
 
@@ -208,11 +228,13 @@ def main() -> None:
           f"({', '.join(sorted(blessed))})")
 
     # ---- the numeric claims
-    for c in NUMERIC_CHECKS:
+    for c in CLAIM_CHECKS:
         scan = dict(texts)
         for rel in c.get("extra", []):
             scan[rel] = read(rel)
-        found = [x for p, t in scan.items() for x in claims(c["pattern"], c["context"], p, t)]
+        cast = c.get("cast", to_int)
+        found = [x for p, t in scan.items()
+                 for x in claims(c["pattern"], c["context"], p, t, cast)]
         if not found:
             die(c["name"], f'no claim matched /{c["pattern"]}/ anywhere — the check is '
                            f"dead. If the wording changed, teach the pattern the new one.")
@@ -249,7 +271,7 @@ The GPU rule file carries three alerts.
 | the simulators serve the surface | `verify.sh` L1-L9 | `helm test` |
 nine PromQL queries that also work against real hardware
 repoints every `${datasource}` reference — 33 of them on the LLM board — and drops it.
-The exporter emits 3 events per scrape, and 12 of them are dropped.
+The exporter emits 3 events per scrape, and 12 of them are dropped.\n[![Kubernetes](https://img.shields.io/badge/kubernetes-v1.36.1-326ce5.svg)](kind/gpu-sim.yaml)
 Real vLLM only ever emits one surface — `both` is a rig affordance, not a fidelity claim.
 """
 
@@ -273,19 +295,21 @@ def selftest() -> None:
     # check's first real run against the tree, because the context regex named the
     # subject (vLLM) instead of the counted noun.
     expected = {"emits": [15], "alerts": [6], "l-range": [9],
-                "promql": [9], "datasource": [33]}
-    for c in NUMERIC_CHECKS:
-        vals = [v for _, _, v in claims(c["pattern"], c["context"], "f.md", CLAIM_FIXTURE)]
+                "promql": [9], "datasource": [33], "k8s-version": ["1.36.1"]}
+    for c in CLAIM_CHECKS:
+        vals = [v for _, _, v in claims(c["pattern"], c["context"], "f.md",
+                                        CLAIM_FIXTURE, c.get("cast", to_int))]
         assert vals == expected[c["name"]], (c["name"], vals)
         print(f"  ok  {c['name']:<10} extracted {vals} from the fixture, decoys ignored")
 
     assert to_int("six") == 6 and to_int("33") == 33
-    assert claims(NUMERIC_CHECKS[1]["pattern"], NUMERIC_CHECKS[1]["context"],
+    assert claims(CLAIM_CHECKS[1]["pattern"], CLAIM_CHECKS[1]["context"],
                   "f.md", "The GPU rule file carries three alerts.") == []
     print("  ok  words      word and digit forms both parse; contextless claims ignored")
 
-    for c in NUMERIC_CHECKS:
-        assert claims(c["pattern"], c["context"], "f.md", "nothing relevant") == []
+    for c in CLAIM_CHECKS:
+        assert claims(c["pattern"], c["context"], "f.md", "nothing relevant",
+                      c.get("cast", to_int)) == []
     assert blessed_ids("no ids at all") == set()
     print("  ok  empty      no-match is representable — main() treats it as fatal")
 
