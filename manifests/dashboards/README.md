@@ -146,25 +146,29 @@ first — so a merged panel reaches nobody who imported by id until it is upload
 
 Always re-submit as a **new revision of the existing id**, never as a new dashboard: a
 second upload mints a second id, and everyone who already imported the first silently
-stops receiving fixes. 25620 is on **revision 2** — the phase breakdown — uploaded
-2026-08-01; 25618 is still on revision 1 from 2026-07-31.
+stops receiving fixes. 25620 is on **revision 3** — the TTFT error-budget burn-rate panel — with its catalog
+page re-pasted; 25618 is still on revision 1 from 2026-07-31, and its JSON is still in
+step. Both confirmed against grafana.com's API on 2026-08-04.
 
-⚠️ **25620 has since fallen behind this repo, in both artefacts.** Revision 2 predates the
-TTFT error-budget burn-rate panel, and the live catalog page predates the SLO section that
-explains it — so importing 25620 today gets a board with no burn-rate panel and a page that
-never mentions the objective. Re-upload `dist/grafana-com/llm-sim-overview.json` as
-revision 3 and re-paste [`llm-sim-overview.grafana-com.md`](llm-sim-overview.grafana-com.md)
-next time that board is touched. 25618's JSON is still in step.
+⚠️ ~~**25620 has since fallen behind this repo, in both artefacts.**~~ **DONE — 2026-08-04.**
+Revision 3 carries the TTFT error-budget burn-rate panel and the live catalog page now
+carries the SLO section, both verified against the API. The procedure stands for next
+time and is why this is struck rather than deleted: rebuild with `task dashboards`, upload
+`dist/grafana-com/llm-sim-overview.json` as a **new revision of 25620**, and re-paste
+[`llm-sim-overview.grafana-com.md`](llm-sim-overview.grafana-com.md). Both halves, every
+time — a board revision without its page leaves the panel unexplained.
 
-⚠️ **25618's catalog page text is not**, and it is worth re-pasting from
+⚠️ **25618's catalog page text is still not**, and it is worth re-pasting from
 [`gpu-sim-dcgm.grafana-com.md`](gpu-sim-dcgm.grafana-com.md) next time that board is
-touched: the live copy predates the dash flattening, and the paste corrupted two things a
-reader would copy — the per-pod attribution query lost the `)` after `gpu`, and the board
-12239 link lost its `]` so it renders as literal text. Both are intact in this repo.
+touched. Of the two paste corruptions recorded here, the attribution query now closes
+correctly on the live page; **the board 12239 link still lost its `]` and renders as
+literal text** (checked 2026-08-04). Both are intact in this repo.
 
-⚠️ **The short description on both boards is still the upload form's placeholder** —
-"Dashboard for vLLM stats" on 25620, "Dashboard to display NVIDIA DCGM stats" on 25618 —
-rather than the paste-ready text above. That field is what the catalog search results show.
+⚠️ ~~**The short description on both boards is still the upload form's placeholder**~~
+**DONE — 2026-08-04.** Both now carry the paste-ready text: 25620 leads with the TTFT error
+budget, 25618 with "works against a real dcgm-exporter unchanged". That field is what the
+catalog search results show, which is why it was worth fixing and why a future upload must
+not let the form default win again.
 
 A logo each, 512×512, is in [`docs/logos/`](../../docs/logos/) — `gpu-sim-dcgm.png` and
 `llm-sim-overview.png`, named for the boards they belong to, plus `org-chrisadkin.png` for
