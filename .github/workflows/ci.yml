@@ -277,7 +277,7 @@ jobs:
       PROMETHEUS_PORT: 9090
       GRAFANA_PORT: 3000
     steps:
-      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       # Gated exactly as the stack job's is — fork PRs never receive secrets, and an
       # ungated login fails every external contribution.
