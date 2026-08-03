@@ -26,21 +26,29 @@ simulators**, and each polls its own file every **10 seconds** (see
 alt-tab.
 
 ```sh
-cd compose && PROMETHEUS_PORT=19090 GRAFANA_PORT=13000 docker compose up -d
+(cd compose && PROMETHEUS_PORT=19090 GRAFANA_PORT=13000 docker compose up -d)
 ```
+
+⚠️ **Both compose commands run in a subshell on purpose.** A bare `cd compose` persists in your shell, and the profile edit below is written from the REPO ROOT — after a leaked `cd` it resolves to `compose/compose/.generated/...`, which does not exist. Every path in this file is root-relative; keep it that way.
 
 The non-default ports are deliberate: 3000 and 9090 collide with `scripts/grafana.sh` and
 `scripts/prometheus.sh`, and a loopback-bound port-forward wins silently — you would record
 the *cluster's* Grafana while believing it was compose's.
 
-**Let it run ~90 seconds before recording.** The `llm:tokens:*_rate5m` panels under-read
-until the `[5m]` window fills, so an immediate capture shows a rig that looks broken.
+**Let it run ~90 seconds before recording**, or an immediate capture shows a rig that
+looks broken: `rate()` needs two scrapes before it reports anything at all, and the
+saturated tenant's queue takes longer than that to reach the plateau the board is meant to
+show.
+
+⚠️ It does **not** need the full `[5m]` window. `rate()` extrapolates within whatever the
+window holds, so a steady counter reads correctly from about the second scrape — waiting
+five minutes buys nothing. 90s is what the queue needs, not what the range needs.
 
 ## The frame
 
 Open the board in **kiosk mode**, which strips Grafana's nav and sidebar:
 
-```
+```text
 http://localhost:13000/d/llm-sim-overview?kiosk&from=now-5m&to=now&refresh=5s
 ```
 
@@ -75,7 +83,7 @@ saturated one, which is the whole demonstration in one gesture.
 Restore afterwards; `generate` rewrites the profiles from the manifests on every start:
 
 ```sh
-docker compose up -d --force-recreate generate
+(cd compose && docker compose up -d --force-recreate generate)
 ```
 
 `.generated/` is gitignored, so nothing here can be committed by accident.
@@ -142,5 +150,5 @@ A screen recording cannot be, because a human has to drive the board.
 This page is the substitute: the parameters that decide whether the recording is usable
 (`?kiosk`, `refresh=5s`, compose rather than kind, the encode flags) are written down, so
 re-recording after a board change is one pass rather than a rediscovery of the same two
-traps. **If the board gains or loses a panel, re-record it** — a demo of a board that no
+traps. **If a change alters what the board looks like — a panel added or removed, but equally a query, threshold, title, layout or refresh interval — re-record it** — a demo of a board that no
 longer exists is worse than a still of one that does.

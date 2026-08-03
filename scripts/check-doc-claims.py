@@ -199,9 +199,16 @@ def referenced_ids(path: str, text: str) -> list[tuple[str, int, str]]:
 
 
 def tracked(pattern: str) -> list[str]:
+    # No check=True: a CalledProcessError here would surface as a traceback, which is
+    # the one failure shape this script otherwise never produces. Everything else
+    # reports through die() with the check named, and a missing git is exactly the
+    # case where a clear message matters most.
     out = subprocess.run(["git", "ls-files", pattern],
-                         cwd=ROOT, capture_output=True, text=True, check=True).stdout
-    return [p for p in out.splitlines() if p and p not in EXCLUDED]
+                         cwd=ROOT, capture_output=True, text=True)
+    if out.returncode != 0:
+        die("setup", f"git ls-files exited {out.returncode} — the scan cannot enumerate "
+                     f"tracked files\n{out.stderr.strip()}")
+    return [p for p in out.stdout.splitlines() if p and p not in EXCLUDED]
 
 
 def main() -> None:

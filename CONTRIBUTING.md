@@ -129,7 +129,7 @@ in `manifests/dashboards/`. Keep the `uid` unchanged. A change made only in the 
 is reverted on the next install, because the ConfigMap is rebuilt from the file every
 time — see [manifests/dashboards/](manifests/dashboards/).
 
-If you add or remove a panel on the LLM board, the README's demo GIF is now stale — it is
+If you change what the LLM board looks like — a panel added or removed, but equally a query, threshold, title, layout or refresh interval — the README's demo GIF is now stale — it is
 the one visual asset here that no script can re-render, because a human has to drive the
 board. [docs/record-demo.md](docs/record-demo.md) is the recipe, and exists mainly to hold
 the two settings that decide whether a recording is usable at all.
