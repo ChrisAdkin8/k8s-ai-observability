@@ -83,6 +83,26 @@ dependencies:
 
 annotations:
   artifacthub.io/license: MIT
+
+  # ⚠️ THE CHART'S NAME ON ARTIFACT HUB IS `name:` AT THE TOP OF THIS FILE, and
+  # there is no display-name annotation for Helm charts — checked against
+  # artifacthub.io/docs/topics/annotations/helm 2026-08-04. The display name that
+  # does exist belongs to the REPOSITORY and is set in the Artifact Hub form; see
+  # artifacthub-repo.yml. So these two annotations are the whole of what this
+  # file controls about how the chart presents itself.
+
+  # One of eight fixed values. `ai-machine-learning` is the tempting one and is
+  # the wrong shelf: that category is where people look for things that RUN
+  # models, and this ships dashboards, recording rules, alerts and
+  # ServiceMonitors. Someone filtering monitoring-logging is looking for exactly
+  # this. Reach into the AI audience is alternativeName's job, below, which costs
+  # nothing and does not mis-file the package.
+  artifacthub.io/category: monitoring-logging
+
+  # A second term for search ranking. The chart's own name does not contain
+  # "vllm" or "gpu", which are the words someone arriving from the Grafana
+  # catalog boards (25618, 25620) would actually type.
+  artifacthub.io/alternativeName: vllm-gpu-observability
   # ⚠️ STAYS "true" FOR THE FIRST LISTING, and the condition for removing it is
   # written here rather than left to feel — otherwise it never comes off, or it
   # comes off the day someone thinks the chart looks finished.
