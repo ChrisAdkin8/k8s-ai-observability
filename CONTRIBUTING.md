@@ -23,8 +23,9 @@ task chart             # assemble into dist/, lint, render both ways — ~20s
 task image             # build the simulator image and smoke-test it — ~30s
 ```
 
-The full stack job takes ~6 minutes and stands up a real kind cluster; you do not need to
-run it locally to open a PR, but `task local:up` does exactly what CI does if you want to.
+The full stack job takes ~6 minutes and stands up a real kind cluster; the `lite` leg takes
+longer, not less — see the note beside the two legs below. You do not need to run either
+locally to open a PR, but `task local:up` does exactly what CI does if you want to.
 
 If you changed shell, `bash -n scripts/*.sh` is the next thing CI checks; every `*.py` in
 the repo goes through `python3 -m py_compile` beside it, so a syntax error in the release
@@ -162,8 +163,14 @@ order; it has been questioned once and settled.
 - One logical change per commit. If two things are genuinely independent, they are two
   commits, even when they arrive together.
 - Say why in the body, not just what. The diff already says what.
-- CI must be green. The `fast` job is seconds, `chart` and `image` about a minute each, and
-  the two full-stack legs are ~6 minutes each and run in parallel.
+- CI must be green. Measured across three runs on 2026-08-04: `fast` 9-12s, `chart` 10-14s,
+  `image` 19-36s, `compose` 61-78s, and the two full-stack legs in parallel — `full`
+  5m19s-6m25s, `lite` 6m39s-8m32s. **`lite` is the critical path, not `full`**, which is
+  backwards for a profile that installs less; all of the difference is inside `verify.sh`.
+  `fast` now gates the four expensive jobs, so a broken rule test costs seconds rather than
+  the ~14 runner-minutes the two legs would otherwise spend confirming it.
+  ⚠️ This measurement predates the poll-budget and port-forward fixes and **still needs**
+  re-deriving once those land.
 
 ## What is deliberately out of scope
 
