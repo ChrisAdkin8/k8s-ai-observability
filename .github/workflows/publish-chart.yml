@@ -1,0 +1,459 @@
+# Publish the Helm chart to ghcr.io as an OCI artefact, from a release tag.
+#
+# The chart is how someone who ALREADY runs Prometheus adopts this rig without
+# handing their monitoring stack to an install script. `task chart` is not going
+# away and is not replaced by this: a CONTRIBUTOR builds locally to test a
+# template change, a USER installs the published artefact. Both paths are real
+# and docs/byo-prometheus.md says which is which.
+#
+# ⚠️ NO NEW SECRETS. GITHUB_TOKEN is sufficient for ghcr.io, the same as
+# publish-image.yml, and for the same reason: a step gated on a repository secret
+# silently cannot run for a fork.
+#
+# ⚠️ PACKAGED FROM dist/, NEVER FROM charts/. This is the single most important
+# line in the file. `.Files.Get` cannot read outside the chart directory, so the
+# dashboards and rule files are assembled into dist/ by scripts/chart-build.py
+# rather than committed a second time. A chart packaged from charts/ RENDERS
+# SUCCESSFULLY and produces no ConfigMaps at all, because `.Files.Get` returns
+# empty for a missing file instead of failing. helm lint passes. helm package
+# passes. The push exits 0. The verify job below exists because none of those
+# catch it.
+name: Publish helm chart
+
+on:
+  push:
+    tags: ['v*']
+  # So the whole path can be exercised before a real tag exists. Defaults to a
+  # REHEARSAL: `push_to_registry` must be set true deliberately, because a chart
+  # version cannot be un-published and a dispatch is the easy way to burn one.
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Release tag to publish as (e.g. v0.8.0). Required — a wrong default would publish over a real release.'
+        required: true
+        type: string
+      push_to_registry:
+        description: 'Actually push. Leave false to rehearse: builds, packages and lints, publishes nothing, verifies nothing.'
+        required: true
+        default: false
+        type: boolean
+
+permissions:
+  contents: read
+
+concurrency:
+  group: publish-chart-${{ github.ref }}
+  cancel-in-progress: false   # never cancel a half-finished registry push
+
+env:
+  # ⚠️ The chart lives under a `charts/` path component so it cannot collide with
+  # the image package (ghcr.io/<owner>/vllm-metrics-sim). `helm push` appends the
+  # chart NAME to this, giving ghcr.io/<owner>/charts/k8s-ai-observability.
+  OCI_REPO: ghcr.io/${{ github.repository_owner }}/charts
+  CHART_NAME: k8s-ai-observability
+  HELM_VERSION: v3.21.3
+
+jobs:
+  publish:
+    name: package from dist/ + push
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    # Job-level permissions REPLACE the workflow default rather than adding to
+    # it, so `contents: read` is restated alongside packages: write. Without it
+    # the push fails with a 403 that reads exactly like a bad credential.
+    permissions:
+      contents: read
+      packages: write
+
+    outputs:
+      chart_version: ${{ steps.v.outputs.chart_version }}
+      oci_repo: ${{ steps.v.outputs.oci_repo }}
+      pushed: ${{ steps.v.outputs.pushed }}
+
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          # chart-build.py resolves the release tag with `git describe --tags`
+          # and reads Chart.yaml at every tag for the version re-use check.
+          # A shallow clone has neither, and both checks SKIP rather than fail —
+          # the quiet half of the bug they exist to prevent.
+          fetch-depth: 0
+
+      - name: Install pinned Helm
+        run: |
+          set -euo pipefail
+          mkdir -p "$HOME/.local/bin"
+          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+          curl -fsSL "https://get.helm.sh/helm-${HELM_VERSION}-linux-amd64.tar.gz" \
+            | tar -xz -C /tmp linux-amd64/helm
+          mv /tmp/linux-amd64/helm "$HOME/.local/bin/helm"
+          chmod +x "$HOME/.local/bin/helm"
+          helm version --short
+
+      - name: Resolve the versions
+        id: v
+        env:
+          REF_NAME: ${{ github.ref_name }}
+          INPUT_VERSION: ${{ inputs.version }}
+          INPUT_PUSH: ${{ inputs.push_to_registry }}
+        run: |
+          set -euo pipefail
+          version="${INPUT_VERSION:-$REF_NAME}"
+          case "$version" in
+            v*) ;;
+            *) echo "version must start with 'v', got '$version'" >&2; exit 1 ;;
+          esac
+          # A tag push always publishes; a dispatch publishes only when asked.
+          if [ "${GITHUB_EVENT_NAME}" = "push" ]; then pushed=true
+          else pushed="${INPUT_PUSH:-false}"; fi
+          # ghcr.io rejects an uppercase path component and a GitHub username may
+          # contain one.
+          echo "oci_repo=$(echo "${OCI_REPO}" | tr '[:upper:]' '[:lower:]')" >> "$GITHUB_OUTPUT"
+          echo "version=$version"   >> "$GITHUB_OUTPUT"
+          echo "pushed=$pushed"     >> "$GITHUB_OUTPUT"
+          cv=$(grep -m1 '^version:' "charts/${CHART_NAME}/Chart.yaml" | awk '{print $2}')
+          echo "chart_version=$cv" >> "$GITHUB_OUTPUT"
+          echo "release $version, chart $cv, push=$pushed"
+
+      # ⚠️ --strict-version makes THREE comparisons fatal that only warn during
+      # development, and this is the last chance to catch any of them:
+      #   * values.yaml llm.image.tag vs Chart.yaml appVersion
+      #   * appVersion vs the repo's release tag — a stale one installs green and
+      #     runs an OLD simulator
+      #   * the chart `version` against every version a tag already shipped — a
+      #     registry version is immutable, so a re-use is rejected at the push,
+      #     by which point the tag is public and the release is out
+      # It also assembles dist/, which is what gets packaged.
+      - name: Build into dist/, strictly
+        run: python3 scripts/chart-build.py --strict-version
+
+      - name: helm lint the built chart
+        run: helm lint "dist/charts/${CHART_NAME}"
+
+      # ⚠️ VENDORING IS NOT A CHOICE HERE, it is how packaged charts work.
+      # `helm install` of a .tgz does NOT resolve dependencies — there is no
+      # `helm dependency update` step on the consumer's side and no network fetch
+      # at install time. A dependency that is not INSIDE the archive is simply
+      # absent, and Helm additionally requires a conditional dependency to be
+      # present even when its condition is false. chart-build.py already fetched
+      # both into dist/charts/<name>/charts/; this step asserts they are actually
+      # there rather than trusting that it did.
+      - name: The dependencies are vendored inside the package
+        run: |
+          set -euo pipefail
+          d="dist/charts/${CHART_NAME}/charts"
+          ls -la "$d"
+          for dep in kube-prometheus-stack fake-gpu-operator; do
+            ls "$d/$dep"-*.tgz >/dev/null 2>&1 \
+              || { echo "::error::$dep is NOT vendored into the package. A packaged chart does not resolve dependencies at install time, so it would be silently absent." >&2; exit 1; }
+            echo "  ok  $(basename "$(ls "$d/$dep"-*.tgz)")"
+          done
+
+      - name: helm package
+        id: pkg
+        run: |
+          set -euo pipefail
+          mkdir -p /tmp/pkg
+          helm package "dist/charts/${CHART_NAME}" -d /tmp/pkg
+          tgz=$(ls /tmp/pkg/${CHART_NAME}-*.tgz)
+          echo "tgz=$tgz" >> "$GITHUB_OUTPUT"
+          ls -la "$tgz"
+
+      # The last assertion before anything leaves this runner, and the one that
+      # catches the packaged-from-charts/ failure at its source: look INSIDE the
+      # archive for the dashboard JSON. A chart missing them packages, lints and
+      # pushes without complaint.
+      - name: The archive actually contains the dashboards and rules
+        run: |
+          set -euo pipefail
+          tgz="${{ steps.pkg.outputs.tgz }}"
+          tar tzf "$tgz" | sed 's/^/  /' | head -40
+          for f in $(ls manifests/dashboards/*.json | xargs -n1 basename); do
+            tar tzf "$tgz" | grep -q "/files/dashboards/$f$" \
+              || { echo "::error::$f is not inside the package — it was packaged from charts/ instead of dist/, or chart-build.py did not run." >&2; exit 1; }
+            echo "  ok  files/dashboards/$f"
+          done
+          tar tzf "$tgz" | grep -q '/files/rules/' \
+            || { echo "::error::no rule files inside the package." >&2; exit 1; }
+
+      - name: Log in to ghcr.io
+        if: steps.v.outputs.pushed == 'true'
+        uses: docker/login-action@dbcb813823bdd20940b903addbd779551569679f # v4.6.0
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      # ⚠️ NO FLOATING TAG. The image publishes `:latest` alongside the version;
+      # the chart deliberately does not. Helm's OCI tag IS the chart version, and
+      # a `latest` that consumers can pin means "whatever shipped most recently",
+      # which is the opposite of what pinning is for. `--version` on the consumer
+      # side is the supported way to track a release.
+      - name: helm push
+        if: steps.v.outputs.pushed == 'true'
+        run: |
+          set -euo pipefail
+          helm push "${{ steps.pkg.outputs.tgz }}" "oci://${{ steps.v.outputs.oci_repo }}"
+
+      - name: Rehearsal summary
+        if: steps.v.outputs.pushed != 'true'
+        run: |
+          {
+            echo "### Rehearsal only — NOTHING WAS PUBLISHED"
+            echo
+            echo "The chart was built from \`dist/\`, linted, its dependencies"
+            echo "asserted vendored, packaged, and its contents checked. It was"
+            echo "**not pushed**, so the verify job did not run and nothing here"
+            echo "has been verified as a consumer would receive it."
+            echo
+            echo "Re-run with \`push_to_registry: true\` to publish."
+          } >> "$GITHUB_STEP_SUMMARY"
+
+  # ---------------------------------------------------------------------------
+  # ⚠️ A SUCCESSFUL PUSH PROVES BYTES MOVED. It does not prove the chart
+  # installs, and this repo does not ship unverified claims. Everything below
+  # runs against the PUBLISHED artefact — the copy a stranger actually gets —
+  # and none of it shares state with the job that produced it.
+  verify-published:
+    name: pull back anonymously + install against a foreign Prometheus
+    needs: publish
+    if: needs.publish.outputs.pushed == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+
+    # ⚠️ DELIBERATELY NOT `packages: read`. The whole point of W1.4 is that the
+    # package is PUBLIC, and a job holding a credential cannot tell the
+    # difference between "public" and "private but I am allowed". Reading it
+    # anonymously is the only way to check.
+    permissions:
+      contents: read
+
+    env:
+      # Foreign on purpose. A release name and namespace this repo would never
+      # choose, so a hardcoded assumption anywhere in the chart shows up as a
+      # failure rather than passing by coincidence.
+      KPS_RELEASE: acme-mon
+      KPS_NS: acme-observability
+
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Install pinned Helm
+        run: |
+          set -euo pipefail
+          mkdir -p "$HOME/.local/bin"
+          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+          curl -fsSL "https://get.helm.sh/helm-${HELM_VERSION}-linux-amd64.tar.gz" \
+            | tar -xz -C /tmp linux-amd64/helm
+          mv /tmp/linux-amd64/helm "$HOME/.local/bin/helm"
+          chmod +x "$HOME/.local/bin/helm"
+          helm version --short
+
+      # ⚠️ THE ANONYMITY IS THE ASSERTION. `helm registry logout` first, so this
+      # cannot accidentally verify only that the pusher can read what they
+      # pushed — which is true of a private package and is exactly the thing that
+      # must not be assumed. ghcr.io packages are PRIVATE BY DEFAULT and the
+      # visibility switch is a repository setting no workflow can flip, so the
+      # failure message says which one and where.
+      - name: Pull the published chart back ANONYMOUSLY
+        run: |
+          set -euo pipefail
+          helm registry logout ghcr.io 2>/dev/null || true
+          rm -rf ~/.config/helm/registry ~/.docker/config.json || true
+          repo="${{ needs.publish.outputs.oci_repo }}"
+          ver="${{ needs.publish.outputs.chart_version }}"
+          mkdir -p /tmp/pulled
+          if ! helm pull "oci://${repo}/${CHART_NAME}" --version "$ver" -d /tmp/pulled 2>/tmp/pull.err; then
+            cat /tmp/pull.err
+            if grep -qiE 'unauthorized|denied|authentication' /tmp/pull.err; then
+              echo "::error title=Package is not public::An anonymous pull was refused, so the package is PRIVATE. Nobody can install this chart. Fix it once at https://github.com/users/${{ github.repository_owner }}/packages/container/charts%2F${CHART_NAME}/settings -> Change visibility -> Public. This is a repository setting; no workflow can change it." >&2
+            fi
+            exit 1
+          fi
+          ls -la /tmp/pulled
+          tar xzf /tmp/pulled/${CHART_NAME}-${ver}.tgz -C /tmp/pulled
+          echo "  ok  pulled ${CHART_NAME} ${ver} with no credentials — the package is public"
+
+      # Both ways round, against the PUBLISHED copy. `=false` is the BYO case the
+      # chart exists for; `=true` additionally renders the subchart's own
+      # templates, which only works if the dependencies really are vendored.
+      - name: helm template the published chart, both stack settings
+        run: |
+          set -euo pipefail
+          C="/tmp/pulled/${CHART_NAME}"
+          for v in false true; do
+            helm template rig "$C" --set kubePrometheusStack.enabled=$v > "/tmp/pub-$v.yaml"
+            echo "  kubePrometheusStack.enabled=$v -> $(grep -c '^kind:' "/tmp/pub-$v.yaml") objects"
+            test -s "/tmp/pub-$v.yaml"
+          done
+          for kind in PrometheusRule ServiceMonitor ConfigMap Deployment Service; do
+            grep -q "^kind: $kind$" /tmp/pub-false.yaml \
+              || { echo "::error::no $kind in the published chart's default render" >&2; exit 1; }
+          done
+
+      # ⚠️ THE FAILURE THIS ENTIRE BUILD STEP EXISTS TO PREVENT. A chart packaged
+      # from charts/ instead of dist/ renders SUCCESSFULLY and emits no dashboard
+      # ConfigMaps, because `.Files.Get` returns empty for a missing file rather
+      # than failing. Invisible to helm lint, to helm package and to a push that
+      # exits 0. The uids come from the boards themselves, so a renamed board
+      # cannot leave this asserting a uid nobody ships.
+      - name: The render is not empty and carries the real dashboards
+        run: |
+          set -euo pipefail
+          uids=$(python3 -c "
+          import json, glob
+          print(' '.join(json.load(open(f))['uid'] for f in sorted(glob.glob('manifests/dashboards/*.json'))))")
+          test -n "$uids" || { echo "::error::derived no dashboard uids — the check is dead" >&2; exit 1; }
+          for uid in $uids; do
+            grep -q "\"uid\": \"$uid\"" /tmp/pub-false.yaml \
+              || { echo "::error title=Packaged from charts/ instead of dist/::dashboard uid '$uid' is absent from the published render. .Files.Get returned empty for a missing file, so the chart renders green and ships no boards." >&2; exit 1; }
+            echo "  ok  uid $uid present in the published render"
+          done
+
+      # An assertion that has quietly stopped firing looks exactly like one that
+      # passes. Driven to failure against the PUBLISHED chart, the same way the
+      # `chart` CI job drives them against the local build.
+      - name: The render-time assertions still fire on the published chart
+        run: |
+          set -uo pipefail
+          C="/tmp/pulled/${CHART_NAME}"
+          rc=0
+          must_fail() {
+            desc="$1"; shift
+            if helm template rig "$C" "$@" >/dev/null 2>&1; then
+              echo "  FAIL  rendered successfully but should NOT have: $desc"; rc=1
+            else
+              echo "  ok    fires: $desc"
+            fi
+          }
+          must_fail "two tenants sharing a model_name" \
+            --set llm.saturated.modelName=sim-llama-3-8b-steady
+          must_fail "steady tenant above modelled capacity" --set llm.steady.arrivalRateRps=9
+          must_fail "saturated tenant below modelled capacity" --set llm.saturated.arrivalRateRps=1.0
+          must_fail "maxInFlight below maxConcurrency" --set llm.profile.maxInFlight=4
+          must_fail "prefix cache hit rate given as a percentage" --set llm.steady.prefixCacheHitRate=35
+          must_fail "empty releaseLabel" --set releaseLabel=
+          must_fail "empty grafana.dashboardLabel" --set grafana.dashboardLabel=
+          must_fail "node-pool label key disagrees with the subchart's" \
+            --set nodePoolLabelKey=nvidia.com/something-else
+          must_fail "nodePoolName is not one of the topology pools" --set nodePoolName=nonexistent
+          exit $rc
+
+      - name: Create a kind cluster
+        run: |
+          set -euo pipefail
+          curl -fsSLo /tmp/kind https://kind.sigs.k8s.io/dl/v0.30.0/kind-linux-amd64
+          chmod +x /tmp/kind && sudo mv /tmp/kind /usr/local/bin/kind
+          kind create cluster --config kind/gpu-sim.yaml --wait 5m
+          kubectl get nodes
+
+      # ⚠️ THE NODE LABEL IS A PREREQUISITE THE CHART CANNOT SATISFY — a chart
+      # cannot label nodes. Without it the fake operator watches a pool no node
+      # belongs to and the install is green with ZERO GPUs.
+      - name: Label a node for the simulated GPU pool
+        run: |
+          set -euo pipefail
+          key=$(grep -m1 '^nodePoolLabelKey:' "charts/${CHART_NAME}/values.yaml" | awk '{print $2}')
+          val=$(grep -m1 '^nodePoolName:'     "charts/${CHART_NAME}/values.yaml" | awk '{print $2}')
+          kubectl label node --all "${key}=${val}" --overwrite
+          echo "  labelled all nodes ${key}=${val}"
+
+      # A stranger's monitoring stack, under a name this repo would never pick.
+      # NO selector overrides: upstream defaults ruleSelectorNilUsesHelmValues and
+      # its siblings to true, which makes the selector `release=acme-mon`. That
+      # default IS the BYO case, so leaving it alone is the realistic test.
+      - name: Install kube-prometheus-stack as a FOREIGN release
+        run: |
+          set -euo pipefail
+          helm repo add prometheus-community https://prometheus-community.github.io/helm-charts
+          helm repo update
+          helm install "$KPS_RELEASE" prometheus-community/kube-prometheus-stack \
+            -n "$KPS_NS" --create-namespace --wait --timeout 15m
+          kubectl -n "$KPS_NS" get prometheus \
+            -o jsonpath='{.items[0].spec.ruleSelector}{"\n"}'
+
+      # ⚠️ THE NEGATIVE CASE FIRST, because it is the one that looks like
+      # success. With the chart's DEFAULT releaseLabel against this cluster,
+      # `helm install` reports SUCCESS and every object is created — and the
+      # rules are never adopted, the scrapes never happen, and every derived
+      # panel is empty. `helm test` is the ONLY thing that says so, which is why
+      # it is asserted to FAIL here rather than assumed to be unnecessary.
+      - name: helm test FAILS on the default releaseLabel (the silent failure)
+        run: |
+          set -euo pipefail
+          repo="${{ needs.publish.outputs.oci_repo }}"
+          ver="${{ needs.publish.outputs.chart_version }}"
+          helm install neg "oci://${repo}/${CHART_NAME}" --version "$ver" \
+            -n neg --create-namespace \
+            --set namespaces.monitoring="$KPS_NS" --wait --timeout 10m
+          if helm test neg -n neg --logs 2>&1 | tee /tmp/neg.log; then
+            echo "::error title=The silent-failure check did not fire::helm test PASSED with a releaseLabel that matches no ruleSelector on this cluster. The one check that catches the chart's most likely misconfiguration is not working." >&2
+            exit 1
+          fi
+          grep -qi 'releaseLabel' /tmp/neg.log \
+            || { echo "::error::helm test failed, but not with a message naming releaseLabel — the diagnosis a user needs is missing." >&2; exit 1; }
+          echo "  ok  helm test caught the mismatched releaseLabel"
+          helm uninstall neg -n neg --wait
+
+      - name: Install the PUBLISHED chart correctly and helm test it
+        run: |
+          set -euo pipefail
+          repo="${{ needs.publish.outputs.oci_repo }}"
+          ver="${{ needs.publish.outputs.chart_version }}"
+          helm install rig "oci://${repo}/${CHART_NAME}" --version "$ver" \
+            -n rig --create-namespace \
+            --set releaseLabel="$KPS_RELEASE" \
+            --set namespaces.monitoring="$KPS_NS" \
+            --wait --timeout 15m
+          helm test rig -n rig --logs
+
+      - name: Both boards are reachable in the foreign Grafana
+        run: |
+          set -euo pipefail
+          kubectl -n "$KPS_NS" rollout status "deploy/${KPS_RELEASE}-grafana" --timeout=5m
+          kubectl -n "$KPS_NS" port-forward "svc/${KPS_RELEASE}-grafana" 13001:80 &
+          pf=$!; trap 'kill $pf 2>/dev/null || true' EXIT
+          sleep 10
+          pw=$(kubectl -n "$KPS_NS" get secret "${KPS_RELEASE}-grafana" \
+                -o jsonpath='{.data.admin-password}' | base64 -d)
+          uids=$(python3 -c "
+          import json, glob
+          print(' '.join(json.load(open(f))['uid'] for f in sorted(glob.glob('manifests/dashboards/*.json'))))")
+          for uid in $uids; do
+            for i in $(seq 1 30); do
+              code=$(curl -s -o /dev/null -w '%{http_code}' -u "admin:$pw" \
+                     "http://localhost:13001/api/dashboards/uid/$uid")
+              [ "$code" = "200" ] && break
+              sleep 5
+            done
+            [ "$code" = "200" ] \
+              || { echo "::error::/d/$uid returned $code — the sidecar never imported it (grafana.dashboardLabel?)" >&2; exit 1; }
+            echo "  ok  /d/$uid -> 200"
+          done
+
+      - name: Summary
+        if: always()
+        run: |
+          {
+            echo "### Published chart \`${{ needs.publish.outputs.oci_repo }}/${CHART_NAME}:${{ needs.publish.outputs.chart_version }}\`"
+            echo
+            echo '```sh'
+            echo "helm install rig oci://${{ needs.publish.outputs.oci_repo }}/${CHART_NAME} \\"
+            echo "  --version ${{ needs.publish.outputs.chart_version }} \\"
+            echo "  --set releaseLabel=<your monitoring release>"
+            echo '```'
+            echo
+            echo "Verified against the **published** artefact, not the local build:"
+            echo
+            echo "| check | |"
+            echo "|--|--|"
+            echo "| pulled with no credentials | the package is public |"
+            echo "| rendered both stack settings | non-empty, real dashboard uids present |"
+            echo "| render-time assertions | driven to failure, all still fire |"
+            echo "| foreign Prometheus (\`$KPS_RELEASE\` in \`$KPS_NS\`) | \`helm test\` passes |"
+            echo "| default \`releaseLabel\` | \`helm test\` **fails**, as it must |"
+            echo "| both boards | HTTP 200 from the foreign Grafana |"
+            echo
+            echo "No floating tag is published — pin with \`--version\`."
+          } >> "$GITHUB_STEP_SUMMARY"
