@@ -23,6 +23,28 @@ Comparison links are at the foot of this file, one per released version.
 
 ## [Unreleased]
 
+## [0.8.0] — 2026-08-04
+
+**This release makes the chart installable without cloning anything, and proves it by
+consuming the published artefact rather than by pushing one.** A successful `helm push`
+demonstrates that bytes moved; it says nothing about whether the chart installs. So the
+publish workflow pulls its own output back **with no credentials** — which is also the only
+way to establish that the package is public — renders it both ways, drives all nine
+render-time assertions to failure, and installs it on kind against a foreign Prometheus
+with `helm test` required to *fail* on the default `releaseLabel` and pass when it is set.
+
+**Proving the path is what found the two bugs below, and neither was visible to CI.** The
+BYO story had been documented, flagged and reasoned about since 0.4.0 without once being
+run end to end under a foreign release name; doing that took `verify.sh --byo` from six
+failures to 26 passes. The chart's `helm test` had been pointing at an image that no longer
+exists, so the single check guarding the two silent-failure labels could not start — and
+nothing noticed, because running it needs a cluster and CI never did.
+
+MINOR by this file's table. Nothing an existing cluster can see moved: no metric, recording
+rule, alert, dashboard `uid`, profile or Terraform input. The script fixes are strictly
+more permissive — names that resolved before still resolve first, by the same construction
+— and the chart changes are additive.
+
 ### Fixed
 
 - **The BYO path could not work under any release name it was built for.** `KPS_RELEASE`
@@ -1620,7 +1642,8 @@ Initial public release. Build and test GPU and LLM observability without a GPU.
   a GPU, running the advertised `task local:up` end to end including every acceptance
   check, with a diagnostics bundle on failure and weekly upstream-drift detection.
 
-[Unreleased]: https://github.com/ChrisAdkin8/k8s-ai-observability/compare/v0.7.1...HEAD
+[Unreleased]: https://github.com/ChrisAdkin8/k8s-ai-observability/compare/v0.8.0...HEAD
+[0.8.0]: https://github.com/ChrisAdkin8/k8s-ai-observability/compare/v0.7.1...v0.8.0
 [0.7.1]: https://github.com/ChrisAdkin8/k8s-ai-observability/compare/v0.7.0...v0.7.1
 [0.7.0]: https://github.com/ChrisAdkin8/k8s-ai-observability/compare/v0.6.0...v0.7.0
 [0.6.0]: https://github.com/ChrisAdkin8/k8s-ai-observability/compare/v0.5.0...v0.6.0
