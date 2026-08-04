@@ -200,7 +200,25 @@ tests:
   # Needs kubectl and bash. Pinned rather than :latest, for the same reason
   # every other version in this repo is: an unpinned toolchain turns someone
   # else's release into a mystery failure on an unrelated day.
-  image: bitnami/kubectl:1.31
+  #
+  # ⚠️ THIS WAS `bitnami/kubectl:1.31` AND THE IMAGE NO LONGER EXISTS.
+  # Found 2026-08-04 by the first real `helm test` run against a BYO cluster:
+  # `docker.io/bitnami/kubectl:1.31: not found`. Bitnami retired much of its
+  # public Docker Hub catalogue, so the test pod sat in ImagePullBackOff and the
+  # ONE thing that checks the two silent-failure labels against a live cluster
+  # could not start at all. Nothing noticed, because CI lints and renders the
+  # chart and never runs `helm test` — that needs a cluster.
+  #
+  # ⚠️ IT NEEDS BOTH kubectl AND /bin/bash, and that rules out the obvious fix.
+  # `registry.k8s.io/kubectl` is the Kubernetes project's own image and the most
+  # durable option, but it is DISTROLESS: the hook's `command: ["/bin/bash",...]`
+  # dies with `stat /bin/bash: no such file or directory`, exit 128, StartError.
+  # Verified by running it. alpine/k8s carries kubectl and bash together.
+  #
+  # ⚠️ THE MINOR MUST TRACK config.sh K8S_VERSION, and it did not: 1.31 against a
+  # cluster pinned at 1.36 is five minors outside kubectl's supported +/-1 skew.
+  # scripts/check-doc-claims.py now refuses to let the two drift.
+  image: alpine/k8s:1.36.2
 
 # ---- pass-through to the conditional dependencies ---------------------------
 # Only reached when the corresponding `enabled` above is true. Keys here are the
