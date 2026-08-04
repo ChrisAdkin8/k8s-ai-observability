@@ -977,6 +977,31 @@ def selftest():
 
     print("llm-sim --selftest")
 
+    # ---- fmt(): the three spellings Prometheus parses specially -------------
+    # ⚠️ EVERY VALUE IN THE EXPOSITION GOES THROUGH fmt(), AND NOTHING TESTED IT.
+    # The structural checks below are thorough about histogram shape — buckets
+    # cumulative, +Inf equal to _count — and say nothing about how a number is
+    # SPELLED. Prometheus accepts exactly `NaN`, `+Inf` and `-Inf`; get one wrong
+    # and it rejects the sample while every structural assertion here stays green.
+    # That is the failure class this repo exists to catch, and it was uncovered by
+    # a CodeQL alert on the NaN test one line below being a false positive.
+    #
+    # `value != value` IS the NaN idiom — NaN is the only value not equal to
+    # itself — and it stays. This pins the behaviour so it cannot be "tidied" into
+    # something that silently formats NaN as the string "nan", which Prometheus
+    # does not accept.
+    fmt_cases = [
+        (float("nan"), "NaN"),
+        (math.inf, "+Inf"),
+        (-math.inf, "-Inf"),
+        (3, "3"),                    # int passes through without a decimal point
+        (1.5, "1.5"),
+        (0.1 + 0.2, "0.3"),          # rounded to 6dp, not 0.30000000000000004
+    ]
+    bad = [(v, fmt(v), want) for v, want in fmt_cases if fmt(v) != want]
+    check(not bad, f"fmt() renders NaN, +Inf, -Inf, ints and rounded floats"
+                   + (f" — got {bad}" if bad else ""))
+
     profile = validate_profile(dict(DEFAULT_PROFILE, seed=1234))
     sim = Simulator(profile, start_time=0.0, binding_device_id="d3adbeef-0000-4000-8000-000000000000")
 

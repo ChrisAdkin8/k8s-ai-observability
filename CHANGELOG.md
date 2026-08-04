@@ -23,6 +23,29 @@ Comparison links are at the foot of this file, one per released version.
 
 ## [Unreleased]
 
+### Added
+
+- **CodeQL** (`.github/workflows/codeql.yml`), advanced setup rather than the browser
+  toggle — a control that lives only in repository settings is versioned by nothing, which
+  is the problem `.github/required-checks.txt` already exists to solve. ⚠️ It covers Python
+  and GitHub Actions workflows and **cannot read Shell, which is 40% of this repository**;
+  that is stated at the top of the workflow so "we have code scanning" cannot quietly become
+  "therefore the shell is checked". Advisory, not a required check.
+
+- **`fmt()` is covered by the simulator selftest**, and was not before. Every value in the
+  exposition passes through it, including the three spellings Prometheus parses specially —
+  `NaN`, `+Inf`, `-Inf`. The existing checks are thorough about histogram *shape* and said
+  nothing about how a number is *spelled*, so a wrong `+Inf` would have produced an
+  exposition Prometheus rejects while every structural assertion stayed green. Proven by
+  breaking it two ways.
+
+### Changed
+
+- **The `verify-chart` action passes its inputs through `env:`** instead of interpolating
+  `${{ }}` into `run:` bodies. Nothing exploitable reaches it — both callers pass literals,
+  and no workflow uses `pull_request_target` — but a composite action cannot know who calls
+  it, and an interpolated expression is substituted as text before bash sees it.
+
 ## [0.9.1] — 2026-08-04
 
 **Documentation and tooling only.** `0.9.0` fixed the verifiers; this writes down how they
