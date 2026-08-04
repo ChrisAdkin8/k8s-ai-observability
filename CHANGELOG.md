@@ -23,6 +23,28 @@ Comparison links are at the foot of this file, one per released version.
 
 ## [Unreleased]
 
+### Fixed
+
+- **The chart publish failed on its first real run, on an archive that was correct.** The
+  step that opens the packaged `.tgz` to prove the dashboards are inside piped `tar tzf`
+  into `head`, and under `set -o pipefail` the consumer exits first, SIGPIPEs `tar` and
+  fails the step with exit 141 — before a single assertion ran. The `tar tzf | grep -q`
+  form in the same step was worse: it is *racy*, and passed locally on the same 363-entry
+  archive. The listing is now written to a file and read from there, which also runs `tar`
+  once instead of once per dashboard.
+
+  ⚠️ **The `v0.8.0` chart is therefore published from `main`, not from the tag.** The image
+  published from the tag normally; only the chart job failed, and it failed before pushing
+  anything. The chart content at `main` is identical to the tag — the commits between them
+  touch only this workflow and `chart-build.py` — but the artefact was not built from the
+  tagged commit, and that is recorded here rather than left to be inferred.
+
+- **A publish that failed could not be retried without burning a chart version.** The
+  version guard excluded only tags pointing at `HEAD`, so a retry dispatched against the
+  same release tag from a branch that had moved on was refused for re-using a version the
+  failed run never pushed. `chart-build.py --publishing-as <tag>` now names the release
+  being published; a genuinely re-used version still fails.
+
 ## [0.8.0] — 2026-08-04
 
 **This release makes the chart installable without cloning anything, and proves it by

@@ -175,7 +175,7 @@ def check_image_tag_agrees(app_version, strict):
         print(f"  ok    appVersion {app_version} == the repo's latest tag")
 
 
-def shipped_chart_versions():
+def shipped_chart_versions(also_exclude=()):
     """Chart versions carried by the repo's own release tags: {version: [tags]}.
 
     The registry is the real authority on what has been pushed, and it is exactly
@@ -213,6 +213,14 @@ def shipped_chart_versions():
         being_released = set(at_head.stdout.split()) if at_head.returncode == 0 else set()
     except (OSError, subprocess.SubprocessError):
         being_released = set()
+    # ⚠️ AND THE TAG BEING PUBLISHED AS, which is NOT always the one at HEAD. A
+    # publish that fails partway — a transient registry error, or a bug in this
+    # workflow — is retried by dispatching against the SAME release tag from a
+    # branch that has since moved on. HEAD is then a later commit, the release
+    # tag is no longer at HEAD, and without this the guard would refuse the
+    # retry and force a version to be burned over a fault that published
+    # nothing. Exactly that happened on v0.8.0.
+    being_released |= {t for t in also_exclude if t}
 
     seen = {}
     for tag in (t.strip() for t in out.stdout.splitlines() if t.strip()):
@@ -232,7 +240,7 @@ def shipped_chart_versions():
     return seen
 
 
-def check_version_not_reused(chart_version, strict):
+def check_version_not_reused(chart_version, strict, publishing_as=None):
     """⚠️ A REGISTRY VERSION CANNOT BE RE-USED, CORRECTED, OR OVERWRITTEN.
 
     The failure this prevents is not subtle, it is just late: the chart version
@@ -251,7 +259,7 @@ def check_version_not_reused(chart_version, strict):
     appVersion does: on an unreleased branch the version legitimately still
     equals the last released one, right up until the release commit bumps it.
     """
-    seen = shipped_chart_versions()
+    seen = shipped_chart_versions(also_exclude=(publishing_as,))
     if seen is None:
         print("  note  no git tags readable here; skipping the re-use check.\n"
               "        That is an absence of a result, not a passing one.")
@@ -461,6 +469,11 @@ def main(argv=None):
     ap.add_argument("--strict-version", action="store_true",
                     help="fail rather than warn when Chart.yaml appVersion does "
                          "not match the repo's latest git tag (used at release)")
+    ap.add_argument("--publishing-as", metavar="TAG", default=None,
+                    help="the release tag this build is being published as. "
+                         "Excluded from the already-shipped set, so re-running a "
+                         "publish that failed before it pushed anything does not "
+                         "require burning a chart version.")
     ap.add_argument("--skip-deps", action="store_true",
                     help="do not fetch the conditional dependencies (offline). The "
                          "result will NOT render — Helm needs them present even "
@@ -477,7 +490,7 @@ def main(argv=None):
     chart_version = read_chart_field("version")
     print(f"chart {chart_version}, appVersion {app_version}")
     check_image_tag_agrees(app_version, args.strict_version)
-    check_version_not_reused(chart_version, args.strict_version)
+    check_version_not_reused(chart_version, args.strict_version, args.publishing_as)
     check_dependency_pins_agree()
     print()
 

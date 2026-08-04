@@ -125,8 +125,14 @@ jobs:
       #     registry version is immutable, so a re-use is rejected at the push,
       #     by which point the tag is public and the release is out
       # It also assembles dist/, which is what gets packaged.
+      # --publishing-as names the release this build IS, so the version guard
+      # does not count that tag against itself. Without it a retry — same tag,
+      # dispatched from a branch that has moved on — would be refused for
+      # re-using a version the failed run never actually pushed.
       - name: Build into dist/, strictly
-        run: python3 scripts/chart-build.py --strict-version
+        run: |
+          python3 scripts/chart-build.py --strict-version \
+            --publishing-as "${{ steps.v.outputs.version }}"
 
       - name: helm lint the built chart
         run: helm lint "dist/charts/${CHART_NAME}"
@@ -164,17 +170,28 @@ jobs:
       # catches the packaged-from-charts/ failure at its source: look INSIDE the
       # archive for the dashboard JSON. A chart missing them packages, lints and
       # pushes without complaint.
+      # ⚠️ THE LISTING IS MATERIALISED ONCE, AND NOT PIPED. `tar tzf | head` and
+      # `tar tzf | grep -q` both make the CONSUMER exit first, which SIGPIPEs tar
+      # — and under `set -o pipefail` that fails the step with exit 141 before a
+      # single assertion has run. It failed exactly that way on the first real
+      # release, on an archive that was perfectly correct. The `grep -q` form is
+      # worse than the `head` form because it is RACY: it passed locally on the
+      # same 363-entry archive and would fail whenever tar happened to still be
+      # writing. Reading a file has neither problem, and runs tar once rather
+      # than once per dashboard.
       - name: The archive actually contains the dashboards and rules
         run: |
           set -euo pipefail
           tgz="${{ steps.pkg.outputs.tgz }}"
-          tar tzf "$tgz" | sed 's/^/  /' | head -40
+          tar tzf "$tgz" > /tmp/contents.txt
+          echo "  $(grep -c . /tmp/contents.txt) entries; first 40:"
+          head -40 /tmp/contents.txt | sed 's/^/    /'
           for f in $(ls manifests/dashboards/*.json | xargs -n1 basename); do
-            tar tzf "$tgz" | grep -q "/files/dashboards/$f$" \
+            grep -q "/files/dashboards/$f\$" /tmp/contents.txt \
               || { echo "::error::$f is not inside the package — it was packaged from charts/ instead of dist/, or chart-build.py did not run." >&2; exit 1; }
             echo "  ok  files/dashboards/$f"
           done
-          tar tzf "$tgz" | grep -q '/files/rules/' \
+          grep -q '/files/rules/' /tmp/contents.txt \
             || { echo "::error::no rule files inside the package." >&2; exit 1; }
 
       - name: Log in to ghcr.io
