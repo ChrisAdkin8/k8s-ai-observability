@@ -29,7 +29,9 @@ WHAT IT CHECKS
      nine since `ALERTS{alertstate="firing"}` was added.
   6. The pinned Kubernetes version — the README badge and docs/versions.md vs
      kind/gpu-sim.yaml. A badge is prose with a colour, and nothing else verified it.
-  7. `${datasource}` reference count — vs the LLM board. Said 22, "true when that board had
+  7. The chart's `helm test` kubectl image minor vs `config.sh` K8S_VERSION. kubectl
+     supports the API server within +/-1 minor; this was 1.31 against 1.36.
+  8. `${datasource}` reference count — vs the LLM board. Said 22, "true when that board had
      nine panels, 33 now".
 
 WHAT IT DELIBERATELY DOES NOT CHECK
@@ -130,6 +132,18 @@ def derive_datasource_refs() -> int:
     return n or die("datasource", "no ${datasource} references on the LLM board — dead")
 
 
+def derive_k8s_minor() -> str:
+    """The repo's pinned Kubernetes MINOR, from config.sh.
+
+    The chart's `helm test` image ships a kubectl, and kubectl supports the API server
+    only within +/-1 minor. It was pinned at 1.31 against a cluster pinned at 1.36 —
+    five minors out — and nothing caught it, because CI never runs `helm test`.
+    """
+    m = re.search(r'^K8S_VERSION="([\d.]+)"', read("scripts/config.sh"), re.MULTILINE)
+    return m.group(1) if m else die("kubectl-skew",
+                                    "no K8S_VERSION in config.sh — the derivation is dead")
+
+
 def derive_kind_node_version() -> str:
     """The pinned kind node image — the version the README's badge asserts.
 
@@ -171,6 +185,13 @@ CLAIM_CHECKS = [
     dict(name="k8s-version", pattern=r"(?:kubernetes-|kindest/node:)v([\d.]+)", context=r".",
          derive=derive_kind_node_version, cast=str, unit="pinned kind node image",
          hint="the badge and docs/versions.md must both match kind/gpu-sim.yaml"),
+    # The chart's test image carries a kubectl; its MINOR must match the cluster the
+    # repo pins. Captures "1.36" out of "registry.k8s.io/kubectl:v1.36.2".
+    dict(name="kubectl-skew",
+         pattern=r"(?:alpine/k8s|kubectl):v?(\d+\.\d+)\.\d+", context=r"image",
+         derive=derive_k8s_minor, cast=str, extra=["charts/k8s-ai-observability/values.yaml"],
+         unit="K8S_VERSION minor from config.sh",
+         hint="the helm-test image's kubectl minor must track config.sh K8S_VERSION"),
     dict(name="datasource", pattern=rf"\b{NUM} of them\b", context=r"datasource",
          derive=derive_datasource_refs, unit="${datasource} refs on the LLM board",
          hint="count them in manifests/dashboards/llm-sim-overview.json"),
@@ -279,7 +300,7 @@ The GPU rule file carries three alerts.
 nine PromQL queries that also work against real hardware
 repoints every `${datasource}` reference — 33 of them on the LLM board — and drops it.
 The exporter emits 3 events per scrape, and 12 of them are dropped.\n[![Kubernetes](https://img.shields.io/badge/kubernetes-v1.36.1-326ce5.svg)](kind/gpu-sim.yaml)
-Real vLLM only ever emits one surface — `both` is a rig affordance, not a fidelity claim.
+Real vLLM only ever emits one surface — `both` is a rig affordance, not a fidelity claim.\n  image: alpine/k8s:1.36.2
 """
 
 
@@ -302,7 +323,8 @@ def selftest() -> None:
     # check's first real run against the tree, because the context regex named the
     # subject (vLLM) instead of the counted noun.
     expected = {"emits": [15], "alerts": [6], "l-range": [9],
-                "promql": [9], "datasource": [33], "k8s-version": ["1.36.1"]}
+                "promql": [9], "datasource": [33], "k8s-version": ["1.36.1"],
+                "kubectl-skew": ["1.36"]}
     for c in CLAIM_CHECKS:
         vals = [v for _, _, v in claims(c["pattern"], c["context"], "f.md",
                                         CLAIM_FIXTURE, c.get("cast", to_int))]
