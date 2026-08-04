@@ -1,0 +1,35 @@
+# Artifact Hub repository metadata — THE OWNERSHIP CLAIM, not decoration.
+#
+# ⚠️ WITHOUT THIS, THE LISTING IS ANONYMOUS AND ANYONE CAN CLAIM THE SAME OCI
+# REFERENCE. The chart still lists, with no verified-publisher badge and nothing
+# tying it to this repository. The whole point of listing is that a stranger
+# finds the chart and trusts it; an unverified listing undercuts the second half.
+#
+# ⚠️ FOR AN OCI REPOSITORY THIS IS NOT A FILE IN THE TREE THAT ARTIFACT HUB READS.
+# It is verified by a metadata artefact PUSHED TO THE REGISTRY beside the chart,
+# at the tag `artifacthub.io`. There is no web form for it and no branch it can
+# be read from. That makes it a WORKFLOW step, which is precisely why it is easy
+# to miss when the rest of the Artifact Hub setup is a browser form — so
+# .github/workflows/publish-chart.yml pushes it from the same job that pushes the
+# chart, and the two cannot drift apart.
+#
+# ─── HOW TO FILL THIS IN (one-time, needs a browser) ────────────────────────
+#   1. https://artifacthub.io -> Control Panel -> Repositories -> Add
+#        kind: Helm charts
+#        url:  oci://ghcr.io/chrisadkin8/charts/k8s-ai-observability
+#   2. Artifact Hub shows a repository ID (a UUID) as soon as it is added.
+#      Copy it into repositoryID below and commit.
+#   3. The next chart publish pushes this file to the registry and the listing
+#      becomes ownership-verified. Until then the publish step SKIPS LOUDLY
+#      rather than pushing a placeholder that would claim nothing.
+#
+# The ID is not a secret. It identifies the listing; it does not authorise
+# anything on its own — the claim works because only someone who can push to this
+# registry path can place the artefact next to the chart.
+#
+# `owners` is OPTIONAL and deliberately omitted: it exists to display contact
+# details on the listing, and the maintainer is already named in Chart.yaml.
+# Adding it here would publish an email address to a second place with no
+# additional verification value.
+
+repositoryID: REPLACE_ME_WITH_THE_ARTIFACT_HUB_REPOSITORY_ID

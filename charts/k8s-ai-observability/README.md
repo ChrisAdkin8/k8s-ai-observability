@@ -13,14 +13,39 @@ dashboards and **leaves your monitoring stack alone**.
 
 ---
 
-## ⚠️ There is a build step. `helm install ./charts/...` does not work.
+## Two ways in, for two different people
+
+**If you want to USE this** — install the published chart. Nothing to clone, no build
+step, and this is the copy the verification below actually runs against:
+
+```sh
+helm install rig oci://ghcr.io/chrisadkin8/charts/k8s-ai-observability \
+  --version 0.2.0 \
+  --set releaseLabel=<your monitoring release>
+helm test rig --logs                              # ← do not skip this
+```
+
+> ⚠️ **Not published yet.** The workflow that pushes it
+> ([`publish-chart.yml`](../../.github/workflows/publish-chart.yml)) runs on a release tag,
+> and `0.2.0` will be the first version to exist. Until that tag is cut, use the
+> contributor path below. This block is written out rather than held back so the two
+> audiences are visibly different things, and it is marked rather than quietly aspirational.
+
+**If you want to CHANGE this** — build it locally. `task chart` is not going away and is
+not replaced by the published artefact; it is how you test a template edit:
 
 ```sh
 task chart                                        # assembles into gitignored dist/
 helm install rig dist/charts/k8s-ai-observability \
   --set releaseLabel=<your monitoring release>
-helm test rig --logs                              # ← do not skip this
+helm test rig --logs
 ```
+
+---
+
+## ⚠️ There is a build step. `helm install ./charts/...` does not work.
+
+This is why the contributor path above says `dist/` and not `./charts/`.
 
 **Why.** Helm's `.Files.Get` cannot read outside the chart directory, so a chart under
 `charts/` cannot reference `manifests/dashboards/*.json` or `manifests/alerts/*.yaml` where
