@@ -23,7 +23,105 @@ Comparison links are at the foot of this file, one per released version.
 
 ## [Unreleased]
 
+## [0.7.0] — 2026-08-04
+
+**This release makes the repo check its own prose, and writes down the law it had been
+carrying in its head.** 0.6.0 shipped an SLO and then corrected seven numbers by hand —
+alert counts, the emitted-metric count, the `L1-Ln` range in two files, the PromQL query
+count, the `${datasource}` count — because a fact stated in prose had forked from the code
+that owned it. Twelve of this repo's first 76 commits were corrections of work already on
+`main`, and that class dominated them.
+
+Every other failure class here already had an executable check: metric drift has
+`check-vllm-buckets.py`, DCGM parity has `tests/contracts/`, silent chart labels have
+render-time `fail`s driven to failure in CI. Prose drift had hand-correction sweeps three
+releases running. It has a checker now, `task preflight` runs it with every other
+no-cluster gate in one command, and CI runs it on every push.
+
+The rest follows from the same idea. `CLAUDE.md` collects the invariants that were
+scattered across `config.sh` comments, file headers and the authoring briefs, so the briefs
+can cite a rule instead of restating it. `task outstanding` derives the open-item list
+rather than duplicating it into a TODO file. And the sizing claim that had been marked
+unverified since 0.4.0 was finally measured — it was wrong, and the way it was wrong is
+worth reading.
+
+⚠️ **Nothing here changes what a cluster looks like.** No metric, recording rule, alert,
+dashboard `uid`, profile or Terraform input moved. It is a MINOR by this file's own table
+because it adds new **targets and checks**, not because anything breaks.
+
 ### Added
+
+- **`CLAUDE.md` — the repo's standing law, in one file.** Sixteen rules, each traceable to
+  the file that owns it or the commit that taught it: the fixtures that must never be
+  driven, JSON profiles, `model_name` as an identity, tuning against `llmsim_capacity_rps`,
+  the bucket rules and why an SLO threshold must **be** a boundary, polling anything that
+  races its producer, writing expected values before running, `verify.sh` holding invariants
+  only, pins living twice and cross-checked by name, dashboard `uid`/revision discipline,
+  and how outstanding work is marked and struck.
+
+  The invariants were all already written down. They were also **scattered**, and restated
+  in full inside every authoring brief — which is how copies fork. This is pointers, not
+  restatements: where a rule has an owning file it cites it. The two live briefs now cite
+  rules by number, which removed about a hundred lines of duplicated preamble between them.
+
+- **`scripts/check-doc-claims.py` and `task doc-claims` — prose numbers checked against the
+  code that owns them.** Seven checks, ~20 claims, and **no copy of any truth**: every
+  expected value is derived at run time. Dashboard ids are blessed from
+  `manifests/dashboards/README.md` itself, so the external DCGM board 12239 needs no
+  allowlist; the emitted-metric count comes from running `llm-sim.py --print`; the alert
+  count from `- alert:` entries; the `L1-Ln` range from `verify.sh`'s own pass/fail calls
+  rather than its section comments, because a comment is prose and could itself be what
+  drifted; the query count from the numbered block in `observability.md`; the
+  `${datasource}` count from the board JSON; and the pinned Kubernetes version from
+  `kind/gpu-sim.yaml`, which the README badge had been asserting unchecked.
+
+  ⚠️ **A checker that finds nothing must die, not pass.** Every check treats "no claims
+  matched" as fatal and names itself, so a reworded claim fails loudly instead of quietly
+  retiring. `--selftest` pins all six matchers to fixtures carrying three decoys — one of
+  which is a regression test: on its first real run the `emits` matcher flagged *"Real vLLM
+  only ever emits one surface"*, a true sentence about metric **surfaces** on a line
+  mentioning vLLM. The context regex named the subject rather than the counted noun.
+
+  Not checked, and the script says why: the drift-gap count. The only local upstream list is
+  a fixture whose own header calls it *"a STUBBED upstream vLLM metric set — NOT a copy of
+  the real one"*. Deriving from it would compare the prose against a fiction and pass.
+
+- **`task preflight` — every no-cluster gate in one command.** `selftest`,
+  `compose-selftest`, `drift-test`, `doc-claims`, `rule-tests`, `chart`, in cheap-first
+  order. Deliberately excluded: `image` and `compose` need docker, `verify.sh` needs a
+  cluster, and the live drift check needs the network, which its weekly job owns.
+
+- **`task outstanding` — the open-item list, derived.** Items are already marked in the file
+  that owns them and struck when done; what was missing was a way to see them without
+  reading a 940-line append-only changelog. ⚠️ It matches **phrases**, not the `⚠️` glyph —
+  there are 91 of those in tracked markdown and it is this repo's general warning marker.
+  The phrase list is curated and therefore incomplete by construction, so every run says so:
+  a clean run means the matchers found nothing, not that there is no outstanding work.
+
+  A TODO file was the obvious answer and the wrong one — a second copy of every line it
+  printed, unverifiable, and the first thing here to rot.
+
+- **`docs/record-demo.md` — how to record the README demo GIF**, the one visual asset no
+  script can re-render, because a human has to drive the board.
+
+- **Three badges**, for the two things a stranger can consume without cloning: the published
+  boards 25618 and 25620, and `ghcr.io/vllm-metrics-sim`. The board badges cost nothing to
+  keep honest — `doc-claims` already blesses every grafana.com id in tracked markdown, and a
+  badge URL is markdown.
+
+- **`SECURITY.md`, `CODE_OF_CONDUCT.md`, a PR template and two issue forms**, taking GitHub's
+  community profile from 57% to 100%. Written for this repo rather than pasted: the bug form
+  asks which of six paths you were on and names the command that produces the evidence the
+  next field wants, and there is a second form for **upstream drift** — the failure this rig
+  exists to catch, and the one a stranger is most likely to spot first. `SECURITY.md` leads
+  with what is true rather than with an address: this is a test rig, Grafana runs anonymous
+  on purpose, and the Terraform bills real money.
+
+- **The organisation logo for grafana.com is first available here**, not in 0.6.0. It is
+  described under that release because the entry was written before the tag was cut, and
+  `9a21f67` landed after it — so `v0.6.0`'s notes describe a file that release does not
+  contain. Recorded in both directions rather than silently moved: the description stays
+  where a reader has already found it, and both sections now say which tag it is in.
 
 - **A "Contributing and support" section in the README**, closing the one gap that graded
   badly against every published README standard at once. `SECURITY.md`,
@@ -63,6 +161,71 @@ Comparison links are at the foot of this file, one per released version.
   so the fastest honest answer to "what is this" is a board you can look at. Written down
   because it has now been questioned once, and an undocumented deviation reads as an
   oversight to the next person who checks.
+
+- **The Kubernetes badge is derived rather than asserted.** `kubernetes-v1.36.1` sat
+  hardcoded in an `img.shields.io` URL on line 4 of the README with nothing verifying it —
+  one node-image bump from quietly lying, in the most prominent line in the repo. It is now
+  checked against `kind/gpu-sim.yaml`'s `kindest/node` pin, along with the same version in
+  `docs/versions.md`.
+
+- **The `dependencies` label exists.** `.github/dependabot.yml` had been requesting it since
+  0.4.0 and silently getting nothing, because the label was never created — a config doing
+  exactly what `install.sh` warns about when `LITE=1` is ignored under `--skip-monitoring`.
+  Backfilled onto the five dependency PRs merged before it existed.
+
+- **Repository settings** (not in the tree, recorded here because nothing else would show
+  it, as in 0.4.0): the `v0.5.0` GitHub Release was backfilled — the tag had existed since
+  2026-08-01 with no release, and 0.5.0 is the chart, the published image and the phase
+  breakdown.
+
+- **Five SHA-pinned actions bumped** by Dependabot: `actions/checkout` 5.1.0 → 7.0.1,
+  `actions/upload-artifact` 5.0.0 → 7.0.1, `docker/login-action` 3.7.0 → 4.6.0,
+  `docker/setup-buildx-action` 3.11.1 → 4.2.0, `docker/setup-qemu-action` 3.6.0 → 4.2.0.
+
+### Fixed
+
+- ⚠️ **The LITE sizing floor was unreachable, and had been since 0.4.0 said so.** The claim
+  that `LITE=1` "lowers the floor to 3 GiB" carried an *unverified* marker because CI cannot
+  settle it — the runner has ~16 GB and nothing there is under memory pressure. Measured at
+  last on a constrained runtime, colima/aarch64:
+
+  | Allocated | Docker reports | `kind-up.sh` reads | Result |
+  |--|--|--|--|
+  | 3 GiB — the advertised floor | 2.83 GiB | **2 GiB** | **refused before anything started** |
+  | 4 GiB | 3.81 GiB | 3 GiB | `ALL CHECKS PASSED` |
+
+  **Consumption was never the problem.** At 4 GiB the trimmed stack used **2.197 GiB of
+  3.813 — 57.6%**, with zero restarts, zero OOMKills and nothing Pending, through every GPU
+  check and L1–L9 including the phase breakdown within 0.1% and all four SLO ratios.
+
+  ⚠️ The **floor** was unreachable, from a unit mismatch nothing in the docs would have
+  revealed: `kind-up.sh` computes `mem_bytes / 1024 / 1024 / 1024` — integer division — so a
+  runtime is judged by what it **reports** while a user sets what it is **allocated**. VM
+  overhead takes ~0.2 GiB and truncation the rest. Asking for exactly the documented 3 GiB
+  produced a `2 GiB` reading and an error telling you to raise it to 4: the floor refusing
+  itself.
+
+  Fixed in the docs rather than the check. Rounding instead of truncating would make the
+  guard accept 2.83 GiB as "3", looser than a check that exists because Prometheus alone
+  limits at 2Gi.
+
+- **`docs/record-demo.md` could not be followed end to end**, found by review before anyone
+  tried. `cd compose && docker compose up -d` persists in the reader's shell, and the profile
+  edit twenty lines later is written from the repo root — so `compose/.generated/…` resolved
+  to `compose/compose/.generated/…` and did not exist. A page whose entire purpose is being
+  followed step by step, broken at step three. Both compose commands now run in a subshell.
+
+- **25620 is current again, and the record says which artefacts moved.** Revision 3 carries
+  the TTFT error-budget burn-rate panel and the catalog page carries the SLO section; both
+  boards' short descriptions are no longer the upload form's placeholder. Confirmed against
+  grafana.com's API rather than taken on trust. ⚠️ 25618's catalog page still renders the
+  board 12239 link as literal text — the `]` landed after the number instead of before the
+  URL — and that marker is narrowed to the surviving half rather than cleared.
+
+- **The grafana.com logo question is closed, and the answer is that there is no requirement
+  to meet.** Grafana's publishing documentation states no dimension, aspect ratio, file-size
+  or format limit, so the 512×512 assumption could never have been checked against a spec.
+  What settles it is acceptance: the API reports `hasLogo: true` on both boards.
 
 ## [0.6.0] — 2026-08-02
 
@@ -125,6 +288,11 @@ a caveat and exposed a second figure worth explaining rather than editing away.
 
 - **An organisation logo for grafana.com**, `docs/logos/org-chrisadkin.png`, generated by
   the same `docs/dashboard-logos.py` as the two board marks so the set cannot drift.
+
+  ⚠️ **This entry is mis-filed and is left in place rather than moved.** `9a21f67` landed
+  *after* the `v0.6.0` tag, so the file is not in that release and its GitHub notes — cut
+  from this section — describe something you cannot get by checking out `v0.6.0`. It is
+  first available in **0.7.0**.
 
   It is not a third board mark. The two boards are a die (hardware) and a panel frame
   (serving); the org mark is those two **fused** — the die with the serving signal running
@@ -1251,7 +1419,8 @@ Initial public release. Build and test GPU and LLM observability without a GPU.
   a GPU, running the advertised `task local:up` end to end including every acceptance
   check, with a diagnostics bundle on failure and weekly upstream-drift detection.
 
-[Unreleased]: https://github.com/ChrisAdkin8/k8s-ai-observability/compare/v0.6.0...HEAD
+[Unreleased]: https://github.com/ChrisAdkin8/k8s-ai-observability/compare/v0.7.0...HEAD
+[0.7.0]: https://github.com/ChrisAdkin8/k8s-ai-observability/compare/v0.6.0...v0.7.0
 [0.6.0]: https://github.com/ChrisAdkin8/k8s-ai-observability/compare/v0.5.0...v0.6.0
 [0.5.0]: https://github.com/ChrisAdkin8/k8s-ai-observability/compare/v0.4.0...v0.5.0
 [0.4.0]: https://github.com/ChrisAdkin8/k8s-ai-observability/compare/v0.3.0...v0.4.0
