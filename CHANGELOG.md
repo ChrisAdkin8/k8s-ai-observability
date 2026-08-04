@@ -23,6 +23,87 @@ Comparison links are at the foot of this file, one per released version.
 
 ## [Unreleased]
 
+### Fixed
+
+- **`verify.sh` rebuilt its Prometheus port-forward on every single query, and slept 4s
+  each time.** `prom_pf_ensure` set `PF_PID=$!`, but every caller reaches it through
+  command substitution — `x="$(promql_count ...)"` — which runs in a **subshell**, so that
+  assignment never reached the shell that reads it. `prom_pf_up` therefore saw an empty pid
+  on every call and re-established the forward each time. The self-healing forward never
+  healed; it only ever re-established, and leaked an orphaned `kubectl port-forward` per
+  call.
+
+  **Measured, not inferred.** On CI run 30867055387 consecutive single-shot checks land
+  exactly 4.03s apart, run after run, while the two checks that issue no PromQL land 0.0s
+  apart: ~37 calls, ~149s of a 247s `verify.sh`. Driving the real function text through a
+  stub `kubectl`, six queries cost **24.1s before and 4.1s after** — one settle instead of
+  six. The pid now lives in a file, because a file survives a subshell and a variable
+  does not.
+
+  ⚠️ **The Grafana forward beside it is the same design and always worked**, because
+  `grafana_uid_check` is a plain function call rather than a substitution. Identical code,
+  different call convention, opposite outcome. That contrast is now written down where the
+  next helper that backgrounds something will be read.
+
+- **Every poll budget in `verify.sh` was ~1.8x larger than it said**, as a direct
+  consequence. `DCGM_POLL_ATTEMPTS=24` against a `sleep 5` reads as 120s and printed "120s"
+  in two failure messages; the real budget was 216s, and 312s in check 3, which issues two
+  queries per pass. `LLMHighTTFT` said "up to 5m" and granted 420s; `GPUHighUtilization`
+  said 6m and granted 504s.
+
+  ⚠️ **This is why the budgets moved first and the forward second.** Landing the forward fix
+  alone would have cut every timeout in this file by ~45% in one commit, silently, while the
+  diff read as a pure speed-up. Bounds are now wall-clock deadlines in seconds, so a stated
+  budget and a real one cannot diverge again — including `grafana_uid_check`, whose count
+  was already honest, so that "every poll here is bounded in seconds" is greppable rather
+  than an audit.
+
+- **L8's budget was the one that was genuinely too small.** Measured across three runs on
+  2026-08-04: the `full` leg converges in 12.1s **every time**, to two decimal places, while
+  `lite` took 12.1s, 129.5s and **201.7s** on the same commit range — 22 of its 24 attempts,
+  roughly 18 seconds from a red leg on a rig that was working perfectly. Now 420s.
+
+### Added
+
+- **`verify.sh` reports how long L8 took to converge, and its residual while it waits.**
+  A new `promql_value` helper reads the number inside a series rather than counting series;
+  L8 prints the worst relative residual every ~30s while polling and appends the elapsed
+  time to its PASS line. Diagnostic only — no check asserts on it.
+
+  **Because the cause is not yet known, and the obvious ones are ruled out rather than
+  assumed.** The 201.7s run's diagnostics show Prometheus at `RESTARTS 0`, no OOM or
+  eviction events, rule-group `evaluationTime` of 2.4ms on a 30s interval, and llm-sim
+  scrape targets identical to the `full` leg's — 15s interval, ~1.3ms per scrape, both
+  healthy. A "converges at a fixed simulator age" hypothesis was tested against all six legs
+  and **fails**: the age at convergence spreads 188s to 391s. What survives is that `lite`
+  converges at 284-391s of simulator age against `full`'s 188-254s — consistently later,
+  non-overlapping, across three runs, through a mechanism none of the instrument-level
+  explanations covers. ⚠️ The cause **remains unproven**, and the instrumentation exists so
+  the next slow leg answers it instead of needing a rerun to reproduce.
+
+### Changed
+
+- **CI: `fast` now gates `compose`, `chart`, `image` and `stack`.** It is 9-12s and covers
+  the selftests, doc-claims, the rule tests and both syntax passes; when it is red the two
+  kind legs are ~14 runner-minutes spent confirming something already known.
+
+  ⚠️ **`stack` takes it as `needs: [changes, fast]` plus `if: always()`, and the `always()`
+  is load-bearing.** A failed dependency SKIPS a job, and a skipped **matrix** job does not
+  interpolate its name — so the two required checks would never report and the PR would sit
+  pending, which is precisely the bug the step-level gate already exists to avoid. Running
+  always and gating the steps on a single `RUN_STACK` expression keeps both names reporting
+  whatever `fast` did, with its own `::notice::` saying which of the two reasons applied.
+
+- **CI: diagnostics are no longer collected and uploaded on green runs.** `always()` was
+  bundling the logs of a stack that worked, on both kind legs and the compose job, every
+  run, retained 14 days. `!= 'success'` still covers failure, cancellation and timeout,
+  which is the whole reason it is not `failure()`.
+
+- **The CI timings in `CLAUDE.md` and `CONTRIBUTING.md` were wrong in the same direction.**
+  Both said the two kind legs take ~5.5-6 minutes *each*. Measured: `full` 5m19s-6m25s,
+  `lite` 6m39s-8m32s. **`lite` is the critical path**, which is backwards for a profile that
+  installs less, and every second of the difference is inside `verify.sh`.
+
 ## [0.7.0] — 2026-08-04
 
 **This release makes the repo check its own prose, and writes down the law it had been
