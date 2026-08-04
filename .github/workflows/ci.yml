@@ -248,6 +248,78 @@ jobs:
   # it is the half that actually happened. The reverse direction, upstream
   # declaring something we do not emit, is printed as a gap and exits 0.
   # ---------------------------------------------------------------------------
+  # ---------------------------------------------------------------------------
+  # The OTHER half of the required-check coupling, and the half that cannot run
+  # offline. .github/required-checks.txt records what the `main` ruleset requires;
+  # check-doc-claims.py asserts every line of it is a name ci.yml can produce, on
+  # every run. That catches a rename in the pull request that made it.
+  #
+  # It cannot catch the reverse: someone editing the ruleset in the browser. The
+  # ruleset is repository SETTINGS, versioned by nothing, and reading it needs the
+  # network — so that check lives here, weekly, rather than in the offline gate.
+  #
+  # ⚠️ NO CREDENTIALS AND NO EXTRA PERMISSIONS. The rulesets endpoint is readable
+  # anonymously for a public repository (verified 2026-08-04), so this needs no
+  # token, which also means it cannot fail for a fork the way a secret-gated step
+  # would. If this repo ever goes private, this step needs a token and this
+  # comment is the reason it stopped working.
+  # ---------------------------------------------------------------------------
+  settings-drift:
+    name: branch ruleset vs required-checks.txt
+    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: The ruleset requires exactly what the repo says it does
+        run: |
+          set -euo pipefail
+          api="https://api.github.com/repos/${GITHUB_REPOSITORY}/rulesets"
+          curl -fsSL -H 'Accept: application/vnd.github+json' "$api" -o /tmp/rulesets.json
+          python3 - <<'PY'
+          import json, os, subprocess, sys, urllib.request
+
+          want = [l.strip() for l in open(".github/required-checks.txt")]
+          want = sorted(l for l in want if l and not l.startswith("#"))
+
+          # Find the ruleset targeting `main`. Named lookup rather than a hardcoded
+          # id: an id is meaningless in a fork and silently wrong after a recreate.
+          sets = json.load(open("/tmp/rulesets.json"))
+          live = []
+          for rs in sets:
+              if rs.get("target") != "branch":
+                  continue
+              url = rs["_links"]["self"]["href"]
+              with urllib.request.urlopen(url) as r:
+                  full = json.load(r)
+              for rule in full.get("rules", []):
+                  if rule["type"] == "required_status_checks":
+                      live += [c["context"] for c in
+                               rule["parameters"]["required_status_checks"]]
+          live = sorted(set(live))
+
+          if not live:
+              sys.exit("::error::no required status checks found on any branch ruleset. "
+                       "Either the ruleset was deleted, or it no longer requires anything "
+                       "— both mean main is less protected than this repo claims.")
+          if live != want:
+              print(f"  ruleset requires : {live}")
+              print(f"  repo records     : {want}")
+              missing = [c for c in want if c not in live]
+              extra = [c for c in live if c not in want]
+              if missing:
+                  print(f"::error::recorded as required but the ruleset does NOT require: "
+                        f"{missing}. main is less protected than .github/required-checks.txt "
+                        f"claims.")
+              if extra:
+                  print(f"::error::the ruleset requires checks the repo does not record: "
+                        f"{extra}. If a job was renamed in settings and not here, pull "
+                        f"requests may already be blocked.")
+              sys.exit(1)
+          print(f"  ok  ruleset and .github/required-checks.txt agree on {len(want)}: {want}")
+          PY
+
   upstream-drift:
     name: vLLM upstream drift (buckets + metric set)
     if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'

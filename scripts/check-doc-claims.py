@@ -144,6 +144,44 @@ def derive_k8s_minor() -> str:
                                     "no K8S_VERSION in config.sh — the derivation is dead")
 
 
+CI_WORKFLOW = ".github/workflows/ci.yml"
+CI_DOC = "docs/ci.md"
+REQUIRED_CHECKS = ".github/required-checks.txt"
+
+
+def ci_check_names(text: str = None) -> set:
+    """Every status-check name ci.yml can produce, with matrix values expanded.
+
+    ⚠️ THE MATRIX VALUE IS INTERPOLATED INTO THE NAME, which is what makes this
+    worth deriving rather than eyeballing: `full stack on kind (${{ matrix.profile }})`
+    is not a check anyone can require, `full stack on kind (lite)` is. A rename or a
+    changed matrix value silently changes the strings the ruleset must match.
+
+    Parsed with regex rather than a YAML library on purpose — this repo's scripts
+    are stdlib-only (CLAUDE.md rule 14) and Python has no stdlib YAML. Only the
+    `jobs:` section is scanned, so the `on:` triggers cannot be mistaken for jobs.
+    """
+    body = (read(CI_WORKFLOW) if text is None else text).split("\njobs:\n", 1)
+    if len(body) != 2:
+        die("ci-jobs", f"no `jobs:` section in {CI_WORKFLOW} — the derivation is dead")
+    blocks = re.split(r"^  ([a-z][a-z0-9-]*):[ \t]*$", body[1], flags=re.M)
+    names = set()
+    for i in range(1, len(blocks), 2):
+        job = blocks[i + 1]
+        m = re.search(r"^    name:[ \t]*(.+?)[ \t]*$", job, re.M)
+        if not m:
+            continue                      # a job with no display name uses its key
+        label = m.group(1)
+        mx = re.search(r"^\s+matrix:\s*\n\s+(\w+):\s*\[([^\]]+)\]", job, re.M)
+        if mx and "${{ matrix." in label:
+            key = re.escape(mx.group(1))
+            for v in (v.strip() for v in mx.group(2).split(",")):
+                names.add(re.sub(r"\$\{\{\s*matrix\." + key + r"\s*\}\}", v, label))
+        else:
+            names.add(label)
+    return names or die("ci-jobs", f"no named jobs found in {CI_WORKFLOW} — dead")
+
+
 def within_one_minor(claimed: str, derived: str) -> bool:
     """kubectl is supported within ONE minor of the API server, EITHER direction.
 
@@ -279,6 +317,44 @@ def main() -> None:
     print(f"  ok  ids        {len(refs):>3} references, all known to the catalog "
           f"({', '.join(sorted(blessed))})")
 
+    # ---- CI check names: two set comparisons, not counts
+    #
+    # ⚠️ The ruleset on `main` requires these strings and lives in GitHub SETTINGS,
+    # outside this repository. Rename a job and the required check is never reported;
+    # GitHub waits for it forever and every pull request becomes unmergeable, with
+    # nothing here saying why. This is the offline half of catching that — the
+    # `settings-drift` job checks the live ruleset, which needs the network.
+    ci_names = ci_check_names()
+
+    required = [ln.strip() for ln in read(REQUIRED_CHECKS).splitlines()]
+    required = [ln for ln in required if ln and not ln.startswith("#")]
+    if not required:
+        die("ci-required", f"{REQUIRED_CHECKS} lists no checks — the comparison is dead")
+    unknown = [r for r in required if r not in ci_names]
+    if unknown:
+        for r in unknown:
+            print(f"  {REQUIRED_CHECKS}: '{r}' is required but {CI_WORKFLOW} never "
+                  f"produces it", file=sys.stderr)
+        print(f"  {CI_WORKFLOW} produces: " + ", ".join(f"'{n}'" for n in sorted(ci_names)),
+              file=sys.stderr)
+        die("ci-required", "a required status check cannot be reported by any job. Every "
+                           "pull request would wait on it forever — rename the job back, "
+                           "or update BOTH the ruleset and this file.")
+    print(f"  ok  ci-required {len(required)} required check(s) are names {CI_WORKFLOW} "
+          f"produces")
+
+    # Completeness the other way: a job nobody documented is a job nobody can
+    # reason about, and a RENAMED job stops matching the prose that describes it.
+    ci_doc = read(CI_DOC)
+    undocumented = sorted(n for n in ci_names if n not in ci_doc)
+    if undocumented:
+        for n in undocumented:
+            print(f"  {CI_DOC}: no mention of the check name '{n}'", file=sys.stderr)
+        die("ci-jobs", f"every name {CI_WORKFLOW} produces must appear in {CI_DOC} — a "
+                       f"renamed or added job leaves the page describing something that "
+                       f"no longer exists.")
+    print(f"  ok  ci-jobs     all {len(ci_names)} check name(s) appear in {CI_DOC}")
+
     # ---- the numeric claims
     for c in CLAIM_CHECKS:
         scan = dict(texts)
@@ -332,8 +408,36 @@ Real vLLM only ever emits one surface — `both` is a rig affordance, not a fide
 """
 
 
+CI_FIXTURE = """\
+on:
+  push:
+    branches: [main]
+
+jobs:
+  keyed-only:
+    runs-on: ubuntu-latest
+  plain:
+    name: a plain job
+    runs-on: ubuntu-latest
+  matrixed:
+    name: stack on kind (${{ matrix.profile }})
+    strategy:
+      matrix:
+        profile: [full, lite]
+"""
+
+
 def selftest() -> None:
     print("check-doc-claims --selftest")
+
+    # ⚠️ The `on:` triggers must NOT be mistaken for jobs, a job with no `name:`
+    # contributes nothing (its key is the check name, which nothing requires here),
+    # and the matrix value must be interpolated INTO the name rather than left as
+    # the literal ${{ }} — that literal is exactly what a skipped matrix job
+    # reports, and requiring it would block every pull request forever.
+    ci = ci_check_names(CI_FIXTURE)
+    assert ci == {"a plain job", "stack on kind (full)", "stack on kind (lite)"}, ci
+    print("  ok  ci-jobs     matrix expanded, triggers ignored, unnamed job skipped")
 
     got = blessed_ids(BLESS_FIXTURE)
     assert got == {"25618", "12239"}, got  # 2026 must NOT be blessed by the year

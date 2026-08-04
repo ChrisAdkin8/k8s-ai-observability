@@ -60,6 +60,7 @@ Everything else hangs off those two.
 | `simulator image (build both arches, smoke-test amd64)` | the image builds for amd64 and arm64 and actually serves metrics | 15 min |
 | `full stack on kind (full)` / `(lite)` | the real thing, end to end, twice | 90 min |
 | `vLLM upstream drift (buckets + metric set)` | upstream vLLM has not moved under us | 5 min, weekly |
+| `branch ruleset vs required-checks.txt` | the branch protection settings still match what the repo records | 5 min, weekly |
 
 ### selftest + rule tests + shell syntax
 
@@ -196,7 +197,26 @@ Two consequences follow, and both have teeth.
 **Rename the job or change the matrix values and every pull request blocks forever.** A
 required check that never reports is not treated as passed; it sits at "waiting for status to
 be reported". The ruleset lives in GitHub settings, outside this repository, so nothing here
-version-controls it and nothing detects the drift.
+version-controls it.
+
+That coupling *is* checked now, in two halves, because no single check could cover it:
+
+| Half | Where | When | Catches |
+|--|--|--|--|
+| every recorded requirement is a name `ci.yml` can produce | `check-doc-claims.py` | every run, offline | a rename, in the pull request that made it |
+| the recorded list matches the **live** ruleset | `branch ruleset vs required-checks.txt` | weekly, needs network | someone editing the ruleset in a browser |
+
+The shared anchor is [`.github/required-checks.txt`](../.github/required-checks.txt), which
+is the only record in this repository of a fact that otherwise exists solely in GitHub
+settings. It is a *record*, not a control plane: adding a line does not make a check
+required. Change the ruleset first, then record it, or the weekly job will report that they
+disagree, which is precisely its job.
+
+A third check falls out of the same derivation: **every check name `ci.yml` produces must
+appear on this page.** Add a job without documenting it, or rename one and leave the prose
+behind, and `doc-claims` fails. That is not hypothetical politeness. The
+`branch ruleset vs required-checks.txt` row in the table above exists because adding that job
+failed this check, which is how it should work.
 
 **This is also why the `stack` job is `if: always()`** rather than gated like its siblings. A
 *skipped* matrix job does not interpolate its name, so it would report as the literal string

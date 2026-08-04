@@ -1,0 +1,36 @@
+# The status checks the `main` branch ruleset requires, one per line.
+#
+# ⚠️ THIS FILE EXISTS BECAUSE THE RULESET DOES NOT LIVE IN THIS REPOSITORY.
+# It is GitHub repository settings, editable in a browser, versioned by nothing.
+# The coupling it creates is the sharpest edge in CI:
+#
+#   ci.yml generates a check NAME  ->  the ruleset requires that exact string
+#
+# Rename a job, or change a matrix value, and the required check is never
+# reported. GitHub does not treat a missing required check as passed — it waits
+# for it forever, so every pull request becomes unmergeable, and nothing in the
+# repository says why. `full stack on kind (full)` and `(lite)` are especially
+# exposed, because the matrix value is interpolated INTO the name.
+#
+# Splitting that unverifiable coupling into two verifiable halves is the whole
+# point of this file:
+#
+#   1. scripts/check-doc-claims.py asserts every line below is a name ci.yml can
+#      actually produce. Offline, on every run, so a rename fails in the same
+#      pull request that made it.
+#   2. the `settings-drift` job asserts this file matches the LIVE ruleset. That
+#      needs the network, so it runs weekly rather than per-pull-request. It
+#      catches the other direction: someone editing the ruleset in the browser.
+#
+# Neither half needs the other to be useful. Together they cover workflow ->
+# settings -> prose.
+#
+# ⚠️ ADDING A LINE HERE DOES NOT MAKE A CHECK REQUIRED. This file is a record,
+# not a control plane. Change the ruleset first, then record it here, or
+# settings-drift will tell you they disagree — which is exactly its job.
+#
+# The ruleset: https://github.com/ChrisAdkin8/k8s-ai-observability/settings/rules
+
+selftest + rule tests + shell syntax
+full stack on kind (full)
+full stack on kind (lite)
