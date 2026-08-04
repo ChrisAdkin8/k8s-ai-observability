@@ -174,6 +174,16 @@ tasks:
   # Finds pipes whose consumer exits before the producer finishes. Under pipefail
   # that turns a correct result into exit 141 — it has failed a chart publish on a
   # good archive, and made a CI filter skip the cluster jobs on a code change.
+  # ⚠️ THE WHOLE DIRECTORY, NOT ONE FILE AT A TIME. verify.sh sources config.sh,
+  # and the only clash shellcheck has found here — a name that is an array in one
+  # and a string in the other — is invisible unless both are analysed together.
+  # -S warning keeps the signal: `A && B || C` style notes are informational and
+  # this repo uses that idiom deliberately, ~22 times.
+  shellcheck:
+    desc: Lint the shell at warning severity (CI runs the same command)
+    cmds:
+      - shellcheck -S warning scripts/*.sh
+
   sigpipe:
     desc: Find pipes into an early-exiting consumer in a pipefail file
     cmds:
@@ -188,6 +198,7 @@ tasks:
       - task: drift-test
       - task: doc-claims
       - task: sigpipe
+      - task: shellcheck
       - task: rule-tests
       - task: chart
 

@@ -328,14 +328,20 @@ else
       surface_ok=0
       continue
     fi
-    missing=""
+    # ⚠️ NOT `missing`. config.sh declares `local missing=()` — an ARRAY — in
+    # assert_monitoring_crds, and this script sources config.sh. This one is a
+    # GLOBAL at file scope, so only that `local` keeps the two apart: drop it and a
+    # string would be appended to an array, silently. shellcheck sees the clash
+    # only when given both files at once, which is why the CI step passes the whole
+    # directory rather than one script at a time.
+    missing_labels=""
     while IFS= read -r clabel; do
       [[ -n "$clabel" ]] || continue
       # sigpipe-ok: $keys is the label set of ONE series — a few short lines.
-      printf '%s\n' "$keys" | grep -qx -- "$clabel" || missing="$missing $clabel"
+      printf '%s\n' "$keys" | grep -qx -- "$clabel" || missing_labels="$missing_labels $clabel"
     done <<< "$contract_labels"
-    if [[ -n "$missing" ]]; then
-      fail "3b $cseries is missing contract label key(s):$missing — the dashboard legends and the recording-rule joins bind to these, so a rename blanks a legend without blanking the panel"
+    if [[ -n "$missing_labels" ]]; then
+      fail "3b $cseries is missing contract label key(s):$missing_labels — the dashboard legends and the recording-rule joins bind to these, so a rename blanks a legend without blanking the panel"
       surface_ok=0
     fi
   done <<< "$contract_series"

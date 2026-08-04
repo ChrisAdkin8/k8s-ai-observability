@@ -187,6 +187,17 @@ jobs:
       - name: Release tooling selftest
         run: python3 scripts/chart-build.py --selftest
 
+      # ⚠️ CodeQL CANNOT READ SHELL, and shell is 40% of this repository. This is
+      # the gate for the half codeql.yml is blind to. Two of the bugs found on
+      # 2026-08-04 were shell, and neither would have been caught there.
+      #
+      # The whole directory in one invocation: verify.sh sources config.sh, and a
+      # name that is an array in one and a string in the other is invisible when
+      # they are linted separately. -S warning because the `A && B || C` notes are
+      # informational and this repo uses that idiom deliberately.
+      - name: shellcheck
+        run: shellcheck -S warning scripts/*.sh
+
       # The MATCHING RULES of the weekly drift check, against a committed fixture
       # rather than against upstream. The drift job below runs on a schedule and
       # needs network; this needs neither, and it covers the one piece of

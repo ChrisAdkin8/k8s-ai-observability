@@ -1,4 +1,21 @@
 #!/usr/bin/env bash
+
+# ⚠️ shellcheck disable=SC2034 — THIS FILE IS SOURCED, NOT RUN, so shellcheck
+# reading it alone sees variables assigned and never used. Two different reasons,
+# and the second is the one worth knowing:
+#
+#   * most are consumed by install.sh, verify.sh, grafana.sh, prometheus.sh,
+#     teardown.sh or kind-up.sh — genuinely used, invisible from here;
+#   * a few are INFORMATIONAL on purpose and read by nothing. GPU_COUNT,
+#     GPU_PRODUCT and GPU_MEMORY_MIB restate values whose source of truth is
+#     helm/fake-gpu-operator/values.yaml (the comment beside GPU_COUNT says so),
+#     and LLM_VLLM_VERSION is cited by docs/versions.md and CONTRIBUTING.md rather
+#     than by code. They exist so this file remains the single place a human looks.
+#
+# ⚠️ Checked one name at a time before silencing, and the first check was WRONG:
+# `grep "\$$v"` in zsh expands `$$` to the PID, so it reported everything unused.
+# If this directive is ever re-justified, verify with a literal `${NAME}` search.
+# shellcheck disable=SC2034
 # config.sh — SINGLE SOURCE OF TRUTH for runtime constants + shared helpers.
 # Sourced by install.sh / teardown.sh / verify.sh. Do not run directly.
 #

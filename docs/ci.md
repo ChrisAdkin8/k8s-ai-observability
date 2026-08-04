@@ -368,8 +368,11 @@ Actions workflows**, on pushes to `main`, on pull requests, and weekly.
 ⚠️ **It does not read Shell, and Shell is 40% of this repository.** CodeQL supports neither
 Bash nor HCL nor YAML, so `verify.sh`, `install.sh` and `config.sh` — where most of the
 install logic lives — are invisible to it. Two of the bugs found on 2026-08-04 were shell,
-and neither would have been caught by it. `shellcheck` remains the larger gap;
-`CONTRIBUTING.md` records why it was deferred.
+and neither would have been caught by it. That gap is now covered separately: the `fast` job runs
+**`shellcheck -S warning scripts/*.sh`**, on the whole directory in one invocation rather
+than file by file. That matters — `verify.sh` sources `config.sh`, and the only real clash
+shellcheck has found here (a name that is an array in one and a string in the other) is
+invisible when they are linted apart.
 
 It is **advisory**, not a required check: findings need triage, and a scanner that blocks
 merges on a false positive costs more than it returns. The `actions` language is the half

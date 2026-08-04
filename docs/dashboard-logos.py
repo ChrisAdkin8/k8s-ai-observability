@@ -215,6 +215,11 @@ def main():
     org_logo()
     print("\nBoard logos upload with their boards — see manifests/dashboards/README.md.")
     print("org-chrisadkin.png is the ORG logo: grafana.com -> your org -> Settings.")
+    # ⚠️ Explicit, because `sys.exit(main())` below CLAIMS a status code and got
+    # `None` — which exits 0. Correct here only because every failure path
+    # raises SystemExit with a message instead of returning. Three other
+    # scripts in this repo return a code properly; these two did not.
+    return 0
 
 
 if __name__ == "__main__":

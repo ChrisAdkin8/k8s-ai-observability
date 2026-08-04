@@ -106,7 +106,11 @@ def retarget(node):
 
 
 def convert(path):
-    raw = open(path).read()
+    # Closed explicitly rather than left to refcounting: CPython frees the handle
+    # at once, other runtimes do not, and this repo's scripts are meant to be
+    # boring everywhere.
+    with open(path, "r", encoding="utf-8") as fh:
+        raw = fh.read()
     dash = json.loads(raw)
 
     own_uid = dash.get("uid", "")
@@ -184,6 +188,11 @@ def main():
 
     print(f"\n{len(files)} board(s) ready. Upload these, NOT the files in "
           f"manifests/dashboards/ — see manifests/dashboards/README.md.")
+    # ⚠️ Explicit, because `sys.exit(main())` below CLAIMS a status code and got
+    # `None` — which exits 0. Correct here only because every failure path
+    # raises SystemExit with a message instead of returning. Three other
+    # scripts in this repo return a code properly; these two did not.
+    return 0
 
 
 if __name__ == "__main__":
