@@ -94,6 +94,8 @@ EOF
 runtime_preflight
 
 # --- create ---------------------------------------------------------------------
+# sigpipe-ok: one short line per kind cluster — bytes, not kilobytes, so it has
+# finished writing long before grep can close the pipe.
 if kind get clusters 2>/dev/null | grep -qx "$CLUSTER_NAME"; then
   echo "==> kind cluster '$CLUSTER_NAME' already exists — reusing it"
 else

@@ -258,6 +258,16 @@ def check_version_not_reused(chart_version, strict, publishing_as=None):
     WARN by default and FAIL under --strict-version, for the same reason
     appVersion does: on an unreleased branch the version legitimately still
     equals the last released one, right up until the release commit bumps it.
+
+    ⚠️ IT ONLY KNOWS VERSIONS CARRIED BY A TAG, AND THAT IS A REAL HOLE.
+    publish-chart.yml can be dispatched from a branch with push_to_registry=true,
+    which publishes a version no tag carries — chart 0.2.1 was published exactly
+    that way on 2026-08-04, after the tagged publish of 0.2.0 failed. Re-using
+    0.2.1 would sail past this check and be rejected by the registry instead,
+    which is the failure this exists to move earlier. The escape hatch is
+    deliberate and explicit (push_to_registry defaults false), so this is
+    recorded rather than closed: closing it needs a record of published versions
+    that git alone cannot provide.
     """
     seen = shipped_chart_versions(also_exclude=(publishing_as,))
     if seen is None:

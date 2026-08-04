@@ -70,7 +70,15 @@ GPU producer against the DCGM surface contract, `promtool` tests for the alert a
 rules, and `scripts/check-doc-claims.py`, which compares prose in the markdown against the
 code it describes.
 
-That last one exists because documentation drift here is a *known failure class*. Dashboard
+It also runs `check-sigpipe.py`, which finds pipes whose consumer stops reading
+before the producer finishes. Under `pipefail` that turns a correct result into exit
+141, and it has bitten twice: it failed a chart publish on an archive that contained
+everything it was asked to prove, and in this very workflow's changes filter it would
+have reported a large code change as "markdown only" and skipped the cluster jobs.
+⚠️ Neither reproduces under `zsh`, so a laptop will not find them — test that class
+with `bash -c`.
+
+The doc-claims check exists because documentation drift here is a *known failure class*. Dashboard
 ids, "emits N metrics" claims and version numbers have all been wrong in prose while being
 right in code. The checker derives every expected value at run time and holds no copy of any
 truth, so it cannot drift itself.

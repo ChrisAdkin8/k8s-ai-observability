@@ -171,6 +171,15 @@ tasks:
   #   image / compose   need docker            (task image, task compose)
   #   verify.sh         needs a cluster        (task <target>:verify)
   #   the live drift check needs the network — its weekly CI job owns it
+  # Finds pipes whose consumer exits before the producer finishes. Under pipefail
+  # that turns a correct result into exit 141 — it has failed a chart publish on a
+  # good archive, and made a CI filter skip the cluster jobs on a code change.
+  sigpipe:
+    desc: Find pipes into an early-exiting consumer in a pipefail file
+    cmds:
+      - python3 scripts/check-sigpipe.py --selftest
+      - python3 scripts/check-sigpipe.py
+
   preflight:
     desc: Run every no-cluster gate (selftests, rules, doc claims, chart) before pushing
     cmds:
@@ -178,6 +187,7 @@ tasks:
       - task: compose-selftest
       - task: drift-test
       - task: doc-claims
+      - task: sigpipe
       - task: rule-tests
       - task: chart
 

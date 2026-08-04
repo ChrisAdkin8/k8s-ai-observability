@@ -265,6 +265,8 @@ spec:
           # The end-to-end form of the same invariant, and what verify.sh
           # check 1 asserts: a label that matches is not proof the device plugin
           # actually came up.
+          # sigpipe-ok: `sort` must read ALL its input before emitting anything, so it has
+          # finished reading by the time `head` exits; output is one short line per node.
           max=$(kubectl get nodes -o jsonpath='{range .items[*]}{.status.allocatable.nvidia\.com/gpu}{"\n"}{end}' 2>/dev/null | grep -vE '^$' | sort -rn | head -1)
           if [ -n "${max:-}" ] && [ "${max:-0}" -gt 0 ] 2>/dev/null; then
             pass "nvidia.com/gpu allocatable = $max (no physical GPU involved)"
@@ -288,10 +290,18 @@ spec:
           # matches no pod fails here.
           SVC={{ include "k8s-ai-observability.fullname" . }}-llm-sim
           body=$(kubectl get --raw "/api/v1/namespaces/${LLM_NS}/services/${SVC}:llm-metrics/proxy/metrics" 2>/dev/null)
-          if echo "$body" | grep -q '^vllm:num_requests_running{'; then
+          # ⚠️ WRITTEN TO A FILE, NOT PIPED. `echo "$body" | grep -q` exits at the first
+          # match while echo still has the rest of the scrape to write; under the
+          # `set -uo pipefail` above the producer's SIGPIPE becomes the pipeline's status
+          # and the `if` reads FALSE — reporting the metric missing when it is present.
+          # Measured: ~18.7 kB payload against a 64 kB Linux pipe buffer, first match at
+          # line 4 of 222. Safe today, data-dependent tomorrow, and this is the chart's
+          # OWN verification. A file has no margin to lose.
+          printf '%s\n' "$body" > /tmp/scrape.txt
+          if grep -q '^vllm:num_requests_running{' /tmp/scrape.txt; then
             pass "the Service serves the vllm: metric surface"
             for m in prefill decode inference; do
-              echo "$body" | grep -q "^# HELP vllm:request_${m}_time_seconds " \
+              grep -q "^# HELP vllm:request_${m}_time_seconds " /tmp/scrape.txt \
                 && pass "  the $m phase histogram is present" \
                 || fail "  vllm:request_${m}_time_seconds is missing — the image tag is probably older than this chart (llm.image.tag / Chart.appVersion)"
             done

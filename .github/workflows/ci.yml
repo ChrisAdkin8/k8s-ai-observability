@@ -112,7 +112,15 @@ jobs:
 
           # Non-markdown means code. An EMPTY diff also means code, for the same
           # fail-open reason: it should not happen, and if it does we do not know why.
-          if [ -z "$changed" ] || echo "$changed" | grep -qvE '\.md$'; then
+          # ⚠️ WRITTEN TO A FILE RATHER THAN PIPED, and the DIRECTION is the point.
+          # `echo "$changed" | grep -qvE` exits at the first non-markdown path, SIGPIPEs
+          # echo, and under pipefail returns 141 — which reads as "markdown only" and
+          # SKIPS THE CLUSTER JOBS ON A CODE CHANGE. That is the opposite of the
+          # fail-open posture stated 12 lines above, and it needs a diff big enough to
+          # fill the pipe buffer, so it would strike only the largest changes.
+          # sigpipe-ok: no pipe.
+          printf '%s\n' "$changed" > /tmp/changed-files.txt
+          if [ -z "$changed" ] || grep -qvE '\.md$' /tmp/changed-files.txt; then
             echo "code=true" >> "$GITHUB_OUTPUT"
             echo "-> non-markdown changes present, running everything"
           else
@@ -164,6 +172,15 @@ jobs:
 
       - name: Prose claims vs the code they describe
         run: python3 scripts/check-doc-claims.py
+
+      # ⚠️ Cheap, and it has already earned it twice: `tar tzf | head` failed a
+      # chart publish on a correct archive, and `echo | grep -qvE` in this file's
+      # own changes filter would have skipped the cluster jobs on a large code
+      # change. Neither reproduces under zsh, so a laptop will not find them.
+      - name: Pipes into an early-exiting consumer
+        run: |
+          python3 scripts/check-sigpipe.py --selftest
+          python3 scripts/check-sigpipe.py
 
       # The MATCHING RULES of the weekly drift check, against a committed fixture
       # rather than against upstream. The drift job below runs on a schedule and
@@ -831,7 +848,11 @@ jobs:
 
           # No `source` label on any vllm: series — the same invariant --selftest
           # holds, asserted here against what the IMAGE actually serves.
-          if grep '^vllm:' /tmp/scrape.txt | grep -q 'source="'; then
+          # ⚠️ ONE grep, NOT `grep | grep -q`. Under pipefail the second grep exits at
+          # the first match, SIGPIPEs the first, and the pipeline returns 141 — so the
+          # `if` was false EXACTLY WHEN A VIOLATION WAS PRESENT. This assertion could
+          # only ever fail open. sigpipe-ok: no pipe.
+          if grep -qE '^vllm:.*source="' /tmp/scrape.txt; then
             echo "a vllm: series carries a source label" >&2; exit 1
           fi
           echo "scraped $(grep -c '^vllm:' /tmp/scrape.txt) vllm: sample lines"
@@ -1084,6 +1105,7 @@ jobs:
           # "connection refused" wall into eleven separate files. That artifact is
           # worse than none — it looks like signal and is pure noise. In that case the
           # step log is the diagnostic, and it is already clear.
+          # sigpipe-ok: one short line per kind cluster; bytes, not kilobytes.
           if ! kind get clusters 2>/dev/null | grep -q '[^[:space:]]'; then
             {
               echo "No kind cluster exists."

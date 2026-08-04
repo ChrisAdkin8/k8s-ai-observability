@@ -196,7 +196,7 @@ fi
 
 # 1. a node advertises nvidia.com/gpu allocatable > 0
 max_gpu="$("${KUBECTL[@]}" get nodes -o jsonpath='{range .items[*]}{.status.allocatable.nvidia\.com/gpu}{"\n"}{end}' \
-  | grep -vE '^$' | sort -rn | head -1 || echo 0)"
+  | grep -vE '^$' | sort -rn | head -1 || echo 0)"   # sigpipe-ok: sort drains first
 [[ "${max_gpu:-0}" =~ ^[0-9]+$ && "${max_gpu:-0}" -gt 0 ]] \
   && pass "nvidia.com/gpu allocatable = $max_gpu (no physical GPU)" \
   || fail "no node advertises nvidia.com/gpu — check node label $NODE_POOL_LABEL_KEY=$NODE_POOL_NAME and topology name"
@@ -269,6 +269,7 @@ else
     missing=""
     while IFS= read -r clabel; do
       [[ -n "$clabel" ]] || continue
+      # sigpipe-ok: $keys is the label set of ONE series — a few short lines.
       printf '%s\n' "$keys" | grep -qx -- "$clabel" || missing="$missing $clabel"
     done <<< "$contract_labels"
     if [[ -n "$missing" ]]; then
