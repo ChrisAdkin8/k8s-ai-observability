@@ -12,7 +12,44 @@ type: application
 #                cleanly and runs an OLD simulator: green, with something
 #                silently wrong. `task chart` and the publish workflow both
 #                cross-check it against the release tag rather than trusting it.
-version: 0.1.0
+#
+# ─── THE BUMP POLICY ────────────────────────────────────────────────────────
+# What the two mean was already written down. What happens ON A RELEASE was not,
+# and that is the half that bites:
+#
+#   * `appVersion` moves EVERY release, because it tracks the tag.
+#   * `version` moves whenever anything under charts/ changes — templates,
+#     values, defaults, dependency pins.
+#
+# ⚠️ THOSE TWO RULES DO NOT COVER THE CASE THAT BREAKS A RELEASE. A release that
+# changes NO chart template still publishes the chart, because publishing is
+# driven by the tag and not by whether these files moved. `version` therefore has
+# to move ANYWAY, or the push is rejected for re-using a version that already
+# exists in the registry. Registry versions are IMMUTABLE: a number that has been
+# published once can never be reused, corrected, or overwritten.
+#
+# So: bump `version` on every release, whether or not the chart changed.
+# scripts/chart-build.py enforces it against the versions carried by the repo's
+# own tags, so the collision is found locally rather than at `helm push`.
+#
+# ⚠️ DO NOT SET version EQUAL TO appVersion to keep them tidy. They are different
+# numbers with different meanings, and making them match once teaches every
+# consumer that chart 0.9.0 implies app v0.9.0 — a coupling nothing enforces and
+# the paragraph above explicitly denies.
+#
+# ─── WHY 0.2.0 IS THE FIRST PUBLISHED VERSION ───────────────────────────────
+# It sat at 0.1.0 through repo releases v0.5.0, v0.6.0, v0.7.0 and v0.7.1 — four
+# releases and a great deal of template work, including the render-time
+# assertions in templates/_assertions.tpl — because nothing ever forced it to
+# move. Verified by reading Chart.yaml at each of those tags.
+#
+# 0.1.0 was never PUBLISHED, so it was still technically free. It is not being
+# kept anyway: it would contradict the policy directly above on the very first
+# artefact anyone pins, and "0.1.0" advertises an untouched chart that four
+# releases of history says this is not. 0.2.0 is deliberately NOT v0.7.x, so the
+# independence above stays visible at a glance, and deliberately not 1.0.0 while
+# artifacthub.io/prerelease below is still "true".
+version: 0.2.0
 appVersion: "v0.7.1"
 
 home: https://github.com/ChrisAdkin8/k8s-ai-observability
@@ -46,4 +83,26 @@ dependencies:
 
 annotations:
   artifacthub.io/license: MIT
+  # ⚠️ STAYS "true" FOR THE FIRST LISTING, and the condition for removing it is
+  # written here rather than left to feel — otherwise it never comes off, or it
+  # comes off the day someone thinks the chart looks finished.
+  #
+  # It is honest while the chart has never been installed by anyone outside this
+  # repo. Every install so far has been run by its own author, on a cluster its
+  # own scripts built, against a Prometheus its own prompt chose the name of.
+  # That proves the templates render and the preconditions hold; it cannot prove
+  # the chart survives a cluster nobody here has seen.
+  #
+  # Remove it when ALL of these are true, and record which release did it:
+  #   1. The PUBLISHED artefact — not a local build — has been pulled
+  #      anonymously, rendered both ways, and installed against a foreign
+  #      Prometheus with `helm test` passing. (That is W3 of the distribution
+  #      work; until it exists, nothing here has been verified as a consumer
+  #      sees it.)
+  #   2. At least one install by someone unconnected to this repo, on a cluster
+  #      this repo did not build, has been reported working — an issue, a
+  #      discussion, or a message. One report, not an assumption drawn from
+  #      download counts: a pull proves curiosity, not a working install.
+  #   3. No breaking values change is pending. Renaming or removing a key in
+  #      values.yaml after the flag comes off breaks people who pinned.
   artifacthub.io/prerelease: "true"
