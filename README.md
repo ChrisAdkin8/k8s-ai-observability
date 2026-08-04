@@ -272,6 +272,7 @@ you give up.
 | [tests/](tests/) | the rule tests and the simulator selftest: what they cover and how to add one |
 | [compose/](compose/) | the no-Kubernetes path: what it shares with the cluster, and what it cannot exercise |
 | [CONTRIBUTING.md](CONTRIBUTING.md) | the invariants that fail *silently* if broken, what to re-check when bumping a pinned version, and what is deliberately out of scope |
+| [docs/ci.md](docs/ci.md) | what CI actually proves, the two kind legs and how they differ, why the check names are load-bearing, and how to reproduce a failure locally |
 | [docs/usage.md](docs/usage.md) | running every phase as scripts instead of Task |
 | [docs/versions.md](docs/versions.md) | every pinned version and the one place each is set |
 | [docs/eks.md](docs/eks.md) / [docs/gke.md](docs/gke.md) | per-cloud specifics |
