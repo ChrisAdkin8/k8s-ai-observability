@@ -23,6 +23,47 @@ Comparison links are at the foot of this file, one per released version.
 
 ## [Unreleased]
 
+### Added
+
+- **A "Contributing and support" section in the README**, closing the one gap that graded
+  badly against every published README standard at once. `SECURITY.md`,
+  `CODE_OF_CONDUCT.md` and both issue forms already existed and already scored on GitHub's
+  community profile — but the profile checks that a file *exists*, not that a reader can
+  find it, and none of the four was reachable from the page most people actually read.
+  Grepping the README for `issue|discussion|support|help` returned nothing.
+
+  The section routes the four requests that actually arrive — an empty panel, a bug or an
+  upstream drift, a security report, a change — to the file that owns each, and says *not*
+  to open a public issue for the third. Discussions are disabled on the repo, so it does
+  not offer them.
+
+  **No response-time commitment is stated**, deliberately. `SECURITY.md` sets one for
+  security reports and that is a narrower promise than a general one; inventing a second
+  would be a claim about spare time that nothing enforces.
+
+### Changed
+
+- **The LITE sizing block in the README keeps the instruction and delegates the mechanism.**
+  0.6.0's `8ea005e` put the whole 3-vs-4 GiB finding in Prerequisites, which was right
+  about *where it bites* and wrong about how much of it a reader needs there. What stops
+  you cold is "allocate 4, do not try 3"; the arithmetic behind it — reported vs allocated
+  GiB, `MemTotal` floored by integer division, 2.83 reading as `2` — is what you want
+  *after* it has already bitten. That now lives in
+  [docs/troubleshooting.md](docs/troubleshooting.md), with the measurement stamp, and the
+  README links to it in one line.
+
+  `scripts/config.sh` moved with it. Its comment beside `KIND_MIN_MEMORY_GIB` used to say
+  the README "says why", which stopped being true — the pointer now names troubleshooting,
+  because a stale cross-reference between the constant and its explanation is exactly the
+  drift class that comment exists to prevent.
+
+- **`CONTRIBUTING.md` records why the README leads with "Try it" before "Install".** The
+  order inverts what [Standard Readme](https://github.com/RichardLitt/standard-readme)
+  asks for, and it is deliberate: the compose path needs no cluster and no prerequisites,
+  so the fastest honest answer to "what is this" is a board you can look at. Written down
+  because it has now been questioned once, and an undocumented deviation reads as an
+  oversight to the next person who checks.
+
 ## [0.6.0] — 2026-08-02
 
 **This release gives the rig an SLO, and then makes the docs tell the truth about it.**

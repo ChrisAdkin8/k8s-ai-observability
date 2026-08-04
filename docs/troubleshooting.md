@@ -35,3 +35,15 @@ causes apart by working outwards from the producer.
 `./scripts/verify.sh local` (or `eks` / `gke`) asserts the whole path end-to-end. It checks that
 metrics are flowing, that the dashboard is present under uid `gpu-sim-dcgm`, and that Grafana
 serves it to an anonymous request.
+
+## Why a 3 GiB runtime is refused when the floor reads 3
+
+`LITE=1` lowers `KIND_MIN_MEMORY_GIB` to 3, yet allocating exactly 3 GiB fails the preflight
+before anything is created. The floor is checked against what the runtime *reports*, not against
+what you asked for: `kind-up.sh` reads the runtime's own `MemTotal` and floors it with integer
+division, so a colima VM asked for 3 GiB reports 2.83 and reads as `2`. Allocating 4 reports
+3.81 and passes.
+
+Measured on colima/aarch64, 2026-08-04: `ALL CHECKS PASSED` at 4 GiB, with the stack using
+2.197 GiB of it. The constants are set in `scripts/config.sh`, and the
+[README](../README.md#prerequisites) gives the `colima` command.
