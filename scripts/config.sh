@@ -33,9 +33,103 @@ FAKE_GPU_RELEASE="gpu-operator"
 # overwritten at source time and every one of those scripts port-forwarded to a
 # Service that does not exist on a cluster whose release is named anything else.
 #
-# The Service and Secret names are BUILT from it — "${KPS_RELEASE}-grafana",
-# "${KPS_RELEASE}-prometheus" — which is a chart convention, not a Kubernetes one.
+# ⚠️ THE SERVICE NAMES ARE NOT BUILT FROM IT ANY MORE, AND THE OBVIOUS
+# CONSTRUCTION WORKED ONLY FOR THE ONE RELEASE NAME THAT NEVER NEEDED IT.
+#
+# This used to be "${KPS_RELEASE}-prometheus", described as a chart convention.
+# It is half of one. Helm's fullname template collapses the prefix when the
+# release name ALREADY CONTAINS the chart name:
+#
+#   release kube-prometheus-stack  ->  svc kube-prometheus-stack-prometheus
+#   release acme-mon               ->  svc acme-mon-kube-prometheus-s-prometheus
+#
+# So the construction resolves for the greenfield release this repo installs
+# itself, and for nothing else — including every release name KPS_RELEASE exists
+# to support. Verified both ways by rendering the upstream chart under each name.
+#
+# ⚠️ AND IT FAILED AS A DIFFERENT BUG. Found 2026-08-04 by running the BYO path
+# with release `acme-mon`: verify.sh port-forwarded a Service that does not
+# exist, so every PromQL query returned nothing, and every series check reported
+# itself as a SELECTOR problem — pointing at RELEASE_LABEL, which was correct.
+# The suggested fix would not have helped, because the diagnosis was wrong.
+#
+# Grafana is NOT affected: the grafana subchart's own fullname gives
+# "<release>-grafana" either way. It is resolved the same way regardless, so the
+# two cannot quietly diverge again.
 KPS_RELEASE="${KPS_RELEASE:-kube-prometheus-stack}"
+
+# Ask the cluster what a kube-prometheus-stack component is called, rather than
+# predicting it. Echoes a bare resource name and returns 0, or returns 1.
+#
+#   $1  resource kind      svc | deploy
+#   $2  component          prometheus | alertmanager | operator | grafana
+#
+# Requires KUBECTL and MONITORING_NS, which every caller sets before use.
+resolve_kps() {
+  local kind="$1" component="$2" name
+
+  # 1. The constructed name, which IS correct when the release name contains the
+  #    chart name. Tried first so the greenfield path costs a single lookup and
+  #    behaves exactly as it always has.
+  if "${KUBECTL[@]}" -n "$MONITORING_NS" get "$kind" "${KPS_RELEASE}-${component}" \
+       -o name >/dev/null 2>&1; then
+    printf '%s\n' "${KPS_RELEASE}-${component}"; return 0
+  fi
+
+  # 2. kube-prometheus-stack's own labels. `app` is built from the CHART name, so
+  #    it is identical under every release name — which is exactly the property
+  #    the resource name lacks. Narrowed by `release` so a cluster running two
+  #    monitoring stacks cannot answer for the wrong one.
+  name=$("${KUBECTL[@]}" -n "$MONITORING_NS" get "$kind" \
+           -l "app=kube-prometheus-stack-${component},release=${KPS_RELEASE}" \
+           -o jsonpath='{.items[0].metadata.name}' 2>/dev/null) || name=""
+  [ -n "$name" ] && { printf '%s\n' "$name"; return 0; }
+
+  # 3. The SUBCHARTS use the standard Kubernetes labels instead, and carry no
+  #    `release` label at all — grafana is labelled app.kubernetes.io/name=grafana
+  #    with app.kubernetes.io/instance=<release>. Verified on a live cluster.
+  name=$("${KUBECTL[@]}" -n "$MONITORING_NS" get "$kind" \
+           -l "app.kubernetes.io/name=${component},app.kubernetes.io/instance=${KPS_RELEASE}" \
+           -o jsonpath='{.items[0].metadata.name}' 2>/dev/null) || name=""
+  [ -n "$name" ] && { printf '%s\n' "$name"; return 0; }
+
+  # 4. The Prometheus Operator's OWN Service, created for every Prometheus and
+  #    Alertmanager CR regardless of how they were installed — so this works even
+  #    for a Prometheus that never came from this chart. Last, not first: it is
+  #    headless and namespace-wide, so it answers for ALL of them and cannot tell
+  #    two apart. A fallback, not a preference.
+  if [ "$kind" = "svc" ]; then
+    case "$component" in
+      prometheus|alertmanager)
+        if "${KUBECTL[@]}" -n "$MONITORING_NS" get svc "${component}-operated" \
+             -o name >/dev/null 2>&1; then
+          printf '%s\n' "${component}-operated"; return 0
+        fi ;;
+    esac
+  fi
+  return 1
+}
+
+# As above, but a miss is fatal and says what was looked for. A port-forward to a
+# Service that does not exist fails in a way that reads as an empty Prometheus,
+# which is the misdiagnosis this whole block exists to end.
+resolve_kps_or_die() {
+  local kind="$1" component="$2" name
+  if name=$(resolve_kps "$kind" "$component"); then printf '%s\n' "$name"; return 0; fi
+  {
+    echo "ERROR: no '$component' $kind found in namespace '$MONITORING_NS'."
+    echo "       Looked for, in order:"
+    echo "         $kind/${KPS_RELEASE}-${component}"
+    echo "         -l app=kube-prometheus-stack-${component},release=${KPS_RELEASE}"
+    echo "         -l app.kubernetes.io/name=${component},app.kubernetes.io/instance=${KPS_RELEASE}"
+    [ "$kind" = "svc" ] && echo "         $kind/${component}-operated"
+    echo
+    echo "       Is KPS_RELEASE ($KPS_RELEASE) the right release, and is"
+    echo "       MONITORING_NS ($MONITORING_NS) the right namespace? What is there:"
+    "${KUBECTL[@]}" -n "$MONITORING_NS" get "$kind" 2>&1 | sed 's/^/         /'
+  } >&2
+  exit 1
+}
 
 # ⚠️ THE TWO LABELS THAT FAIL SILENTLY. Get either wrong and there is NO ERROR
 # ANYWHERE: the rules never evaluate, the scrapes never happen, the boards stay

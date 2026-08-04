@@ -44,7 +44,8 @@ cleanup() { [[ -n "$PF_PID" ]] && kill "$PF_PID" >/dev/null 2>&1 || true; }
 trap cleanup EXIT INT TERM
 
 echo "==> context $CTX"
-"${KUBECTL[@]}" -n "$MONITORING_NS" port-forward "svc/${KPS_RELEASE}-prometheus" \
+PROM_SVC="$(resolve_kps_or_die svc prometheus)" || exit 1
+"${KUBECTL[@]}" -n "$MONITORING_NS" port-forward "svc/${PROM_SVC}" \
   "${PROMETHEUS_PORT}:9090" >/dev/null 2>&1 &
 PF_PID=$!
 

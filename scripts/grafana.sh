@@ -58,7 +58,10 @@ cleanup() { [[ -n "$PF_PID" ]] && kill "$PF_PID" >/dev/null 2>&1 || true; }
 trap cleanup EXIT INT TERM
 
 echo "==> context $CTX"
-"${KUBECTL[@]}" -n "$MONITORING_NS" port-forward "svc/${KPS_RELEASE}-grafana" "${GRAFANA_PORT}:80" >/dev/null 2>&1 &
+# The Grafana Service and the admin Secret share the grafana subchart's fullname,
+# so one lookup names both — and neither is predicted from KPS_RELEASE.
+GRAF_SVC="$(resolve_kps_or_die svc grafana)" || exit 1
+"${KUBECTL[@]}" -n "$MONITORING_NS" port-forward "svc/${GRAF_SVC}" "${GRAFANA_PORT}:80" >/dev/null 2>&1 &
 PF_PID=$!
 
 # Poll rather than sleep: the forward can also die immediately (port already in use),
@@ -83,7 +86,7 @@ done
 
 # Non-fatal: a missing/renamed secret must not block read-only access, which is the
 # whole point of the anonymous Viewer role.
-pw="$("${KUBECTL[@]}" -n "$MONITORING_NS" get secret "${KPS_RELEASE}-grafana" \
+pw="$("${KUBECTL[@]}" -n "$MONITORING_NS" get secret "${GRAF_SVC}" \
       -o jsonpath='{.data.admin-password}' 2>/dev/null | base64 -d 2>/dev/null || true)"
 
 open_url() {
@@ -122,7 +125,7 @@ echo "    anonymous Viewer access — no login needed to view"
 if [[ -n "$pw" ]]; then
   echo "    to edit: log in as 'admin' / '$pw'"
 else
-  echo "    admin password: secret ${KPS_RELEASE}-grafana not readable (view-only is unaffected)"
+  echo "    admin password: secret ${GRAF_SVC} not readable (view-only is unaffected)"
 fi
 
 echo "    Ctrl-C to stop the port-forward"

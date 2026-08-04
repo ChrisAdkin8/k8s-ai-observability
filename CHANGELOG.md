@@ -23,6 +23,63 @@ Comparison links are at the foot of this file, one per released version.
 
 ## [Unreleased]
 
+### Fixed
+
+- **The BYO path could not work under any release name it was built for.** `KPS_RELEASE`
+  exists so a cluster whose monitoring release is *not* called `kube-prometheus-stack` can
+  be served, and the scripts built Service names from it — `${KPS_RELEASE}-prometheus`.
+  Helm's fullname template collapses the prefix only when the release name already
+  contains the chart name, so that construction resolves for `kube-prometheus-stack`
+  (`kube-prometheus-stack-prometheus`) and for nothing else: release `acme-mon` produces
+  `acme-mon-kube-prometheus-s-prometheus`. The flag therefore worked for exactly the one
+  release name that never needed it.
+
+  It failed **as a different bug**, which is why it survived. `verify.sh` port-forwarded a
+  Service that does not exist, so every PromQL query returned nothing and every series
+  check reported a *selector* problem, naming `RELEASE_LABEL` — which was correct all
+  along. Following the suggested fix would not have helped.
+
+  Service, Deployment and Secret names are now **resolved from the cluster** by
+  `resolve_kps` in `scripts/config.sh`, trying the constructed name, then
+  kube-prometheus-stack's `app=` labels, then the subcharts' `app.kubernetes.io/` labels,
+  then the operator's own `prometheus-operated`. A miss is now fatal and prints every
+  pattern it tried. Affects `verify.sh`, `grafana.sh`, `prometheus.sh` and `install.sh`
+  — including a greenfield install under a custom `KPS_RELEASE`, where the operator
+  readiness wait silently matched nothing and `|| true` swallowed it.
+
+  Measured on a kind cluster with kube-prometheus-stack installed as **`acme-mon`**:
+  `verify.sh --byo` went from six failures and a >10-minute run to **26 passed, 0 failed,
+  3 skipped in ~90 seconds**, and `grafana.sh` opened both boards.
+
+- **The chart's `helm test` image no longer existed.** `bitnami/kubectl:1.31` returns
+  `not found` — Bitnami retired much of its public Docker Hub catalogue — so the pod sat
+  in `ImagePullBackOff` and the only live check of the two silent-failure labels could not
+  start. Nothing noticed because CI never runs `helm test`; it needs a cluster. Now
+  `alpine/k8s`, which carries both kubectl and bash (`registry.k8s.io/kubectl` is
+  distroless and exits 128 on the hook's `/bin/bash`). The pin was also five minors out of
+  skew, and `check-doc-claims.py` now holds it inside Kubernetes' supported ±1 window.
+
+### Added
+
+- **The chart is published to `ghcr.io` as an OCI artefact** (`.github/workflows/publish-chart.yml`),
+  packaged from `dist/` with its dependencies vendored, and then **verified by consuming
+  it**: pulled back with no credentials — so "the package is public" is asserted rather
+  than assumed — rendered both stack settings, all nine render-time assertions driven to
+  failure, and installed on kind against a foreign kube-prometheus-stack with `helm test`
+  required to *fail* on the default `releaseLabel` and pass when it is set correctly. No
+  floating tag: Helm's OCI tag is the chart version, and a `latest` consumers can pin is
+  the opposite of pinning.
+
+### Changed
+
+- **Chart `version` 0.1.0 → 0.2.0, and the bump policy is written where the number is.**
+  It had not moved through four releases because nothing said it had to. The rule that was
+  missing: a release publishes the chart even when no template changed, so `version` must
+  move anyway or the push is rejected — registry versions are immutable.
+  `chart-build.py` now refuses a version any tag already shipped, checked against git
+  rather than the registry so it fails locally instead of at `helm push`.
+  `artifacthub.io/prerelease` stays `"true"` and now carries the condition for removing it.
+
 ## [0.7.1] — 2026-08-04
 
 **This release makes the acceptance suite tell the truth about its own clock.** Every

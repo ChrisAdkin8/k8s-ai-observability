@@ -120,7 +120,17 @@ else
   # before we apply custom rules. `helm --wait` above already blocks until the operator +
   # its webhook are Ready, so this is a redundant, NON-FATAL belt-and-braces check
   # (kept resilient to a renamed release — a wrong name must not abort a healthy install).
-  "${KUBECTL[@]}" -n "$MONITORING_NS" rollout status "deploy/${KPS_RELEASE}-operator" --timeout=5m || true
+  # ⚠️ RESOLVED, NOT CONSTRUCTED. "${KPS_RELEASE}-operator" only exists when the
+  # release name contains the chart name. This branch is the greenfield install,
+  # so the default release makes it correct — but set KPS_RELEASE=my-monitoring
+  # WITHOUT --skip-monitoring and the Deployment is
+  # my-monitoring-kube-prometheus-s-operator, the lookup matched nothing, and
+  # `|| true` swallowed it: the wait silently did not happen.
+  if op="$(resolve_kps deploy operator)"; then
+    "${KUBECTL[@]}" -n "$MONITORING_NS" rollout status "deploy/${op}" --timeout=5m || true
+  else
+    echo "    (no operator Deployment found under release '$KPS_RELEASE' — skipping the redundant wait)"
+  fi
 fi
 
 echo "==> [2b] apply dashboards + ServiceMonitors + alert rules (CRDs present & webhook ready)"
@@ -248,6 +258,12 @@ for d in $llm_deploys; do
   "${KUBECTL[@]}" -n "$LLM_NS" rollout status "deploy/$d" --timeout=3m || true
 done
 
+# The admin Secret shares the Grafana Service's name, and neither is predictable
+# from KPS_RELEASE. Resolved so the command printed below can be pasted; falls
+# back to the constructed name only for the message, since a summary line must
+# never abort a successful install.
+graf_secret="$(resolve_kps svc grafana || echo "${KPS_RELEASE}-grafana")"
+
 byo_env=""; byo_verify=""
 if [[ "$SKIP_MONITORING" == "1" ]]; then
   # Echo the release back on every BYO line. The scripts read it from the
@@ -268,7 +284,7 @@ Done. Two dashboards (Grafana stays private — the script holds a port-forward)
   LLM:  $(grafana_llm_dashboard_url)
 
   Anonymous Viewer access — no login needed to view. To edit, log in as 'admin':
-  kubectl --context $CTX -n $MONITORING_NS get secret ${KPS_RELEASE}-grafana \\
+  kubectl --context $CTX -n $MONITORING_NS get secret ${graf_secret} \\
     -o jsonpath='{.data.admin-password}' | base64 -d; echo
   (Anonymous access and that secret are both kube-prometheus-stack conventions —
    on a monitoring stack this repo did not install, yours may differ.)
