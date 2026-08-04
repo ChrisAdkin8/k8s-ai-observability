@@ -14,14 +14,38 @@
 # chart, and the two cannot drift apart.
 #
 # ─── HOW TO FILL THIS IN (one-time, needs a browser) ────────────────────────
-#   1. https://artifacthub.io -> Control Panel -> Repositories -> Add
+# ⚠️ THE ORDER MATTERS AND IT IS NOT THE OBVIOUS ONE. The ID is not minted by
+# hand or requested — Artifact Hub generates it when the repository is ADDED, and
+# adding it makes Artifact Hub immediately try to index that OCI reference. So
+# the chart has to be published FIRST or step 2 points at nothing.
+#
+#   1. Cut a release tag. .github/workflows/publish-chart.yml publishes the chart
+#      and its verify job asserts an ANONYMOUS pull works — if the ghcr.io package
+#      is still private, fix that before going near Artifact Hub, because it
+#      cannot read a private package either.
+#   2. https://artifacthub.io -> sign in -> Control Panel -> Repositories -> Add
 #        kind: Helm charts
 #        url:  oci://ghcr.io/chrisadkin8/charts/k8s-ai-observability
-#   2. Artifact Hub shows a repository ID (a UUID) as soon as it is added.
-#      Copy it into repositoryID below and commit.
-#   3. The next chart publish pushes this file to the registry and the listing
-#      becomes ownership-verified. Until then the publish step SKIPS LOUDLY
-#      rather than pushing a placeholder that would claim nothing.
+#   3. The repository's CARD then shows an `ID` (a UUID). That is the value.
+#      Put it in repositoryID below and commit.
+#   4. Push the ownership artefact. The workflow does this on every publish, but
+#      that means waiting for the NEXT release — so do it once by hand instead
+#      and let the workflow keep it current afterwards:
+#
+#        oras push ghcr.io/chrisadkin8/charts/k8s-ai-observability:artifacthub.io \
+#          --config /dev/null:application/vnd.cncf.artifacthub.config.v1+yaml \
+#          artifacthub-repo.yml:application/vnd.cncf.artifacthub.repository-metadata.layer.v1.yaml
+#
+#      (`brew install oras`. Log in first: `oras login ghcr.io -u <user>` with a
+#      PAT that has write:packages — the same scope the workflow's GITHUB_TOKEN
+#      has, which is why the workflow itself needs no extra secret.)
+#
+# The tag `artifacthub.io` and both media types above are Artifact Hub's, not a
+# convention this repo chose; it pulls that artefact and looks for the
+# repository-metadata layer. Verified against artifacthub.io/docs 2026-08-04.
+#
+# Until repositoryID is real the publish step SKIPS LOUDLY rather than pushing a
+# placeholder that would claim nothing while looking like a step that worked.
 #
 # The ID is not a secret. It identifies the listing; it does not authorise
 # anything on its own — the claim works because only someone who can push to this
