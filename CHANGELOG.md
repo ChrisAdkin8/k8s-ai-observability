@@ -25,6 +25,38 @@ Comparison links are at the foot of this file, one per released version.
 
 ### Fixed
 
+- **Nothing on a pull request ever installed the chart, so `helm test` only ran at release
+  time.** The `helm chart` job lints and renders without touching a cluster; the
+  `full stack on kind` job installs through `install.sh`, the *script* path. The chart's own
+  `helm test` — the only check of the two silent-failure labels against a live cluster — ran
+  solely in the publish workflow, on a tag. That is how `0.2.0` reached the registry
+  reporting a passing chart as a failure. A new `chart on kind` job now runs it on every
+  pull request, asserting **both** that `helm test` fails on a mismatched `releaseLabel` and
+  that it passes when set. The steps live in a composite action shared with
+  `publish-chart.yml`, so the two subjects (local build, published artefact) cannot drift.
+
+- **A wrong `RELEASE_LABEL` took over ten minutes to report, against ~90 seconds to pass.**
+  Every check burned its full poll before giving up. A wrong label is not a race — the
+  objects carry the label they carry — so `verify.sh --byo` now compares it against the
+  Prometheus selectors once, up front, and refuses to start. Measured: **1 second**, naming
+  what the cluster actually selects. It fires only on positive evidence and stays silent
+  when it cannot know, so a slow-but-healthy cluster is unaffected; the poll budgets are
+  unchanged.
+
+- **Two CI assertions could only ever fail open**, plus two in the chart's own test. Under
+  `pipefail`, a consumer that stops reading early SIGPIPEs the producer and the pipeline
+  returns 141 — so an `if` guarding an assertion was false *exactly when* the thing it
+  looked for was present. In the changes filter the same shape would have read a large code
+  change as "markdown only" and skipped the cluster jobs. ⚠️ It reproduces under `bash` and
+  not under `zsh`, which is why it survived local testing. `scripts/check-sigpipe.py` now
+  makes the class mechanical; every remaining hit carries a written justification.
+
+- **`install.sh` and `teardown.sh` only ever checked their second argument**, so
+  `install.sh local --skip-monitoring --lite` accepted `--lite` in silence and installed the
+  full stack. `--lite` is the realistic typo, because `LITE` is an environment variable and
+  not a flag. Both scripts now reject any unrecognised argument, and the usage message says
+  where `LITE` really goes.
+
 - **`helm test --logs` reported a passing chart as a failure — chart `0.2.0` → `0.2.1`.**
   The test's ServiceAccount, ClusterRole and ClusterRoleBinding carried
   `helm.sh/hook: test`, and `helm test --logs` fetches logs for *every* resource with that

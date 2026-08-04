@@ -58,6 +58,7 @@ Everything else hangs off those two.
 | `compose stack (no Kubernetes)` | the Docker Compose path works, boards load, targets are up | 10 min |
 | `helm chart (lint, render, assertions fire)` | the chart renders both ways, and every render-time assertion still *fires* | 15 min |
 | `simulator image (build both arches, smoke-test amd64)` | the image builds for amd64 and arm64 and actually serves metrics | 15 min |
+| `chart on kind (helm test, foreign Prometheus)` | the chart installs, and `helm test` both fails and passes for the right reasons | 30 min |
 | `full stack on kind (full)` / `(lite)` | the real thing, end to end, twice | 90 min |
 | `vLLM upstream drift (buckets + metric set)` | upstream vLLM has not moved under us | 5 min, weekly |
 | `branch ruleset vs required-checks.txt` | the branch protection settings still match what the repo records | 5 min, weekly |
@@ -113,6 +114,31 @@ scrapes `/metrics`. It also asserts that the port override is `LLM_SIM_LISTEN_PO
 `LLM_SIM_PORT` is ignored, because that was a real trap.
 
 Only amd64 is executed: the runner is amd64. Both architectures are built.
+
+### chart on kind
+
+⚠️ **Until this job existed, nothing on a pull request ever installed the chart.** The
+`helm chart` job lints and renders and never touches a cluster; the `full stack on kind`
+job installs through `install.sh`, the *script* path. So the chart's own `helm test` — the
+only thing that checks the two silent-failure labels against a live cluster — ran solely in
+the publish workflow, on a tag.
+
+That is how chart `0.2.0` reached the registry with `helm test --logs` exiting 1 on a chart
+where every hook had succeeded: a green result reported as red, on the exact command the
+chart README tells people to run. Registry versions are immutable, so it is still there.
+
+This job creates its own cluster, installs kube-prometheus-stack under a release name this
+repo would never choose, and then asserts **both** directions: `helm test` must **fail**
+with the default `releaseLabel`, and pass once it is set. An assertion that only ever
+passes is not an assertion.
+
+It needs its own cluster rather than a step on `full stack on kind`, because the chart's
+default namespaces are the same ones `install.sh` uses and Helm will not adopt resources it
+does not own.
+
+The steps live in a composite action, [`.github/actions/verify-chart`](../.github/actions/verify-chart/action.yml),
+because `publish-chart.yml` runs the identical sequence against the **published** artefact.
+Same procedure, two subjects, one implementation — a second copy would be free to drift.
 
 ### full stack on kind
 

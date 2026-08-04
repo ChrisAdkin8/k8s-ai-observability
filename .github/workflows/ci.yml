@@ -898,6 +898,60 @@ jobs:
           echo "image payload matches scripts/llm-sim.py ($(cat /tmp/in-repo))"
 
   # ---------------------------------------------------------------------------
+  # ⚠️ THE CHART'S OWN VERIFICATION, WHICH USED TO RUN ONLY AT RELEASE TIME.
+  #
+  # The `chart` job above lints and renders and never contacts a cluster. The
+  # `stack` job below installs via install.sh — the SCRIPT path, not the chart. So
+  # until this job existed, nothing on a pull request ever installed the chart or
+  # ran `helm test`, and the only place that did was the publish workflow, on a tag.
+  #
+  # That is exactly how chart 0.2.0 reached the registry with `helm test --logs`
+  # exiting 1 on a chart where all four hooks reported Phase: Succeeded — a green
+  # result reported as red, on the command the chart README tells people to run.
+  # Registry versions are immutable, so it is still there.
+  #
+  # ⚠️ ITS OWN CLUSTER, NOT A STEP ON `stack`. The chart's default namespaces are
+  # monitoring, gpu-operator and llm-sim — the same ones install.sh uses — so
+  # installing it after `task local:up` collides: Helm will not adopt resources it
+  # does not own.
+  #
+  # The steps are a composite action because publish-chart.yml runs the identical
+  # sequence against the PUBLISHED artefact. Same procedure, two subjects, one
+  # implementation.
+  # ---------------------------------------------------------------------------
+  chart-cluster:
+    name: chart on kind (helm test, foreign Prometheus)
+    needs: [changes, fast]
+    if: needs.changes.outputs.code == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+
+      - name: Install pinned Helm
+        run: |
+          set -euo pipefail
+          mkdir -p "$HOME/.local/bin"
+          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+          curl -fsSL "https://get.helm.sh/helm-${HELM_VERSION}-linux-amd64.tar.gz" \
+            | tar -xz -C /tmp linux-amd64/helm
+          mv /tmp/linux-amd64/helm "$HOME/.local/bin/helm"
+          chmod +x "$HOME/.local/bin/helm"
+          helm version --short
+
+      # The chart cannot be installed from charts/ — .Files.Get cannot read outside
+      # the chart directory, so the dashboards and rules are assembled into dist/.
+      - name: Build the chart into dist/
+        run: python3 scripts/chart-build.py
+
+      - name: Install it against a foreign Prometheus and helm test it
+        uses: ./.github/actions/verify-chart
+        with:
+          chart: dist/charts/k8s-ai-observability
+
+  # ---------------------------------------------------------------------------
   # The real test: a kind cluster, both Helm releases, all the wiring, and every
   # acceptance check.
   # ---------------------------------------------------------------------------

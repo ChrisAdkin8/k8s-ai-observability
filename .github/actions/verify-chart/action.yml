@@ -1,0 +1,145 @@
+# ⚠️ ONE IMPLEMENTATION, TWO SUBJECTS. This is the chart's cluster verification, and
+# it exists as an action rather than as steps in a workflow because it is called
+# twice: against the LOCALLY BUILT chart on every pull request, and against the
+# PUBLISHED artefact after a release. Those are different subjects and neither
+# replaces the other — a package can be assembled wrongly in ways `helm lint`,
+# `helm package` and a successful push all pass in silence.
+#
+# ⚠️ DO NOT INLINE THIS BACK INTO EITHER CALLER. Two copies of this repo's most
+# important verification would be free to drift, and a drifted copy is invisible from
+# the outside. That is the same trade `chart-build.py` refuses for dashboards, and
+# that `publish-image.yml` refuses by delegating its version check rather than
+# re-implementing it — the first attempt at re-implementing that check was wrong in a
+# way that would have failed every correctly configured release.
+name: Verify the chart against a foreign Prometheus
+description: >
+  Stand up kind, install kube-prometheus-stack under a name this repo would never
+  choose, and prove the chart both fails and passes `helm test` for the right reasons.
+
+inputs:
+  chart:
+    description: 'Chart reference: a local path (dist/charts/...) or an oci:// URL.'
+    required: true
+  version:
+    description: 'Chart version. Required for an oci:// reference, ignored for a path.'
+    required: false
+    default: ''
+  kps-release:
+    description: 'Release name for kube-prometheus-stack. Deliberately foreign.'
+    required: false
+    default: acme-mon
+  kps-namespace:
+    description: 'Namespace for kube-prometheus-stack. Deliberately foreign.'
+    required: false
+    default: acme-observability
+  kind-version:
+    description: 'kind release to install.'
+    required: false
+    default: v0.30.0
+
+runs:
+  using: composite
+  steps:
+    - name: Create a kind cluster
+      shell: bash
+      run: |
+        set -euo pipefail
+        curl -fsSLo /tmp/kind "https://kind.sigs.k8s.io/dl/${{ inputs.kind-version }}/kind-linux-amd64"
+        chmod +x /tmp/kind && sudo mv /tmp/kind /usr/local/bin/kind
+        kind create cluster --config kind/gpu-sim.yaml --wait 5m
+        kubectl get nodes
+
+    # ⚠️ THE NODE LABEL IS A PREREQUISITE THE CHART CANNOT SATISFY — a chart cannot
+    # label nodes. Without it the fake operator watches a pool no node belongs to and
+    # the install is green with ZERO GPUs.
+    - name: Label a node for the simulated GPU pool
+      shell: bash
+      run: |
+        set -euo pipefail
+        c=charts/k8s-ai-observability/values.yaml
+        key=$(grep -m1 '^nodePoolLabelKey:' "$c" | awk '{print $2}')
+        val=$(grep -m1 '^nodePoolName:'     "$c" | awk '{print $2}')
+        kubectl label node --all "${key}=${val}" --overwrite
+        echo "  labelled all nodes ${key}=${val}"
+
+    # A stranger's monitoring stack, under a name this repo would never pick.
+    # NO selector overrides: upstream defaults ruleSelectorNilUsesHelmValues and its
+    # siblings to true, which makes the selector `release=<that release>`. That default
+    # IS the BYO case, so leaving it alone is the realistic test.
+    - name: Install kube-prometheus-stack as a FOREIGN release
+      shell: bash
+      run: |
+        set -euo pipefail
+        helm repo add prometheus-community https://prometheus-community.github.io/helm-charts
+        helm repo update
+        helm install "${{ inputs.kps-release }}" prometheus-community/kube-prometheus-stack \
+          -n "${{ inputs.kps-namespace }}" --create-namespace --wait --timeout 15m
+        kubectl -n "${{ inputs.kps-namespace }}" get prometheus \
+          -o jsonpath='{.items[0].spec.ruleSelector}{"\n"}'
+
+    # ⚠️ THE NEGATIVE CASE FIRST, because it is the one that looks like success. With
+    # the chart's DEFAULT releaseLabel against this cluster, `helm install` reports
+    # SUCCESS and every object is created — and the rules are never adopted, the
+    # scrapes never happen, and every derived panel is empty. `helm test` is the ONLY
+    # thing that says so, which is why it is asserted to FAIL here rather than assumed
+    # to be unnecessary.
+    - name: helm test FAILS on the default releaseLabel (the silent failure)
+      shell: bash
+      env:
+        VER: ${{ inputs.version }}
+      run: |
+        set -euo pipefail
+        args=(); [ -n "$VER" ] && args+=(--version "$VER")
+        helm install neg "${{ inputs.chart }}" "${args[@]}" \
+          -n neg --create-namespace \
+          --set namespaces.monitoring="${{ inputs.kps-namespace }}" --wait --timeout 10m
+        if helm test neg -n neg --logs 2>&1 | tee /tmp/neg.log; then
+          echo "::error title=The silent-failure check did not fire::helm test PASSED with a releaseLabel that matches no ruleSelector on this cluster. The one check that catches the chart's most likely misconfiguration is not working." >&2
+          exit 1
+        fi
+        grep -qi 'releaseLabel' /tmp/neg.log \
+          || { echo "::error::helm test failed, but not with a message naming releaseLabel — the diagnosis a user needs is missing." >&2; exit 1; }
+        echo "  ok  helm test caught the mismatched releaseLabel"
+        helm uninstall neg -n neg --wait
+
+    - name: Install correctly and helm test it
+      shell: bash
+      env:
+        VER: ${{ inputs.version }}
+      run: |
+        set -euo pipefail
+        args=(); [ -n "$VER" ] && args+=(--version "$VER")
+        helm install rig "${{ inputs.chart }}" "${args[@]}" \
+          -n rig --create-namespace \
+          --set releaseLabel="${{ inputs.kps-release }}" \
+          --set namespaces.monitoring="${{ inputs.kps-namespace }}" \
+          --wait --timeout 15m
+        helm test rig -n rig --logs
+
+    - name: Both boards are reachable in the foreign Grafana
+      shell: bash
+      run: |
+        set -euo pipefail
+        ns="${{ inputs.kps-namespace }}"; rel="${{ inputs.kps-release }}"
+        kubectl -n "$ns" rollout status "deploy/${rel}-grafana" --timeout=5m
+        kubectl -n "$ns" port-forward "svc/${rel}-grafana" 13001:80 &
+        pf=$!; trap 'kill $pf 2>/dev/null || true' EXIT
+        sleep 10
+        pw=$(kubectl -n "$ns" get secret "${rel}-grafana" \
+              -o jsonpath='{.data.admin-password}' | base64 -d)
+        uids=$(python3 -c "
+        import json, glob
+        print(' '.join(json.load(open(f))['uid'] for f in sorted(glob.glob('manifests/dashboards/*.json'))))")
+        test -n "$uids" || { echo "::error::derived no dashboard uids — the check is dead" >&2; exit 1; }
+        for uid in $uids; do
+          code=000
+          for i in $(seq 1 30); do
+            code=$(curl -s -o /dev/null -w '%{http_code}' -u "admin:$pw" \
+                   "http://localhost:13001/api/dashboards/uid/$uid")
+            [ "$code" = "200" ] && break
+            sleep 5
+          done
+          [ "$code" = "200" ] \
+            || { echo "::error::/d/$uid returned $code — the sidecar never imported it (grafana.dashboardLabel?)" >&2; exit 1; }
+          echo "  ok  /d/$uid -> 200"
+        done
