@@ -57,6 +57,67 @@ byo_hint() {
   printf ' [BYO: usually the selector label — your Prometheus adopts objects matching release=<its release>, this install applied release=%s. Set RELEASE_LABEL/KPS_RELEASE, or set ruleSelectorNilUsesHelmValues + serviceMonitorSelectorNilUsesHelmValues false on your side.]' "$RELEASE_LABEL"
 }
 
+# --- BYO pre-flight: answer in seconds what the polls take 24 minutes to imply ---
+#
+# ⚠️ A WRONG RELEASE_LABEL IS NOT A RACE, and that asymmetry is the whole point.
+# Rule 5 exists because checks that race their producer must poll — a scrape that has
+# not happened yet WILL happen. But the objects carry the label they carry, and no
+# amount of waiting changes it. Measured 2026-08-04: a wrong label took over TEN
+# MINUTES to surface, against ~90 seconds for a correct one to pass. Failing was
+# seven times slower than succeeding.
+#
+# ⚠️ THIS FIRES ONLY ON POSITIVE EVIDENCE, and every unknown is treated as "carry on".
+# Adoption is itself asynchronous — after a relabel the operator regenerates config and
+# Prometheus reloads — so anything concluding from an ABSENCE would turn a slow but
+# healthy cluster into a hard failure, which is strictly worse than waiting. So this
+# never asks "have the objects been adopted yet". It asks a question with no time in
+# it: does any Prometheus here select a `release` value that this install applied?
+#
+# It stays silent when it cannot know: no Prometheus readable, a selector using
+# matchExpressions, or `{}` (which matches everything and cannot be wrong). It speaks
+# only when EVERY readable selector names a release and none of them is ours.
+#
+# The poll budgets below are untouched. This does not shorten a wait; it declines to
+# start one whose outcome is already decided.
+byo_preflight() {
+  local proms p field v matched=0 seen=0 detail=""
+  proms="$("${KUBECTL[@]}" -n "$MONITORING_NS" get prometheus -o name 2>/dev/null || true)"
+  [[ -n "$proms" ]] || return 0          # no Prometheus CR readable: cannot know
+  while read -r p; do
+    [[ -n "$p" ]] || continue
+    for field in ruleSelector serviceMonitorSelector; do
+      v="$("${KUBECTL[@]}" -n "$MONITORING_NS" get "$p" \
+             -o "jsonpath={.spec.${field}.matchLabels.release}" 2>/dev/null || true)"
+      [[ -n "$v" ]] || continue          # {} or matchExpressions: cannot know
+      seen=$((seen + 1))
+      [[ "$v" == "$RELEASE_LABEL" ]] && matched=1
+      detail="${detail}
+           ${p##*/} ${field} selects release=${v}"
+    done
+  done <<< "$proms"
+
+  [[ "$seen" -gt 0 && "$matched" -eq 0 ]] || return 0
+
+  {
+    echo
+    echo "  ERROR: no Prometheus on this cluster selects release='$RELEASE_LABEL'."
+    echo "         This install labelled its ServiceMonitors and PrometheusRules with"
+    echo "         it, so nothing will ever adopt them: the rules never evaluate, the"
+    echo "         scrapes never happen, and every derived panel stays empty."
+    echo "         What the cluster actually selects:${detail}"
+    echo
+    echo "         Two fixes, and the second is often not yours to make:"
+    echo "           RELEASE_LABEL=<their release> ./scripts/verify.sh <target> --byo"
+    echo "           ...or set ruleSelectorNilUsesHelmValues and"
+    echo "           serviceMonitorSelectorNilUsesHelmValues false on their side."
+    echo
+    echo "         ⚠️ Refusing to START rather than failing slowly: the checks below"
+    echo "         poll for up to 24 minutes waiting for something that cannot arrive."
+    echo "         This is a comparison of two labels, not a timing question."
+  } >&2
+  exit 1
+}
+
 # --- helper: run a PromQL instant query via a self-healing port-forward ---------
 #
 # ⚠️ THE PID LIVES IN A FILE, NOT A VARIABLE, AND THAT IS THE WHOLE FIX.
@@ -192,6 +253,7 @@ if [[ "$BYO" == "1" ]]; then
   echo "    release '$KPS_RELEASE' · selector label 'release=$RELEASE_LABEL'"
   echo "    dashboards labelled '${GRAFANA_DASHBOARD_LABEL}=${GRAFANA_DASHBOARD_LABEL_VALUE}'"
   echo "    Relaxed: anonymous Grafana access (401/403 -> SKIP). Everything else is asserted."
+  byo_preflight
 fi
 
 # 1. a node advertises nvidia.com/gpu allocatable > 0
