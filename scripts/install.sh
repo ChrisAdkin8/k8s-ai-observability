@@ -20,20 +20,26 @@ source scripts/config.sh
 
 TARGET="${1:?usage: install.sh <eks|gke|local> [--skip-monitoring]}"
 # Positional, matching teardown.sh's `--destroy` rather than introducing getopts into
-# one script and leaving the other inconsistent.
+# one script and leaving the other inconsistent. teardown.sh rejects unknown arguments
+# the same way, for the same reason.
 #
-# UNLIKE teardown.sh, an unrecognised value is rejected. teardown.sh compares $2
-# against the literal and ignores anything else, which means a typo'd flag silently
-# does the non-flag thing — and here that would install a second monitoring stack over
-# the top of the user's own, which is the exact outcome this flag exists to prevent.
+# ⚠️ EVERY ARGUMENT IS CHECKED, NOT JUST $2, AND THAT USED TO BE FALSE. This was a
+# `case "${2:-}"` and nothing else, so `install.sh local --skip-monitoring --lite`
+# accepted `--lite` in silence. `--lite` is the realistic typo, because LITE is an
+# environment variable and not a flag: the user gets the FULL stack, on a machine
+# they sized for the trimmed one, with nothing said. A typo'd flag must fail loudly
+# rather than silently do the non-flag thing.
 SKIP_MONITORING=0
-case "${2:-}" in
-  "")                 ;;
-  --skip-monitoring)  SKIP_MONITORING=1 ;;
-  *) echo "ERROR: unknown argument '${2}'" >&2
-     echo "usage: install.sh <eks|gke|local> [--skip-monitoring]" >&2
-     exit 1 ;;
-esac
+shift || true                       # $1 is the target, already consumed above
+for arg in "$@"; do
+  case "$arg" in
+    --skip-monitoring)  SKIP_MONITORING=1 ;;
+    *) echo "ERROR: unknown argument '$arg'" >&2
+       echo "usage: install.sh <eks|gke|local> [--skip-monitoring]" >&2
+       echo "       LITE is an ENVIRONMENT VARIABLE, not a flag:  LITE=1 $0 $TARGET" >&2
+       exit 1 ;;
+  esac
+done
 
 # python3 is listed explicitly because this script genuinely needs it — the dashboard
 # JSON check in assert_dashboard_contract and the simulator checksum in [5/5] both

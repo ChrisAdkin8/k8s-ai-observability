@@ -8,7 +8,20 @@ cd "$(dirname "${BASH_SOURCE[0]}")/.."
 source scripts/config.sh
 
 TARGET="${1:?usage: teardown.sh <eks|gke|local> [--destroy]}"
-DESTROY="${2:-}"
+# ⚠️ EVERY ARGUMENT IS CHECKED. This was `DESTROY="${2:-}"` compared against the
+# literal, so anything else was silently ignored — and the direction that costs money
+# is a typo'd `--destory` being dropped, leaving the user believing they tore down a
+# cloud cluster that is still running and still billing.
+DESTROY=""
+shift || true                       # $1 is the target, already consumed above
+for arg in "$@"; do
+  case "$arg" in
+    --destroy)  DESTROY="--destroy" ;;
+    *) echo "ERROR: unknown argument '$arg'" >&2
+       echo "usage: teardown.sh <eks|gke|local> [--destroy]" >&2
+       exit 1 ;;
+  esac
+done
 case "$TARGET" in
   eks)   require_tools terraform aws ;;
   gke)   require_tools terraform gcloud ;;
