@@ -20,7 +20,7 @@ step, and this is the copy the verification below actually runs against:
 
 ```sh
 helm install rig oci://ghcr.io/chrisadkin8/charts/k8s-ai-observability \
-  --version 0.2.3 \
+  --version 0.2.4 \
   --set releaseLabel=<your monitoring release>
 helm test rig --logs                              # ← do not skip this
 ```
@@ -32,7 +32,7 @@ helm test rig --logs                              # ← do not skip this
 > |--|--|
 > | `0.2.0` | `helm test --logs` exits 1 even when every precondition passes — Helm tries to read pod logs from the test's ServiceAccount. A green result reported as red, on the command this page tells you to run. |
 > | `0.2.1` | fixes that, but the test greps an 18.7 kB scrape through a pipe, which under `pipefail` can report a present metric as missing. |
-> | `0.2.2`, `0.2.3` | both fixed. |
+> | `0.2.2` onwards | both fixed. |
 
 **If you want to CHANGE this** — build it locally. `task chart` is not going away and is
 not replaced by the published artefact; it is how you test a template edit:

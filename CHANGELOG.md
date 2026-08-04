@@ -23,7 +23,26 @@ Comparison links are at the foot of this file, one per released version.
 
 ## [Unreleased]
 
+## [0.9.2] — 2026-08-05
+
+**Static analysis, and the half of it that does not work here.** CodeQL is enabled and
+covers Python and GitHub Actions workflows. It cannot read Shell, which is 40% of this
+repository and where two of the previous release's bugs actually were — so `shellcheck`
+runs beside it, over the whole `scripts/` directory in one invocation.
+
+That detail earned itself immediately. `verify.sh` sources `config.sh`, and the two used
+the same variable name as an array in one and a string in the other. Linting file by file
+reports nothing; linting them together reports it.
+
+PATCH by this file's table. Nothing a cluster can see moved.
+
 ### Added
+
+- **`shellcheck` in the `fast` job and `task preflight`**, at warning severity, over the
+  whole `scripts/` directory in one invocation. It found a real clash on its first run: a
+  name that is an array in `config.sh` and a string in `verify.sh`, invisible to per-file
+  linting. Renamed rather than suppressed. Zero warnings remain, so the gate means
+  something.
 
 - **CodeQL** (`.github/workflows/codeql.yml`), advanced setup rather than the browser
   toggle — a control that lives only in repository settings is versioned by nothing, which
@@ -1838,7 +1857,8 @@ Initial public release. Build and test GPU and LLM observability without a GPU.
   a GPU, running the advertised `task local:up` end to end including every acceptance
   check, with a diagnostics bundle on failure and weekly upstream-drift detection.
 
-[Unreleased]: https://github.com/ChrisAdkin8/k8s-ai-observability/compare/v0.9.1...HEAD
+[Unreleased]: https://github.com/ChrisAdkin8/k8s-ai-observability/compare/v0.9.2...HEAD
+[0.9.2]: https://github.com/ChrisAdkin8/k8s-ai-observability/compare/v0.9.1...v0.9.2
 [0.9.1]: https://github.com/ChrisAdkin8/k8s-ai-observability/compare/v0.9.0...v0.9.1
 [0.9.0]: https://github.com/ChrisAdkin8/k8s-ai-observability/compare/v0.8.0...v0.9.0
 [0.8.0]: https://github.com/ChrisAdkin8/k8s-ai-observability/compare/v0.7.1...v0.8.0
