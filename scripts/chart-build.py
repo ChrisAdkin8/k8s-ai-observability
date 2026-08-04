@@ -175,6 +175,85 @@ def check_image_tag_agrees(app_version, strict):
         print(f"  ok    appVersion {app_version} == the repo's latest tag")
 
 
+def shipped_chart_versions():
+    """Chart versions carried by the repo's own release tags: {version: [tags]}.
+
+    The registry is the real authority on what has been pushed, and it is exactly
+    the authority this must not need. A check that requires network and
+    credentials does not run on a laptop, does not run offline, and reports at
+    `helm push` — the last possible moment, after the tag exists and the release
+    is already cut. Git answers the same question locally, because every publish
+    is driven by a tag and the tag carries the Chart.yaml that shipped with it.
+
+    Tags from before the chart existed have no Chart.yaml and are skipped: an
+    absent file is an absence of a version, not a version of "".
+    """
+    try:
+        out = subprocess.run(["git", "tag"], cwd=ROOT,
+                             capture_output=True, text=True, timeout=10)
+    except (OSError, subprocess.SubprocessError):
+        return None
+    if out.returncode != 0:
+        return None
+    seen = {}
+    for tag in (t.strip() for t in out.stdout.splitlines() if t.strip()):
+        try:
+            blob = subprocess.run(
+                ["git", "show", f"{tag}:charts/{CHART_NAME}/Chart.yaml"],
+                cwd=ROOT, capture_output=True, text=True, timeout=10)
+        except (OSError, subprocess.SubprocessError):
+            continue
+        if blob.returncode != 0:
+            continue                      # chart did not exist at this tag
+        m = re.search(r"^version:\s*(\S+)", blob.stdout, re.M)
+        if m:
+            seen.setdefault(m.group(1), []).append(tag)
+    return seen
+
+
+def check_version_not_reused(chart_version, strict):
+    """⚠️ A REGISTRY VERSION CANNOT BE RE-USED, CORRECTED, OR OVERWRITTEN.
+
+    The failure this prevents is not subtle, it is just late: the chart version
+    is not bumped as part of cutting a release, the tag is pushed, the workflow
+    builds a perfectly good package, and the push is rejected for a version that
+    already exists. By then the tag is public and the release is out.
+
+    ⚠️ THIS IS DELIBERATELY STRICTER THAN THE REGISTRY, and the message says so
+    rather than claiming more than it knows. It fires on any version already
+    carried by a tag, including the four tags that shipped 0.1.0 before anything
+    was ever published. Those would not collide on a push today — but re-using
+    one still contradicts the bump policy in Chart.yaml, and "it happens not to
+    have been published yet" is a reason that expires the first time it is.
+
+    WARN by default and FAIL under --strict-version, for the same reason
+    appVersion does: on an unreleased branch the version legitimately still
+    equals the last released one, right up until the release commit bumps it.
+    """
+    seen = shipped_chart_versions()
+    if seen is None:
+        print("  note  no git tags readable here; skipping the re-use check.\n"
+              "        That is an absence of a result, not a passing one.")
+        return
+    tags = seen.get(chart_version)
+    if not tags:
+        print(f"  ok    chart version {chart_version} is not carried by any existing "
+              f"tag ({len(seen)} version(s) seen)")
+        return
+    msg = (f"chart version {chart_version} already shipped at "
+           f"{', '.join(sorted(tags))}.\n"
+           f"       Registry versions are immutable, so publishing this again is\n"
+           f"       rejected — bump `version:` in charts/{CHART_NAME}/Chart.yaml.\n"
+           f"       Note a release publishes the chart even when no template\n"
+           f"       changed, so the bump is required either way.")
+    if strict:
+        fail(msg)
+    print(f"  WARN  {msg}\n"
+          f"        Not fatal here — the version legitimately still equals the last\n"
+          f"        released one until the release commit bumps it. The publish\n"
+          f"        workflow checks it strictly, where it is the last chance.")
+
+
 def check_dependency_pins_agree():
     """⚠️ THE TWO CHART VERSIONS ARE NOW PINNED IN TWO PLACES.
 
@@ -377,6 +456,7 @@ def main(argv=None):
     chart_version = read_chart_field("version")
     print(f"chart {chart_version}, appVersion {app_version}")
     check_image_tag_agrees(app_version, args.strict_version)
+    check_version_not_reused(chart_version, args.strict_version)
     check_dependency_pins_agree()
     print()
 
