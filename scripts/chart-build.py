@@ -195,8 +195,29 @@ def shipped_chart_versions():
         return None
     if out.returncode != 0:
         return None
+
+    # ⚠️ EXCLUDE THE TAG BEING RELEASED, OR THE CHECK COLLIDES WITH ITSELF. At
+    # release time the new tag points at HEAD and carries the very version being
+    # published, so counting it would reject EVERY release — the guard firing on
+    # its own subject, permanently. Caught by running the documented pre-push
+    # check on the first release after this guard landed, which is the one moment
+    # it was ever going to show up.
+    #
+    # Only tags at HEAD are skipped, so an OLDER tag carrying this version is
+    # still a genuine collision and still fails. On a workflow_dispatch from a
+    # branch nothing points at HEAD, nothing is skipped, and a version that
+    # already exists is still refused.
+    try:
+        at_head = subprocess.run(["git", "tag", "--points-at", "HEAD"], cwd=ROOT,
+                                 capture_output=True, text=True, timeout=10)
+        being_released = set(at_head.stdout.split()) if at_head.returncode == 0 else set()
+    except (OSError, subprocess.SubprocessError):
+        being_released = set()
+
     seen = {}
     for tag in (t.strip() for t in out.stdout.splitlines() if t.strip()):
+        if tag in being_released:
+            continue
         try:
             blob = subprocess.run(
                 ["git", "show", f"{tag}:charts/{CHART_NAME}/Chart.yaml"],
