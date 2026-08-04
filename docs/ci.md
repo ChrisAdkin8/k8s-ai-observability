@@ -287,6 +287,18 @@ A healthy run is nowhere near it. Current measured timings live in
 not repeated here, because a number stated in two places is a fork waiting to disagree. If a
 green run ever approaches 35 minutes, something is waiting that should not be.
 
+### The timings have been wrong twice
+
+⚠️ ~~The two legs run about 5.5 minutes each.~~ **Wrong twice over, and kept here rather
+than deleted because the reasoning outlives the correction.** They were never equal, and
+until the port-forward fix `lite` was the *slower* leg — 6m39s to 8m32s against `full`'s
+5m19s to 6m25s — despite installing less. Both figures were re-derived on 2026-08-04 from
+run `30870290833`, where `verify.sh` on `lite` went 383s to 160s.
+
+The lesson is the habit, not the numbers: **quote the run id with any timing you take from
+a CI page.** A figure with no run behind it cannot be checked later, and both wrong versions
+of this claim looked perfectly plausible.
+
 ---
 
 ## Optional secrets

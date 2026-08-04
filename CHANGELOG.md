@@ -23,6 +23,24 @@ Comparison links are at the foot of this file, one per released version.
 
 ## [Unreleased]
 
+### Added
+
+- **`docs/releasing.md`** — the release procedure, which existed only in commit messages.
+  Three of the four releases cut on 2026-08-04 hit a bug in the procedure rather than in
+  the code, and the step that catches them (tag locally, run the strict check, *then* push)
+  is the one that looks skippable.
+- **`doc-claims` now checks the CI job count**, because `CONTRIBUTING.md` claimed six jobs
+  when there were eight and named `upstream-drift` as the only job absent from pull
+  requests after `settings-drift` had joined it. Same class the checker already covers for
+  dashboard ids and metric counts, and the derivation was already there.
+
+### Changed
+
+- **`CLAUDE.md`**: a rule that `zsh` is not `bash` and CI is `bash` — two bugs on
+  2026-08-04 were invisible in the local shell, one of which could have skipped the cluster
+  jobs on a code change. The Map gains the files that landed that day, and the corrected CI
+  timings move to `docs/ci.md`, which owns that topic now that it exists.
+
 ## [0.9.0] — 2026-08-04
 
 **This release is about the verifiers, not the thing they verify.** Four bugs surfaced in a

@@ -182,6 +182,23 @@ def ci_check_names(text: str = None) -> set:
     return names or die("ci-jobs", f"no named jobs found in {CI_WORKFLOW} — dead")
 
 
+def derive_ci_job_count() -> int:
+    """How many jobs ci.yml defines BEYOND `fast`.
+
+    CONTRIBUTING.md counts them in prose, and that count went stale the moment a job
+    was added — it said six when there were eight, and named `upstream-drift` as the
+    only job absent from pull requests after `settings-drift` joined it. Exactly the
+    prose-versus-code drift this file exists for, and the derivation was already here
+    for the check names.
+    """
+    body = read(CI_WORKFLOW).split("\njobs:\n", 1)
+    if len(body) != 2:
+        die("ci-job-count", f"no `jobs:` section in {CI_WORKFLOW} — the derivation is dead")
+    keys = re.findall(r"^  ([a-z][a-z0-9-]*):[ \t]*$", body[1], re.M)
+    keys = [k for k in keys if k != "fast"]
+    return len(keys) or die("ci-job-count", f"no jobs found in {CI_WORKFLOW} — dead")
+
+
 def within_one_minor(claimed: str, derived: str) -> bool:
     """kubectl is supported within ONE minor of the API server, EITHER direction.
 
@@ -254,6 +271,10 @@ CLAIM_CHECKS = [
          unit="K8S_VERSION minor from config.sh",
          hint="kubectl supports the API server within +/-1 minor; the helm-test image's "
               "kubectl is outside that window against config.sh K8S_VERSION"),
+    # "CI runs six jobs beyond `fast`" — a count in prose about a file in the tree.
+    dict(name="ci-job-count", pattern=rf"\b{NUM} jobs beyond\b", context=r"CI|job",
+         derive=derive_ci_job_count, unit="jobs in ci.yml beyond `fast`",
+         hint="count the job keys in .github/workflows/ci.yml, excluding `fast`"),
     dict(name="datasource", pattern=rf"\b{NUM} of them\b", context=r"datasource",
          derive=derive_datasource_refs, unit="${datasource} refs on the LLM board",
          hint="count them in manifests/dashboards/llm-sim-overview.json"),
@@ -403,6 +424,7 @@ The GPU rule file carries three alerts.
 | the simulators serve the surface | `verify.sh` L1-L9 | `helm test` |
 nine PromQL queries that also work against real hardware
 repoints every `${datasource}` reference — 33 of them on the LLM board — and drops it.
+CI runs eight jobs beyond `fast`: changes, compose, chart, image and the stack legs.
 The exporter emits 3 events per scrape, and 12 of them are dropped.\n[![Kubernetes](https://img.shields.io/badge/kubernetes-v1.36.1-326ce5.svg)](kind/gpu-sim.yaml)
 Real vLLM only ever emits one surface — `both` is a rig affordance, not a fidelity claim.\n  image: alpine/k8s:1.36.2
 """
@@ -456,7 +478,7 @@ def selftest() -> None:
     # subject (vLLM) instead of the counted noun.
     expected = {"emits": [15], "alerts": [6], "l-range": [9],
                 "promql": [9], "datasource": [33], "k8s-version": ["1.36.1"],
-                "kubectl-skew": ["1.36"]}
+                "kubectl-skew": ["1.36"], "ci-job-count": [8]}
     for c in CLAIM_CHECKS:
         vals = [v for _, _, v in claims(c["pattern"], c["context"], "f.md",
                                         CLAIM_FIXTURE, c.get("cast", to_int))]

@@ -17,6 +17,9 @@ rig knows the right answer.
 | `manifests/alerts/llm-prometheusrule.yaml` | recording rules, alerts, and the TTFT SLO (a ratio **at** a bucket boundary) |
 | `scripts/verify.sh` | numbered acceptance checks (L1…) — invariants only |
 | `scripts/check-vllm-buckets.py` | CI canary for upstream vLLM bucket/metric-set drift |
+| `scripts/check-sigpipe.py` | finds pipes whose consumer exits before the producer — see rule 17 |
+| `docs/ci.md` + `docs/releasing.md` | what CI proves; how to cut a release without breaking it |
+| `.github/actions/verify-chart/` | the chart's cluster verification, called by CI **and** the publish workflow |
 | `scripts/config.sh` | single source for version pins, names, labels; asserts cross-file invariants |
 | `charts/` + `scripts/chart-build.py` | Helm chart, assembled into gitignored `dist/` |
 | `terraform/{eks,gke}` + `terraform/modules/contract` | clusters; `contract` holds **cross-cloud identity constants only** — sizing stays in the roots |
@@ -74,6 +77,14 @@ rig knows the right answer.
     second copy of every one of these: unverifiable (`doc-claims` compares prose to code,
     not intentions to reality) and the first thing here to rot.
 
+17. **`zsh` is not `bash`, and CI is `bash`.** Two bugs today were invisible in the local
+    shell. `echo "$x" | grep -q` returned 0 under zsh and **141 under bash** on the same
+    input, because a SIGPIPE'd producer only fails the pipeline under `pipefail` — that one
+    could have skipped the cluster jobs on a code change. Separately, zsh does not
+    word-split unquoted parameters, so a test harness passed `"local --skip-monitoring"` as
+    ONE argument and a passing script looked broken. **Test shell with `bash -c`**, never
+    interactively. `check-sigpipe.py` covers the first class; nothing covers the second.
+
 ## Working loop
 
 - **Before landing anything: `task preflight`** — selftest, compose-selftest, drift-test,
@@ -81,6 +92,10 @@ rig knows the right answer.
   most of the repo's correction commits. `doc-claims` (`scripts/check-doc-claims.py`)
   mechanises the recurring prose-drift class: dashboard ids vs the catalog README, "emits
   N" claims vs what `--print` renders.
+- **Releases:** `docs/releasing.md`. **Tag locally, run
+  `chart-build.py --strict-version`, then push** — the check resolves the tag with `git
+  describe`, so it means nothing until the tag exists, and three of four releases on
+  2026-08-04 hit a bug this step catches while everything is still private.
 - **Cluster loop:** phase 1 `terraform apply` / `kind-up.sh`, phase 2
   `./scripts/install.sh <eks|gke|local> [--skip-monitoring]`, then `./scripts/verify.sh`.
   `LITE=1` fits a 4 GiB runtime. `KPS_RELEASE=<name>` for BYO Prometheus.
@@ -92,10 +107,8 @@ rig knows the right answer.
   jobs. Measured on run 30870290833 (2026-08-04, one run): `full` 6m12s, `lite` 4m42s,
   whole workflow 6m50s; `verify.sh` itself 215s and 160s. Quote the run id with any
   figure you take from here.
-  ⚠️ ~~the two legs run ~5.5 minutes each~~ **DONE — wrong twice over. They were never
-  equal, and until the port-forward fix `lite` was the SLOWER leg (6m39s-8m32s against
-  `full`'s 5m19s-6m25s) despite installing less. Both re-derived 2026-08-04 from run
-  30870290833; `verify.sh` on `lite` went 383s → 160s.**
+  The correction history for those figures moved to `docs/ci.md`, which owns the topic —
+  rule 16 marks work where it lives, and that stopped being here.
 - **Review discipline:** specs and plans get **one adversarial review round, then
   implementation** — after one round the remaining risk is empirical (a timing, a default,
   a command's exact syntax) and a desk can't settle it; the first hours of implementation

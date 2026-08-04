@@ -31,10 +31,15 @@ If you changed shell, `bash -n scripts/*.sh` is the next thing CI checks; every 
 the repo goes through `python3 -m py_compile` beside it, so a syntax error in the release
 tooling no longer waits until someone tries to cut a release.
 
-CI runs six jobs beyond `fast`: `changes` (which gates the expensive ones on a non-markdown
-diff), `compose`, `chart`, `image`, and the two `stack` legs. Only `upstream-drift` is not
-on pull requests — it is scheduled and dispatch-only, so an upstream vLLM release never
-reddens someone's unrelated PR.
+CI runs eight jobs beyond `fast`: `changes` (which gates the expensive ones on a
+non-markdown diff), `compose`, `chart`, `chart-cluster`, `image`, and the two `stack` legs,
+plus `upstream-drift` and `settings-drift`. Those last two are scheduled and dispatch-only,
+so an upstream vLLM release never reddens someone's unrelated PR, and a ruleset edit is
+caught weekly rather than on someone's branch. [docs/ci.md](docs/ci.md) is the map.
+
+⚠️ That count is checked. `scripts/check-doc-claims.py` derives it from `ci.yml`, because
+this paragraph said *six* and named `upstream-drift` as the only job off pull requests long
+after both had stopped being true.
 
 ⚠️ **The `chart` job does more than lint and render, and that is the point.** It drives
 every one of the chart's render-time assertions to its failure and fails if a broken input
