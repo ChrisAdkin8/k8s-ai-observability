@@ -70,6 +70,15 @@ Comparison links are at the foot of this file, one per released version.
   floating tag: Helm's OCI tag is the chart version, and a `latest` consumers can pin is
   the opposite of pinning.
 
+- **`artifacthub-repo.yml`**, the ownership claim for the eventual Artifact Hub listing.
+  For an OCI repository this is not a file Artifact Hub reads from the tree — it is a
+  metadata artefact pushed to the registry beside the chart, which makes it a *workflow*
+  step and therefore the easy one to miss when the rest of the setup is a browser form.
+  The publish job pushes it, and skips loudly while the `repositoryID` is still a
+  placeholder rather than pushing something that would claim nothing.
+  **The listing itself does not exist yet** — creating it needs a one-time browser step,
+  and the ID it produces is what makes this file real.
+
 ### Changed
 
 - **Chart `version` 0.1.0 → 0.2.0, and the bump policy is written where the number is.**

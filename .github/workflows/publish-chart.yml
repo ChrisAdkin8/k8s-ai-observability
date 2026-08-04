@@ -196,6 +196,28 @@ jobs:
           set -euo pipefail
           helm push "${{ steps.pkg.outputs.tgz }}" "oci://${{ steps.v.outputs.oci_repo }}"
 
+      # ⚠️ THE OWNERSHIP CLAIM FOR THE ARTIFACT HUB LISTING, and for an OCI
+      # repository it is a REGISTRY ARTEFACT rather than a file Artifact Hub
+      # reads from the tree. Pushed from the same job as the chart so the two
+      # cannot drift; skipped LOUDLY while the repositoryID is still the
+      # placeholder, because pushing that would claim nothing while looking
+      # exactly like a step that worked.
+      - name: Claim the Artifact Hub listing
+        if: steps.v.outputs.pushed == 'true'
+        run: |
+          set -euo pipefail
+          if grep -q 'REPLACE_ME_WITH_THE_ARTIFACT_HUB_REPOSITORY_ID' artifacthub-repo.yml; then
+            echo "::warning title=Artifact Hub listing is UNVERIFIED::artifacthub-repo.yml still holds the placeholder repositoryID, so no ownership artefact was pushed. The chart lists anonymously and anyone can claim the same OCI reference. See the instructions in artifacthub-repo.yml — it needs a one-time browser step."
+            exit 0
+          fi
+          curl -fsSL "https://github.com/oras-project/oras/releases/download/v1.3.0/oras_1.3.0_linux_amd64.tar.gz" \
+            | tar -xz -C /tmp oras
+          sudo mv /tmp/oras /usr/local/bin/oras
+          oras push "${{ steps.v.outputs.oci_repo }}/${CHART_NAME}:artifacthub.io" \
+            --config /dev/null:application/vnd.cncf.artifacthub.config.v1+yaml \
+            artifacthub-repo.yml:application/vnd.cncf.artifacthub.repository-metadata.layer.v1.yaml
+          echo "  ok  ownership artefact pushed alongside the chart"
+
       - name: Rehearsal summary
         if: steps.v.outputs.pushed != 'true'
         run: |

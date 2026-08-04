@@ -17,6 +17,18 @@ Both hit the same two silent failures, described below. The chart's `helm test` 
 thing in this repo that can *verify* them against your Prometheus rather than just document
 them, so prefer it if you are choosing fresh.
 
+The chart is published to `ghcr.io` and needs no clone — `helm install rig
+oci://ghcr.io/chrisadkin8/charts/k8s-ai-observability --version <v> --set releaseLabel=…`.
+Building it locally with `task chart` is the *contributor* path, for testing a template
+change. (⚠️ The published copy lands with the next release tag; until then the local build
+is the only one that exists. See the chart README.)
+
+⚠️ **Whichever route you take, pass your release name to every script, not just one.**
+`KPS_RELEASE` reaches `install.sh`, `verify.sh`, `grafana.sh` and `prometheus.sh` through
+`config.sh`, and setting it for one of them leaves the others labelling and looking up the
+wrong thing — `install.sh` will still exit 0 and print follow-up commands naming a release
+your cluster does not have.
+
 ## The script path
 
 The default `install.sh` installs `kube-prometheus-stack`. `--skip-monitoring` skips that
