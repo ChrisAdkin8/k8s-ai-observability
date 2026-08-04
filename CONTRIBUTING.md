@@ -149,6 +149,14 @@ Entries here explain **why**, not just what. That is the house style throughout 
 and it is the reason the comments are worth reading: a comment that says what the line
 does is noise, one that says why the obvious alternative was wrong is not.
 
+**The README leads with "Try it" before "Install", and that inversion is deliberate.** The
+conventional order — and what the [Standard Readme](https://github.com/RichardLitt/standard-readme)
+spec asks for — is Install then Usage. It is wrong for this repo: the compose path needs no
+cluster, no credentials and no prerequisites beyond a container runtime, so the fastest
+honest answer to "what is this" is a board you can look at in a minute. Install then covers
+the three Kubernetes targets, which is where the prerequisites actually bite. Keep that
+order; it has been questioned once and settled.
+
 ## Commits and PRs
 
 - One logical change per commit. If two things are genuinely independent, they are two

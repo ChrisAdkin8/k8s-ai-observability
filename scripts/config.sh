@@ -219,7 +219,8 @@ KPS_VALUES=(-f helm/kube-prometheus-stack/values.yaml)
 # kind-up.sh reads the runtime's own MemTotal and floors it with integer division, so a
 # colima VM asked for 3 GiB reports 2.83 and reads as 2 — under this floor, refused
 # before anything starts. Allocating 4 reports 3.81 and passes. Measured 2026-08-04 on
-# colima/aarch64; the README's LITE block gives the command and says why.
+# colima/aarch64; the README's LITE block gives the command, and
+# docs/troubleshooting.md carries the user-facing version of this paragraph.
 if [[ "$LITE" == "1" ]]; then
   KIND_MIN_MEMORY_GIB="${KIND_MIN_MEMORY_GIB:-3}"
   KIND_WANT_MEMORY_GIB="${KIND_WANT_MEMORY_GIB:-4}"

@@ -237,10 +237,9 @@ LITE=1 task local:up
 ```
 
 ⚠️ **Allocate 4 even though the floor reads 3, and do not try 3.** The floor is checked
-against what the runtime *reports*, not what you asked for: a 3 GiB colima VM reports
-2.83 GiB, `kind-up.sh` floors that to `2`, and the preflight refuses before anything
-starts. 4 GiB reports 3.81 and passes. Verified on colima/aarch64 on 2026-08-04:
-`ALL CHECKS PASSED` at 4 GiB, with the stack using 2.197 GiB of it.
+against what the runtime *reports*, not against what you asked for, and a VM asked for
+3 GiB reports less than 3. It is refused before anything is created.
+[Why 3 is refused](docs/troubleshooting.md#why-a-3-gib-runtime-is-refused-when-the-floor-reads-3).
 
 It keeps everything `local` exists to prove: ServiceMonitor discovery, PrometheusRule
 evaluation, the Grafana sidecar import, and scheduling on `nvidia.com/gpu`. Both
@@ -275,6 +274,23 @@ you give up.
 | [docs/versions.md](docs/versions.md) | every pinned version and the one place each is set |
 | [docs/eks.md](docs/eks.md) / [docs/gke.md](docs/gke.md) | per-cloud specifics |
 | [docs/troubleshooting.md](docs/troubleshooting.md) | empty panels, 404s, dead targets, warm-up |
+
+## Contributing and support
+
+- **A panel is empty, or something 404s.** Start with
+  [docs/troubleshooting.md](docs/troubleshooting.md). Nearly every failure here surfaces the
+  same way, and the table tells the causes apart.
+- **Still stuck, or upstream has moved.**
+  [Open an issue](https://github.com/ChrisAdkin8/k8s-ai-observability/issues/new/choose).
+  There is a bug report form, and an upstream-drift form for a vLLM metric name or bucket
+  boundary that has changed under the rig.
+- **A security report.** Not a public issue: [SECURITY.md](SECURITY.md) has the private
+  reporting link, and sets out which parts of a deliberately unauthenticated test rig are in
+  scope and which are the point.
+- **A change.** [CONTRIBUTING.md](CONTRIBUTING.md) covers the invariants that fail *silently*
+  when broken, what to re-check when bumping a pinned version, and what is deliberately out
+  of scope.
+- **Conduct.** The [Contributor Covenant](CODE_OF_CONDUCT.md) applies to both.
 
 ## Licence
 
