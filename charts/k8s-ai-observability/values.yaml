@@ -215,9 +215,12 @@ tests:
   # dies with `stat /bin/bash: no such file or directory`, exit 128, StartError.
   # Verified by running it. alpine/k8s carries kubectl and bash together.
   #
-  # ⚠️ THE MINOR MUST TRACK config.sh K8S_VERSION, and it did not: 1.31 against a
-  # cluster pinned at 1.36 is five minors outside kubectl's supported +/-1 skew.
-  # scripts/check-doc-claims.py now refuses to let the two drift.
+  # ⚠️ THE MINOR MUST STAY WITHIN +/-1 OF config.sh K8S_VERSION, and it did not: 1.31
+  # against a cluster pinned at 1.36 is five minors outside the window Kubernetes
+  # supports. scripts/check-doc-claims.py enforces the window — matching K8S_VERSION
+  # exactly is the tidiest choice, but a supported neighbour is not an error and the
+  # check does not pretend otherwise, since the publisher may not have cut this minor
+  # yet on the day K8S_VERSION moves.
   image: alpine/k8s:1.36.2
 
 # ---- pass-through to the conditional dependencies ---------------------------
