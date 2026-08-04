@@ -762,23 +762,32 @@ those claims honest, and the CI legs that stop the alternative paths rotting.
   to rot at the next chart bump. `fail-fast: false` — if lite breaks while full passes,
   that difference is the signal.
 
-  ⚠️ It proves the trimmed stack **functions**, not that it fits 3 GiB: the runner has
-  ~16 GB and nothing there is under memory pressure. The sizing claim still needs a
-  constrained local run and is still marked unverified.
+  ⚠️ ~~It proves the trimmed stack **functions**, not that it fits 3 GiB~~ **MEASURED —
+  2026-08-04, and the claim was wrong in a way worth stating precisely.** The CI runner has
+  ~16 GB and nothing there is under memory pressure, so a constrained local run was the
+  only thing that could settle it. Run at last, on colima/aarch64:
 
-  ⚠️ **What would settle it, precisely** (recorded 2026-08-04 so it is a ten-minute job rather
-  than an open question): size the runtime AT the floor the README advertises, then run
-  the trimmed stack and let it prove itself —
+  | Runtime allocated | Docker reports | `kind-up.sh` reads | Result |
+  |--|--|--|--|
+  | 3 GiB — the advertised floor | 2.83 GiB | **2 GiB** | **refused before anything started** |
+  | 4 GiB | 3.81 GiB | 3 GiB | `task local:up` green, **ALL CHECKS PASSED** |
 
-  ```sh
-  colima stop && colima start --cpu 4 --memory 3 --disk 40   # or Docker Desktop -> 3 GiB
-  LITE=1 task local:up && ./scripts/verify.sh local
-  ```
+  **The trimmed stack does fit — it used 2.197 GiB of 3.813**, 57.6%, with zero restarts,
+  zero OOMKills and nothing Pending, through every GPU check and L1–L9. Consumption was
+  never the problem.
 
-  Green means the claim holds and this marker can be struck. Pods stuck `Pending`, or an
-  OOMKill, means the README's "lowers the floor to 3 GiB" is wrong and `KIND_MIN_MEMORY_GIB`
-  is the edit. ⚠️ It **destroys any existing kind cluster**, which is why it has not been
-  run in passing — it needs a machine whose cluster is expendable.
+  ⚠️ **The floor was unreachable, and the cause is a unit mismatch nobody would guess.**
+  `scripts/kind-up.sh` computes `mem_bytes / 1024 / 1024 / 1024` — integer division — so a
+  runtime is measured by what it REPORTS, while a user sets what it is ALLOCATED. VM
+  overhead eats ~0.2 GiB and truncation eats the remainder, putting a full GiB between the
+  two. Asking for exactly the documented 3 GiB produced a `2 GiB` reading and an error
+  telling you to raise it to 4 — the floor refusing itself.
+
+  Fixed in the docs rather than the check: the README now gives the LITE path its own
+  `colima` line at `--memory 4` and says why 3 fails, since the full path always had a
+  command to copy and the trimmed one — the only one where the gap bites — never did.
+  Rounding instead of truncating was the alternative and was rejected: it would make the
+  guard accept 2.83 GiB as "3", which is looser than the check was written to be.
 
 - **`.github/dependabot.yml`** for the SHA-pinned actions. Pinning by SHA is right, but a
   SHA pin never moves on its own — and this repo has a live instance, with
