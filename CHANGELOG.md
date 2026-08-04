@@ -76,10 +76,22 @@ Comparison links are at the foot of this file, one per released version.
   step and therefore the easy one to miss when the rest of the setup is a browser form.
   The publish job pushes it, and skips loudly while the `repositoryID` is still a
   placeholder rather than pushing something that would claim nothing.
-  **The listing itself does not exist yet** — creating it needs a one-time browser step,
-  and the ID it produces is what makes this file real.
 
 ### Changed
+
+- **Artifact Hub listing created** (repository settings, not in the tree — recorded here
+  because nothing else would show it). Repository `k8s-ai-observability`, kind *Helm
+  charts*, pointing at `oci://ghcr.io/chrisadkin8/charts/k8s-ai-observability`; its
+  `repositoryID` is now in `artifacthub-repo.yml`. Named after the chart rather than the
+  publisher because an OCI entry maps to **one** chart, so a publisher-style name would be
+  spent on this one and the next chart would need a different scheme.
+
+  ⚠️ **It is listed but not yet ownership-verified, and it will show as broken until the
+  first release.** Artifact Hub is already trying to index that OCI reference and nothing
+  has been published there — the chart lands with the next tag. Verification then needs the
+  `artifacthub-repo.yml` artefact pushed beside it, which the publish job does
+  automatically; running the `oras push` by hand once closes the gap a release earlier.
+  The listing's display name is also unset, so it currently shows the bare slug.
 
 - **Chart `version` 0.1.0 → 0.2.0, and the bump policy is written where the number is.**
   It had not moved through four releases because nothing said it had to. The rule that was
