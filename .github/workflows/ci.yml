@@ -278,7 +278,11 @@ jobs:
     # Gated for the same reason as `stack`, on the same output: the compose path reads
     # the same dashboards, rules, simulator and profiles, so a markdown-only change
     # cannot move it either. Cheaper to run (~1 min) but the signal is identically zero.
-    needs: changes
+    # `fast` too: it is 9-12s and covers the selftests, doc-claims, the rule tests
+    # and both syntax passes. When it is red this job is proving something already
+    # known to be broken. Safe as a plain `needs:` here, unlike the matrix `stack`
+    # job — a skipped NON-matrix job still reports under its own name.
+    needs: [changes, fast]
     if: needs.changes.outputs.code == 'true'
     runs-on: ubuntu-latest
     # Generous against a measured ~1 minute. Nothing here waits on a Helm release; the
@@ -443,8 +447,13 @@ jobs:
       # always(), for the same reason the stack job's diagnostics are: a cancelled or
       # timed-out run is the one whose logs you need. Guarded on `up` so a run
       # superseded before the stack existed does not upload an empty bundle.
+      #
+      # ⚠️ AND NOT ON SUCCESS. `always()` was collecting and uploading a bundle for
+      # every GREEN run too — nobody has ever opened one, and nobody would: it is the
+      # logs of a stack that worked. `!= 'success'` still covers failure, cancellation
+      # and timeout, which is the whole reason this is not `failure()`.
       - name: Collect compose logs
-        if: always() && steps.up.outcome != 'skipped'
+        if: always() && steps.up.outcome != 'skipped' && steps.up.outcome != 'success'
         working-directory: compose
         run: |
           mkdir -p /tmp/compose-diag
@@ -457,7 +466,7 @@ jobs:
           cp /tmp/targets.json /tmp/compose-diag/ 2>/dev/null || true
 
       - name: Upload compose diagnostics
-        if: always() && steps.up.outcome != 'skipped'
+        if: always() && steps.up.outcome != 'skipped' && steps.up.outcome != 'success'
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: compose-diagnostics-${{ github.run_id }}-${{ github.run_attempt }}
@@ -492,7 +501,8 @@ jobs:
   # ---------------------------------------------------------------------------
   chart:
     name: helm chart (lint, render, assertions fire)
-    needs: changes
+    # `fast` too, for the reason the `compose` job states.
+    needs: [changes, fast]
     if: needs.changes.outputs.code == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 15
@@ -680,7 +690,8 @@ jobs:
   # ---------------------------------------------------------------------------
   image:
     name: simulator image (build both arches, smoke-test amd64)
-    needs: changes
+    # `fast` too, for the reason the `compose` job states.
+    needs: [changes, fast]
     if: needs.changes.outputs.code == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 15
@@ -802,6 +813,15 @@ jobs:
     # status checks ("full stack on kind (full)" / "(lite)"), so a ruleset can require
     # both and a red lite leg cannot hide behind a green full one.
     name: full stack on kind (${{ matrix.profile }})
+    # ⚠️ `if: always()` IS WHAT MAKES `needs: fast` SAFE HERE, and without it this job
+    # would reintroduce the exact bug the block below documents. `fast` is 9-12s and
+    # covers the selftests, doc-claims, the rule tests and both syntax passes; when it
+    # is red these two legs are ~14 runner-minutes spent proving something already
+    # known to be broken. But gating a MATRIX job with a bare `needs:` means a failed
+    # dependency SKIPS it, and a skipped matrix job does not interpolate its name — so
+    # the two required checks would never report and the PR would sit pending, exactly
+    # as it did under a job-level `if:`. Running always and gating the STEPS on
+    # RUN_STACK keeps both names reporting whatever `fast` did.
     # ⚠️ THE GATE IS ON THE STEPS, NOT THE JOB, AND THAT IS NOT A STYLE CHOICE.
     #
     # A job-level `if:` was tried first and blocked a docs-only PR outright. When a
@@ -814,7 +834,8 @@ jobs:
     # Gating the steps keeps the job running, so the matrix expands, both names report,
     # and the ruleset is satisfied. The cost is a runner spin-up per leg — seconds
     # against the ~6.5 minutes each leg takes when it has real work to do.
-    needs: changes
+    needs: [changes, fast]
+    if: always()
     strategy:
       # NOT fail-fast. If lite breaks while full passes, that difference IS the signal
       # — cancelling the healthy leg to save four minutes would throw away the
@@ -847,6 +868,12 @@ jobs:
     # collapsed to a boolean here and tested via the env context below.
     env:
       HAVE_DOCKERHUB: ${{ secrets.DOCKERHUB_USERNAME != '' && secrets.DOCKERHUB_TOKEN != '' }}
+      # The one gate every step below reads. Two independent reasons to stand nothing
+      # up — nothing but markdown changed, or `fast` already found the answer — and
+      # collapsing them here keeps the condition on eight steps from drifting apart.
+      # Each reason gets its own ::notice:: below, because "this green means nothing
+      # ran" and WHY are different things to tell the reader.
+      RUN_STACK: ${{ needs.changes.outputs.code == 'true' && needs.fast.result == 'success' }}
       # scripts/config.sh does LITE="${LITE:-0}", and :- treats empty as unset, so the
       # 'full' leg passing '' is exactly equivalent to not setting it at all.
       #
@@ -874,13 +901,20 @@ jobs:
         run: |
           echo "::notice title=Stack not verified::Only markdown changed, so every step in this job was skipped. This green means 'nothing here could have been affected', NOT 'the stack was stood up and passed'."
 
+      # The other way this job goes green without standing anything up. Says which of
+      # the two it was, so a reader is never left inferring it from the run graph.
+      - name: The fast job failed — the stack was NOT stood up
+        if: needs.changes.outputs.code == 'true' && needs.fast.result != 'success'
+        run: |
+          echo "::notice title=Stack not verified::The 'fast' job did not pass, so this job stood nothing up. Fix that first — its checks are seconds and cover the selftests, doc-claims, the rule tests and both syntax passes. This green means 'not attempted', NOT 'passed'."
+
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        if: needs.changes.outputs.code == 'true'
+        if: env.RUN_STACK == 'true'
 
       # Gated on the secrets existing — see the header. Forks get the unauthenticated
       # path: flakier, but it runs.
       - name: Log in to Docker Hub (skipped without secrets)
-        if: needs.changes.outputs.code == 'true' && env.HAVE_DOCKERHUB == 'true'
+        if: env.RUN_STACK == 'true' && env.HAVE_DOCKERHUB == 'true'
         uses: docker/login-action@dbcb813823bdd20940b903addbd779551569679f # v4.6.0
         with:
           username: ${{ secrets.DOCKERHUB_USERNAME }}
@@ -900,13 +934,13 @@ jobs:
       # raise the polling loop and watch it fail again. If you ever see 4 pass and 4b
       # 404 here, check these limits before touching anything else.
       - name: Raise inotify limits (kind + Prometheus stack exhaust the defaults)
-        if: needs.changes.outputs.code == 'true'
+        if: env.RUN_STACK == 'true'
         run: |
           sudo sysctl -w fs.inotify.max_user_watches=524288
           sudo sysctl -w fs.inotify.max_user_instances=512
 
       - name: Install pinned toolchain
-        if: needs.changes.outputs.code == 'true'
+        if: env.RUN_STACK == 'true'
         run: |
           set -euo pipefail
           mkdir -p "$HOME/.local/bin"
@@ -934,7 +968,7 @@ jobs:
       # what this job depends on, so a silently failed kind install would let
       # `task tools` exit 0 and only surface ~12 minutes later inside kind-up.sh.
       - name: Preflight
-        if: needs.changes.outputs.code == 'true'
+        if: env.RUN_STACK == 'true'
         run: |
           set -euo pipefail
           task tools
@@ -952,7 +986,7 @@ jobs:
       # A workflow that builds its own cluster stops testing what users actually run,
       # and would go green while the real entry point is broken.
       - name: task local:up
-        if: needs.changes.outputs.code == 'true'
+        if: env.RUN_STACK == 'true'
         id: up
         run: task local:up
 
@@ -966,7 +1000,7 @@ jobs:
       # an artifact — an accepted limitation, since Actions does not distinguish a
       # timeout cancel from a supersession cancel.
       - name: Diagnostics
-        if: always() && needs.changes.outputs.code == 'true' && steps.up.outcome != 'skipped'
+        if: always() && env.RUN_STACK == 'true' && steps.up.outcome != 'skipped' && steps.up.outcome != 'success'
         run: |
           mkdir -p /tmp/diag
           d=/tmp/diag
@@ -1031,7 +1065,7 @@ jobs:
           echo "--- collected ---"; ls -la "$d"
 
       - name: Upload diagnostics
-        if: always() && needs.changes.outputs.code == 'true' && steps.up.outcome != 'skipped'
+        if: always() && env.RUN_STACK == 'true' && steps.up.outcome != 'skipped' && steps.up.outcome != 'success'
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           # ⚠️ matrix.profile is REQUIRED here. Both legs upload on failure, and two
