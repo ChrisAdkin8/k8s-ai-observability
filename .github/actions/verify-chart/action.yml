@@ -37,14 +37,25 @@ inputs:
     required: false
     default: v0.30.0
 
+# ⚠️ EVERY INPUT REACHES THE SHELL AS AN ENVIRONMENT VARIABLE, NEVER AS `${{ }}`
+# INSIDE A `run:` BODY. An expression interpolated into a script is substituted as TEXT
+# before bash sees it, so a value containing a quote or a semicolon becomes script rather
+# than data. Passing it through `env:` hands bash a variable instead, and the shell's own
+# quoting rules apply.
+#
+# Nothing exploitable reaches this action today — both callers pass literals — but a
+# composite action cannot know who calls it, which is exactly why the pattern rather than
+# the current caller is what matters. It is also what CodeQL's Actions queries flag.
 runs:
   using: composite
   steps:
     - name: Create a kind cluster
       shell: bash
+      env:
+        KIND_VER: ${{ inputs.kind-version }}
       run: |
         set -euo pipefail
-        curl -fsSLo /tmp/kind "https://kind.sigs.k8s.io/dl/${{ inputs.kind-version }}/kind-linux-amd64"
+        curl -fsSLo /tmp/kind "https://kind.sigs.k8s.io/dl/${KIND_VER}/kind-linux-amd64"
         chmod +x /tmp/kind && sudo mv /tmp/kind /usr/local/bin/kind
         kind create cluster --config kind/gpu-sim.yaml --wait 5m
         kubectl get nodes
@@ -68,13 +79,16 @@ runs:
     # IS the BYO case, so leaving it alone is the realistic test.
     - name: Install kube-prometheus-stack as a FOREIGN release
       shell: bash
+      env:
+        REL: ${{ inputs.kps-release }}
+        NS: ${{ inputs.kps-namespace }}
       run: |
         set -euo pipefail
         helm repo add prometheus-community https://prometheus-community.github.io/helm-charts
         helm repo update
-        helm install "${{ inputs.kps-release }}" prometheus-community/kube-prometheus-stack \
-          -n "${{ inputs.kps-namespace }}" --create-namespace --wait --timeout 15m
-        kubectl -n "${{ inputs.kps-namespace }}" get prometheus \
+        helm install "$REL" prometheus-community/kube-prometheus-stack \
+          -n "$NS" --create-namespace --wait --timeout 15m
+        kubectl -n "$NS" get prometheus \
           -o jsonpath='{.items[0].spec.ruleSelector}{"\n"}'
 
     # ⚠️ THE NEGATIVE CASE FIRST, because it is the one that looks like success. With
@@ -87,12 +101,14 @@ runs:
       shell: bash
       env:
         VER: ${{ inputs.version }}
+        CHART: ${{ inputs.chart }}
+        NS: ${{ inputs.kps-namespace }}
       run: |
         set -euo pipefail
         args=(); [ -n "$VER" ] && args+=(--version "$VER")
-        helm install neg "${{ inputs.chart }}" "${args[@]}" \
+        helm install neg "$CHART" "${args[@]}" \
           -n neg --create-namespace \
-          --set namespaces.monitoring="${{ inputs.kps-namespace }}" --wait --timeout 10m
+          --set namespaces.monitoring="$NS" --wait --timeout 10m
         if helm test neg -n neg --logs 2>&1 | tee /tmp/neg.log; then
           echo "::error title=The silent-failure check did not fire::helm test PASSED with a releaseLabel that matches no ruleSelector on this cluster. The one check that catches the chart's most likely misconfiguration is not working." >&2
           exit 1
@@ -106,21 +122,27 @@ runs:
       shell: bash
       env:
         VER: ${{ inputs.version }}
+        CHART: ${{ inputs.chart }}
+        REL: ${{ inputs.kps-release }}
+        NS: ${{ inputs.kps-namespace }}
       run: |
         set -euo pipefail
         args=(); [ -n "$VER" ] && args+=(--version "$VER")
-        helm install rig "${{ inputs.chart }}" "${args[@]}" \
+        helm install rig "$CHART" "${args[@]}" \
           -n rig --create-namespace \
-          --set releaseLabel="${{ inputs.kps-release }}" \
-          --set namespaces.monitoring="${{ inputs.kps-namespace }}" \
+          --set releaseLabel="$REL" \
+          --set namespaces.monitoring="$NS" \
           --wait --timeout 15m
         helm test rig -n rig --logs
 
     - name: Both boards are reachable in the foreign Grafana
       shell: bash
+      env:
+        NS: ${{ inputs.kps-namespace }}
+        REL: ${{ inputs.kps-release }}
       run: |
         set -euo pipefail
-        ns="${{ inputs.kps-namespace }}"; rel="${{ inputs.kps-release }}"
+        ns="$NS"; rel="$REL"
         kubectl -n "$ns" rollout status "deploy/${rel}-grafana" --timeout=5m
         kubectl -n "$ns" port-forward "svc/${rel}-grafana" 13001:80 &
         pf=$!; trap 'kill $pf 2>/dev/null || true' EXIT
