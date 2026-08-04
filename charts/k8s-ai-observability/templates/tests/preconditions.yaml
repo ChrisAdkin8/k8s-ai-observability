@@ -31,6 +31,9 @@ metadata:
   namespace: {{ .Release.Namespace }}
   labels:
     {{- include "k8s-ai-observability.labels" . | nindent 4 }}
+  annotations:
+    helm.sh/hook: test
+    helm.sh/hook-weight: "-5"
   # ⚠️ DELIBERATELY NOT `helm.sh/hook: test`, AND IT USED TO BE.
   # `helm test --logs` fetches logs for EVERY resource carrying the test hook,
   # BY NAME AND AS IF IT WERE A POD. These three are named <fullname>-test while
@@ -53,6 +56,9 @@ metadata:
   name: {{ $sa }}
   labels:
     {{- include "k8s-ai-observability.labels" . | nindent 4 }}
+  annotations:
+    helm.sh/hook: test
+    helm.sh/hook-weight: "-5"
   # ⚠️ DELIBERATELY NOT `helm.sh/hook: test`, AND IT USED TO BE.
   # `helm test --logs` fetches logs for EVERY resource carrying the test hook,
   # BY NAME AND AS IF IT WERE A POD. These three are named <fullname>-test while
@@ -95,6 +101,9 @@ metadata:
   name: {{ $sa }}
   labels:
     {{- include "k8s-ai-observability.labels" . | nindent 4 }}
+  annotations:
+    helm.sh/hook: test
+    helm.sh/hook-weight: "-5"
   # ⚠️ DELIBERATELY NOT `helm.sh/hook: test`, AND IT USED TO BE.
   # `helm test --logs` fetches logs for EVERY resource carrying the test hook,
   # BY NAME AND AS IF IT WERE A POD. These three are named <fullname>-test while
