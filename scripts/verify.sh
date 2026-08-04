@@ -98,7 +98,12 @@ prom_pf_stop() {
 }
 prom_pf_ensure() {  # (re)establish the forward if it isn't alive — survives long polls
   prom_pf_up && return 0
-  "${KUBECTL[@]}" -n "$MONITORING_NS" port-forward "svc/${KPS_RELEASE}-prometheus" 9090:9090 >/dev/null 2>&1 &
+  # Resolved once, then reused: the forward is rebuilt many times over a run and
+  # the Service cannot be renamed underneath it. `|| exit 1` is load-bearing —
+  # resolve_kps_or_die runs in a command substitution, so its `exit` ends that
+  # SUBSHELL, and without this the script would sail on with an empty name.
+  [[ -n "${PROM_SVC:-}" ]] || { PROM_SVC="$(resolve_kps_or_die svc prometheus)" || exit 1; }
+  "${KUBECTL[@]}" -n "$MONITORING_NS" port-forward "svc/${PROM_SVC}" 9090:9090 >/dev/null 2>&1 &
   echo $! > "$PF_PIDFILE"
   sleep 4
 }
@@ -325,7 +330,8 @@ graf_pf_stop() {  # `wait` reaps the job quietly — see prom_pf_stop
 }
 graf_pf_ensure() {  # (re)establish the forward if it isn't alive — survives long polls
   graf_pf_up && return 0
-  "${KUBECTL[@]}" -n "$MONITORING_NS" port-forward "svc/${KPS_RELEASE}-grafana" "${GRAFANA_PORT}:80" >/dev/null 2>&1 &
+  [[ -n "${GRAF_SVC:-}" ]] || { GRAF_SVC="$(resolve_kps_or_die svc grafana)" || exit 1; }
+  "${KUBECTL[@]}" -n "$MONITORING_NS" port-forward "svc/${GRAF_SVC}" "${GRAFANA_PORT}:80" >/dev/null 2>&1 &
   GRAF_PF_PID=$!; sleep 4
 }
 trap 'prom_pf_stop; graf_pf_stop; rm -f "$PF_PIDFILE"' EXIT
