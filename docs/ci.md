@@ -359,3 +359,19 @@ Release artifacts are not built by this workflow. Two others fire on a `v*` tag:
 
 Both verify by consuming what they published, rather than trusting that the push succeeded.
 A successful push only proves bytes moved.
+
+## Static analysis is separate too
+
+[`codeql.yml`](../.github/workflows/codeql.yml) runs CodeQL over **Python and GitHub
+Actions workflows**, on pushes to `main`, on pull requests, and weekly.
+
+⚠️ **It does not read Shell, and Shell is 40% of this repository.** CodeQL supports neither
+Bash nor HCL nor YAML, so `verify.sh`, `install.sh` and `config.sh` — where most of the
+install logic lives — are invisible to it. Two of the bugs found on 2026-08-04 were shell,
+and neither would have been caught by it. `shellcheck` remains the larger gap;
+`CONTRIBUTING.md` records why it was deferred.
+
+It is **advisory**, not a required check: findings need triage, and a scanner that blocks
+merges on a false positive costs more than it returns. The `actions` language is the half
+that earns its keep, because it finds `${{ }}` expressions interpolated into `run:` bodies —
+script injection when the value is attacker-controlled.

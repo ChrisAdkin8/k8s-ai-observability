@@ -1,0 +1,82 @@
+# CodeQL — static analysis for the half of this repo it can actually read.
+#
+# ⚠️ IT DOES NOT COVER SHELL, AND SHELL IS 40% OF THIS REPOSITORY. CodeQL supports
+# Python, GitHub Actions workflows and seven other languages; Bash, HCL and YAML are
+# not among them. scripts/verify.sh alone is ~785 lines, install.sh and config.sh
+# carry most of the install logic, and NONE of it is analysed here. Two of the bugs
+# found on 2026-08-04 were shell — a SIGPIPE class and an argument parser that
+# checked only $2 — and neither would have been caught by anything below.
+#
+# So this is not the security gate for this repo, it is one input to it.
+# CONTRIBUTING.md records shellcheck as deliberately deferred; that remains the
+# larger gap, and check-sigpipe.py covers one shell class mechanically.
+#
+# ⚠️ ADVISORY, NOT REQUIRED. This is deliberately absent from
+# .github/required-checks.txt and from the branch ruleset. Findings need triage and
+# a scanner that blocks merges on a false positive costs more than it returns.
+#
+# ⚠️ DO NOT ALSO ENABLE "DEFAULT SETUP" in Settings -> Code security. The two
+# configurations conflict and GitHub disables one. This file exists rather than the
+# browser toggle for the same reason .github/required-checks.txt exists: a control
+# that lives only in repository settings is versioned by nothing, reviewable by
+# nobody, and cannot explain itself in a commit message.
+name: CodeQL
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  # Weekly, alongside upstream-drift and settings-drift. Query packs improve without
+  # this repo changing, so a scheduled run finds things a push-triggered one cannot.
+  schedule:
+    - cron: '23 4 * * 1'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: codeql-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  analyze:
+    name: CodeQL (${{ matrix.language }})
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    # ⚠️ JOB-LEVEL PERMISSIONS REPLACE THE WORKFLOW DEFAULT RATHER THAN EXTENDING IT,
+    # so `contents: read` is restated here alongside the write scope. Omitting it is
+    # the same trap publish-image.yml documents, where the failure reads as a bad
+    # credential rather than a missing permission.
+    permissions:
+      contents: read
+      security-events: write
+
+    strategy:
+      fail-fast: false
+      matrix:
+        # Only what CodeQL can genuinely analyse here. `actions` is the one that
+        # earns its keep: it finds ${{ }} expressions interpolated into `run:`
+        # bodies, which is script injection when the value is attacker-controlled.
+        # The verify-chart action was converted to pass inputs through `env:`
+        # before this was switched on, so the first run should be clean.
+        language: [python, actions]
+
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Initialise CodeQL
+        uses: github/codeql-action/init@18420e3271f74589575af831a523c833acda327f # codeql-bundle-v2.26.2
+        with:
+          languages: ${{ matrix.language }}
+          # security-and-quality is broader than the default security-extended and
+          # includes maintainability queries. The Python here is stdlib-only release
+          # tooling, so the extra noise is small and the extra coverage is free.
+          queries: security-and-quality
+
+      # No build step: Python and Actions are both interpreted, so CodeQL reads the
+      # source directly. Nothing here compiles.
+      - name: Analyse
+        uses: github/codeql-action/analyze@18420e3271f74589575af831a523c833acda327f # codeql-bundle-v2.26.2
+        with:
+          category: "/language:${{ matrix.language }}"
