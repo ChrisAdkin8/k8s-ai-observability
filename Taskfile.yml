@@ -223,6 +223,7 @@ tasks:
           from charts/, even when their condition is false, so the build has to
           fetch them.
     cmds:
+      - python3 scripts/chart-build.py --selftest
       - python3 scripts/chart-build.py
       - helm lint dist/charts/k8s-ai-observability
       # Both ways round, because they exercise different code paths: with the

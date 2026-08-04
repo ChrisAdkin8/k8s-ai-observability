@@ -36,6 +36,14 @@ Comparison links are at the foot of this file, one per released version.
 
 ### Changed
 
+- **`chart-build.py` has a `--selftest`**, and it was the last script in `scripts/` without
+  one — while being the script that produced the most bugs. All three were *decisions*
+  rather than I/O, so the fixtures are text and lists: a regex that could not match
+  `tag: ""` (the value meaning "track appVersion", and therefore the correct one), the
+  re-use guard counting the tag being released against itself, and the off-tag hole that
+  is still open and still marked. Both fixable bugs were reintroduced deliberately to
+  confirm the selftest fails on them. It runs in `task chart`, `task preflight` and CI.
+
 - **`CLAUDE.md`**: a rule that `zsh` is not `bash` and CI is `bash` — two bugs on
   2026-08-04 were invisible in the local shell, one of which could have skipped the cluster
   jobs on a code change. The Map gains the files that landed that day, and the corrected CI

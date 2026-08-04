@@ -81,7 +81,7 @@ def fail(msg):
     sys.exit(1)
 
 
-def read_chart_field(field):
+def read_chart_field(field, text=None):
     """One top-level scalar out of Chart.yaml, without a YAML parser.
 
     The repo has no PyYAML dependency and this script is release tooling — it
@@ -90,25 +90,29 @@ def read_chart_field(field):
     zero, so a regex is honest here rather than a shortcut.
     """
     path = os.path.join(SRC_CHART, "Chart.yaml")
-    with open(path, "r", encoding="utf-8") as fh:
-        m = re.search(rf'^{field}:\s*"?([^"\s#]+)"?\s*$', fh.read(), re.M)
+    if text is None:
+        with open(path, "r", encoding="utf-8") as fh:
+            text = fh.read()
+    m = re.search(rf'^{field}:\s*"?([^"\s#]+)"?\s*$', text, re.M)
     if not m:
         fail(f"could not read `{field}:` from {path}")
     return m.group(1)
 
 
-def values_image_tag():
+def values_image_tag(text=None):
     """The pinned simulator tag in values.yaml, or "" for 'use appVersion'."""
     path = os.path.join(SRC_CHART, "values.yaml")
-    with open(path, "r", encoding="utf-8") as fh:
-        text = fh.read()
+    if text is None:
+        with open(path, "r", encoding="utf-8") as fh:
+            text = fh.read()
     # Scoped to the llm.image block rather than the first `tag:` anywhere.
     block = re.search(r"^  image:\n((?:    .*\n)+)", text, re.M)
     if not block:
         fail(f"could not find the llm.image block in {path}")
     m = re.search(r'^    tag:\s*"?([^"\s#]*)"?\s*(?:#.*)?$', block.group(1), re.M)
     if m is None:
-        fail(f"could not read llm.image.tag from {path}")
+        fail(f"could not read llm.image.tag from "
+             f"{path if text is None else '<fixture>'}")
     return m.group(1)
 
 
@@ -240,6 +244,18 @@ def shipped_chart_versions(also_exclude=()):
     return seen
 
 
+def version_is_reused(chart_version, seen, publishing_as=None):
+    """Which tags, other than the one being published, already carry this version.
+
+    Split out from check_version_not_reused so the DECISION can be tested without a
+    git repository — the two bugs this guard has had were both decisions, not I/O:
+    it counted the tag being released against itself, and it could not be told about
+    a version published off-tag.
+    """
+    tags = [t for t in seen.get(chart_version, []) if t != publishing_as]
+    return sorted(tags)
+
+
 def check_version_not_reused(chart_version, strict, publishing_as=None):
     """⚠️ A REGISTRY VERSION CANNOT BE RE-USED, CORRECTED, OR OVERWRITTEN.
 
@@ -274,7 +290,7 @@ def check_version_not_reused(chart_version, strict, publishing_as=None):
         print("  note  no git tags readable here; skipping the re-use check.\n"
               "        That is an absence of a result, not a passing one.")
         return
-    tags = seen.get(chart_version)
+    tags = version_is_reused(chart_version, seen, publishing_as)
     if not tags:
         print(f"  ok    chart version {chart_version} is not carried by any existing "
               f"tag ({len(seen)} version(s) seen)")
@@ -474,8 +490,77 @@ def fetch_dependencies(skip):
         print(f"  charts/{name}")
 
 
+# --------------------------------------------------------------------------- selftest
+# ⚠️ THIS FILE HAD THREE BUGS BEFORE IT HAD A TEST, and all three were DECISIONS
+# rather than I/O — which is why the fixtures below are text and lists, not files:
+#
+#   * `values.yaml` was grepped for `tag:` with a regex requiring at least one
+#     character. That cannot match `tag: ""`, which is the value meaning "track
+#     appVersion" and therefore the CORRECT one. Under `set -e` it would have failed
+#     every properly configured release. (Fixed before it shipped; pinned here.)
+#   * the re-use guard counted the tag being released against itself, so it could
+#     never pass — it rejected v0.8.0 for a version only v0.8.0 carried.
+#   * the same guard cannot see a version published off-tag by workflow_dispatch,
+#     which is how 0.2.1 became invisible to it. Still open, and marked in
+#     check_version_not_reused where it lives.
+#
+# Every checker in scripts/ has a --selftest. This one did not, and it is the one
+# that produced the bugs.
+
+VALUES_FIXTURE_EMPTY = """\
+llm:
+  image:
+    repository: ghcr.io/example/sim
+    tag: ""            # "" -> .Chart.AppVersion
+    pullPolicy: IfNotPresent
+"""
+
+VALUES_FIXTURE_PINNED = """\
+llm:
+  image:
+    repository: ghcr.io/example/sim
+    tag: "v1.2.3"
+    pullPolicy: IfNotPresent
+"""
+
+CHART_FIXTURE = """\
+apiVersion: v2
+name: example
+version: 0.4.2
+appVersion: "v1.2.3"
+"""
+
+
+def selftest():
+    print("chart-build --selftest")
+
+    # ⚠️ The empty tag is the CORRECT configuration, and the regex that could not
+    # express it is the bug this pins. "" must parse as "", not as a failure.
+    assert values_image_tag(VALUES_FIXTURE_EMPTY) == "", values_image_tag(VALUES_FIXTURE_EMPTY)
+    assert values_image_tag(VALUES_FIXTURE_PINNED) == "v1.2.3"
+    print('  ok  tag        `tag: ""` reads as empty (tracks appVersion), a pin reads as itself')
+
+    assert read_chart_field("version", CHART_FIXTURE) == "0.4.2"
+    assert read_chart_field("appVersion", CHART_FIXTURE) == "v1.2.3"
+    print("  ok  fields     version and appVersion parse, quoted or bare")
+
+    # The re-use decision, with no git anywhere near it.
+    seen = {"0.1.0": ["v0.5.0", "v0.6.0"], "0.2.0": ["v0.8.0"]}
+    assert version_is_reused("0.2.0", seen, publishing_as="v0.8.0") == []
+    assert version_is_reused("0.2.0", seen, publishing_as=None) == ["v0.8.0"]
+    assert version_is_reused("0.1.0", seen, publishing_as="v0.8.0") == ["v0.5.0", "v0.6.0"]
+    assert version_is_reused("0.3.0", seen, publishing_as=None) == []
+    print("  ok  re-use     the tag being published is excluded; an OLDER tag still fails")
+
+    print("\nSELFTEST PASSED")
+    return 0
+
+
 def main(argv=None):
     ap = argparse.ArgumentParser(description=__doc__.splitlines()[0])
+    ap.add_argument("--selftest", action="store_true",
+                    help="check this script's own parsing and decisions against "
+                         "fixtures, and exit")
     ap.add_argument("--strict-version", action="store_true",
                     help="fail rather than warn when Chart.yaml appVersion does "
                          "not match the repo's latest git tag (used at release)")
@@ -489,6 +574,9 @@ def main(argv=None):
                          "result will NOT render — Helm needs them present even "
                          "when their condition is false.")
     args = ap.parse_args(argv)
+
+    if args.selftest:
+        return selftest()
 
     if not os.path.isdir(SRC_CHART):
         fail(f"{SRC_CHART} not found (run from the repo root)")

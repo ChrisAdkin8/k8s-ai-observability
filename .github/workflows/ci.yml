@@ -182,6 +182,11 @@ jobs:
           python3 scripts/check-sigpipe.py --selftest
           python3 scripts/check-sigpipe.py
 
+      # ⚠️ The release tooling's own parsing and decisions. It is the script that
+      # produced the most bugs in this repo and the last one to get a selftest.
+      - name: Release tooling selftest
+        run: python3 scripts/chart-build.py --selftest
+
       # The MATCHING RULES of the weekly drift check, against a committed fixture
       # rather than against upstream. The drift job below runs on a schedule and
       # needs network; this needs neither, and it covers the one piece of
