@@ -228,12 +228,19 @@ colima start --cpu 4 --memory 8 --disk 40
 ```
 
 **Or run the trimmed stack instead.** `LITE=1` drops Alertmanager, kube-state-metrics,
-node-exporter and the chart's ~100 default rules, and puts Prometheus on 256Mi/512Mi. That
-lowers the floor to 3 GiB and the recommendation to 4:
+node-exporter and the chart's ~100 default rules, and puts Prometheus on 256Mi/512Mi.
+Measured at 2.2 GiB in use, so it fits a small runtime — **allocate 4 GiB**:
 
 ```sh
+colima stop && colima start --cpu 4 --memory 4 --disk 40
 LITE=1 task local:up
 ```
+
+⚠️ **Allocate 4 even though the floor reads 3, and do not try 3.** The floor is checked
+against what the runtime *reports*, not what you asked for: a 3 GiB colima VM reports
+2.83 GiB, `kind-up.sh` floors that to `2`, and the preflight refuses before anything
+starts. 4 GiB reports 3.81 and passes. Verified on colima/aarch64, 2026-08-04 —
+`ALL CHECKS PASSED` at 4 GiB, with the stack using 2.197 GiB of it.
 
 It keeps everything `local` exists to prove: ServiceMonitor discovery, PrometheusRule
 evaluation, the Grafana sidecar import, and scheduling on `nvidia.com/gpu`. Both
