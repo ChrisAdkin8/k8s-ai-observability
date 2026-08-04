@@ -58,26 +58,68 @@ byo_hint() {
 }
 
 # --- helper: run a PromQL instant query via a self-healing port-forward ---------
-PF_PID=""
-prom_pf_up()   { [[ -n "$PF_PID" ]] && kill -0 "$PF_PID" 2>/dev/null; }
+#
+# ⚠️ THE PID LIVES IN A FILE, NOT A VARIABLE, AND THAT IS THE WHOLE FIX.
+#
+# Every caller reaches these through command substitution — `x="$(promql_count ...)"`
+# — which runs in a SUBSHELL. A plain `PF_PID=$!` assigned there is discarded when the
+# subshell exits, so the parent's PF_PID stayed empty forever, prom_pf_up() reported
+# "no forward" on EVERY call, and prom_pf_ensure() therefore rebuilt the forward and
+# slept 4s for EVERY QUERY. The self-healing forward never healed; it only ever
+# re-established.
+#
+# MEASURED on CI run 30867055387 (2026-08-04): consecutive single-shot checks land
+# exactly 4.03s apart, run after run, while the two checks that issue no PromQL land
+# 0.0s apart. ~37 calls per run, ~149s of a 247s verify.sh spent asleep. It also
+# leaked one orphaned `kubectl port-forward` per call.
+#
+# ⚠️ THE GRAFANA FORWARD BELOW IS THE SAME DESIGN AND WORKS, which is the tell worth
+# keeping: grafana_uid_check() is a plain function call, so its `GRAF_PF_PID=$!`
+# reaches the shell that reads it. Identical code, different call convention, opposite
+# outcome. If a future helper backgrounds anything and is read through `$(...)`, it
+# needs a file too.
+#
+# A file survives the subshell because the filesystem does. Established once up front
+# (see below) so the common case is a real child of THIS shell and `wait` can reap it;
+# a forward rebuilt later from inside a substitution is reparented, which is why every
+# kill/wait here tolerates failure.
+PF_PIDFILE="$(mktemp)"
+prom_pf_up() {
+  local p; p="$(cat "$PF_PIDFILE" 2>/dev/null || true)"
+  [[ -n "$p" ]] && kill -0 "$p" 2>/dev/null
+}
 # `wait` after `kill` reaps the job synchronously. Without it the shell reports the
 # reaped background job itself ("Terminated: 15") straight to the terminal — output we
 # cannot redirect, and which reads like a failure in the middle of a passing run.
 prom_pf_stop() {
-  [[ -n "$PF_PID" ]] && { kill "$PF_PID" >/dev/null 2>&1 || true; wait "$PF_PID" 2>/dev/null || true; }
-  PF_PID=""
+  local p; p="$(cat "$PF_PIDFILE" 2>/dev/null || true)"
+  [[ -n "$p" ]] && { kill "$p" >/dev/null 2>&1 || true; wait "$p" 2>/dev/null || true; }
+  : > "$PF_PIDFILE"
 }
 prom_pf_ensure() {  # (re)establish the forward if it isn't alive — survives long polls
   prom_pf_up && return 0
   "${KUBECTL[@]}" -n "$MONITORING_NS" port-forward "svc/${KPS_RELEASE}-prometheus" 9090:9090 >/dev/null 2>&1 &
-  PF_PID=$!; sleep 4
+  echo $! > "$PF_PIDFILE"
+  sleep 4
 }
-trap prom_pf_stop EXIT
+trap 'prom_pf_stop; rm -f "$PF_PIDFILE"' EXIT
 # returns the number of result series for a query (ensures the forward first)
 promql_count() {
   prom_pf_ensure
   curl -sG "http://localhost:9090/api/v1/query" --data-urlencode "query=$1" \
     | python3 -c 'import sys,json; print(len(json.load(sys.stdin).get("data",{}).get("result",[])))' 2>/dev/null || echo 0
+}
+# The largest VALUE a query returns, or nan if it returns nothing. Diagnostic only —
+# no check asserts on it. promql_count() counts series and cannot see the numbers
+# inside them, which is fine for an assertion phrased to return zero series on failure
+# and useless for saying HOW FAR a converging quantity still has to go. L8 uses it to
+# report its residual while it waits.
+promql_value() {
+  prom_pf_ensure
+  curl -sG "http://localhost:9090/api/v1/query" --data-urlencode "query=$1" \
+    | python3 -c 'import sys,json
+r = json.load(sys.stdin).get("data", {}).get("result", [])
+print(max((float(s["value"][1]) for s in r), default=float("nan")))' 2>/dev/null || echo nan
 }
 # The label KEYS on the first result series of a query, one per line (empty if the
 # query returns nothing). Used by check 3b, which asserts a label SET rather than a
@@ -90,24 +132,34 @@ r = json.load(sys.stdin).get("data", {}).get("result", [])
 print("\n".join(sorted(r[0].get("metric", {}))) if r else "")' 2>/dev/null || true
 }
 
-# How long checks 3 and 4c wait for the FIRST DCGM scrape to land, in 5s attempts.
+# How long checks 3, 4c and L4b wait for the FIRST DCGM scrape to land, in WALL-CLOCK
+# SECONDS.
 #
-# ONE constant because those two must move together, and a comment saying so was not
-# enough — 4c asserts a recording rule DERIVED from the metric 3 asserts, so if 3's
+# ⚠️ SECONDS, BECAUSE AN ATTEMPT COUNT WAS NEVER THE BUDGET IT LOOKED LIKE — and every
+# poll in this file used to carry the same defect. This was `DCGM_POLL_ATTEMPTS=24`
+# against a `sleep 5`, which reads as 120s and said "120s" in the failure messages
+# below. The real budget was 216s here, and 312s in check 3, which issues two queries
+# per pass: every promql_count() call ALSO paid an unconditional `sleep 4` rebuilding
+# a port-forward that should have been reused (see the PID-file note above). Measured
+# on CI 2026-08-04: 4.03s per PromQL call, ~37 calls, ~149s of a 247s run.
+#
+# So fixing that forward without first moving these bounds would have cut every
+# timeout in this file by ~45% in one commit, silently, while the diff looked like a
+# pure speed-up. That is why the budgets moved first. A deadline in seconds cannot
+# drift away from its stated value again.
+#
+# ONE constant because checks 3 and 4c must move together, and a comment saying so was
+# not enough — 4c asserts a recording rule DERIVED from the metric 3 asserts, so if 3's
 # window is the shorter of the two, a slow runner produces the contradictory result
 # "the input is missing but the thing computed from it is present". That is confusing
 # in exactly the wrong direction: it reads as a selector fault when it is a timing one.
 #
-# RAISED FROM 12 (60s) after a real CI failure on a docs-only commit. Check 3 gave up
-# at 60s and DCGM_FI_DEV_GPU_TEMP — which cannot exist without DCGM_FI_DEV_GPU_UTIL —
-# passed 13 seconds later. The run took 8m34s against a typical 5m, so the runner was
-# slow rather than the stack broken. 60s was already a deliberate choice (see check 3)
-# and simply had no margin on a bad day.
-#
-# Still bounded, and that is the point: a genuine ServiceMonitor selector mismatch
-# never resolves, so this must fail rather than hang. 120s is ~8 scrape intervals at
-# the 15s the ServiceMonitors set — generous for a first scrape, still quick to fail.
-DCGM_POLL_ATTEMPTS=24
+# 240s. The incident that raised this from 60s needed ~73s, on a run that took 8m34s
+# against a typical 5m; the worst first-scrape wait measured since is 47.8s (CI run
+# 30867055387, 2026-08-04). 240s is over 3x the worst known and still bounded, which
+# is the point: a genuine ServiceMonitor selector mismatch never resolves, so this
+# must fail rather than hang.
+DCGM_POLL_SECONDS=240
 
 echo "Verifying $TARGET (context: $CTX)"
 
@@ -157,13 +209,21 @@ running="$("${KUBECTL[@]}" get pods -l app.kubernetes.io/part-of=gpu-sim-workloa
 #    DCGM_FI_DEV_GPU_UTIL both read empty here, while the series DERIVED from that same metric
 #    passed 60s later. A derived series cannot exist without its input, so the only reading is
 #    that this check ran before the first scrape landed, not that anything was broken.
-#    Shares DCGM_POLL_ATTEMPTS with 4c — see the constant for why they are one value and
-#    why it was raised from 60s to 120s.
+#    Shares DCGM_POLL_SECONDS with 4c — see the constant for why they are one value.
+#
+#    Established HERE, in this shell, rather than left to the first promql_count()
+#    inside a `$(...)`. Both work now that the pid is in a file, but a forward opened
+#    by the main shell is a real child of it, so prom_pf_stop can `wait` and reap it
+#    instead of leaving the kill unacknowledged. This is also the one place the 4s
+#    settle is genuinely paid; every later call reuses it.
+prom_pf_ensure
 up=0; util=0
-for _ in $(seq 1 "$DCGM_POLL_ATTEMPTS"); do
+deadline=$(( SECONDS + DCGM_POLL_SECONDS ))
+while :; do
   up="$(promql_count 'up{job=~".*dcgm.*"} == 1')"
   util="$(promql_count 'DCGM_FI_DEV_GPU_UTIL')"
   [[ "${up:-0}" -gt 0 && "${util:-0}" -gt 0 ]] && break
+  (( SECONDS >= deadline )) && break
   sleep 5
 done
 [[ "${up:-0}" -gt 0 ]] && pass "DCGM scrape target up" || fail "no DCGM scrape target up (ServiceMonitor selector?)$(byo_hint)"
@@ -235,13 +295,15 @@ fi
 #     is still one tick away. A single-shot check would flake right after install.
 for m in DCGM_FI_DEV_GPU_TEMP DCGM_FI_DEV_POWER_USAGE; do
   n=0
-  for _ in $(seq 1 "$DCGM_POLL_ATTEMPTS"); do
+  deadline=$(( SECONDS + DCGM_POLL_SECONDS ))
+  while :; do
     n="$(promql_count "$m")"
     [[ "${n:-0}" -gt 0 ]] && break
+    (( SECONDS >= deadline )) && break
     sleep 5
   done
   [[ "${n:-0}" -gt 0 ]] && pass "derived series $m returns $n series (recording rule live)" \
-    || fail "$m empty after $((DCGM_POLL_ATTEMPTS * 5))s → dashboard temp/power panel blank (are the recording rules in manifests/alerts/ applied?)$(byo_hint)"
+    || fail "$m empty after ${DCGM_POLL_SECONDS}s → dashboard temp/power panel blank (are the recording rules in manifests/alerts/ applied?)$(byo_hint)"
 done
 
 # 4b. The advertised access path itself: fetch the board by UID over an UNAUTHENTICATED
@@ -266,17 +328,25 @@ graf_pf_ensure() {  # (re)establish the forward if it isn't alive — survives l
   "${KUBECTL[@]}" -n "$MONITORING_NS" port-forward "svc/${KPS_RELEASE}-grafana" "${GRAFANA_PORT}:80" >/dev/null 2>&1 &
   GRAF_PF_PID=$!; sleep 4
 }
-trap 'prom_pf_stop; graf_pf_stop' EXIT
+trap 'prom_pf_stop; graf_pf_stop; rm -f "$PF_PIDFILE"' EXIT
 
 # Shared by every dashboard check: fetch a board by UID over an UNAUTHENTICATED
 # request, and translate the HTTP status into an actionable message. One
 # implementation so the GPU and LLM boards can never be checked differently.
+# 40s. This loop's bound was always honest — graf_pf_ensure() is called from a plain
+# function body, so its forward really is reused and a pass really did cost ~2s — but
+# it is expressed in seconds anyway so that "every poll in this file is bounded in
+# wall-clock seconds" is a property you can grep for rather than one you have to
+# audit loop by loop.
+GRAFANA_UID_POLL_SECONDS=40
 grafana_uid_check() {
   local uid="$1" label="$2" url="$3" code=000
-  for _ in $(seq 1 20); do
+  local deadline=$(( SECONDS + GRAFANA_UID_POLL_SECONDS ))
+  while :; do
     graf_pf_ensure                    # rebuilds the forward if it idled out
     code="$(curl -s -o /dev/null -w '%{http_code}' "http://localhost:${GRAFANA_PORT}/api/dashboards/uid/${uid}" || echo 000)"
     [[ "$code" == "200" ]] && break
+    (( SECONDS >= deadline )) && break
     # Died mid-fetch (rather than merely answering badly)? Drop the pid so the next
     # pass rebuilds instead of curling at a port nothing is listening on.
     graf_pf_up || GRAF_PF_PID=""
@@ -316,19 +386,26 @@ grafana_uid_check "$DASHBOARD_UID" "GPU" "$(grafana_dashboard_url)"
 #     every check green with flat-zero panels. Assert the 'busy' workload's band (85-99)
 #     is really reaching the metric.
 #     Polled: the pod must be scheduled, admitted and scraped first.
-#     DELIBERATELY NOT on DCGM_POLL_ATTEMPTS, though it polls the same metric. By the
+#     DELIBERATELY NOT on DCGM_POLL_SECONDS, though it polls the same metric. By the
 #     time this runs, check 3 has already established that DCGM_FI_DEV_GPU_UTIL exists,
-#     so this 60s is measuring something else entirely: whether the ANNOTATION is
+#     so this budget is measuring something else entirely: whether the ANNOTATION is
 #     reaching the exporter. Sharing the constant would tie an annotation-propagation
 #     budget to a first-scrape one and make both harder to reason about.
+#     120s: the effective budget before the port-forward fix was 108s (12 passes at 4s
+#     of forward plus 5s of sleep) and the stated one was 60s. Neither has ever been
+#     approached — worst measured is one pass — so this rounds the true figure up
+#     rather than reasoning from the number that was only ever nominal.
+UTIL_DRIVEN_POLL_SECONDS=120
 util_hi=0
-for _ in $(seq 1 12); do
+deadline=$(( SECONDS + UTIL_DRIVEN_POLL_SECONDS ))
+while :; do
   util_hi="$(promql_count 'max(DCGM_FI_DEV_GPU_UTIL) > 80')"
   [[ "${util_hi:-0}" -gt 0 ]] && break
+  (( SECONDS >= deadline )) && break
   sleep 5
 done
 [[ "${util_hi:-0}" -gt 0 ]] && pass "simulated utilisation is being driven (max DCGM_FI_DEV_GPU_UTIL > 80)" \
-  || fail "no GPU above 80% util after 60s — the 'gpu-busy' annotation is not reaching the exporter. Check that run.ai/simulated-gpu-utilization sits on spec.template.metadata.annotations, not the Deployment's metadata."
+  || fail "no GPU above 80% util after ${UTIL_DRIVEN_POLL_SECONDS}s — the 'gpu-busy' annotation is not reaching the exporter. Check that run.ai/simulated-gpu-utilization sits on spec.template.metadata.annotations, not the Deployment's metadata."
 
 # 5. THE utilisation alert can reach 'firing' (poll, waiting out the rule's for: duration).
 #    Named exactly, NOT alertname=~".*GPU.*": GPUHighMemoryUsage is allocation-driven, so
@@ -336,11 +413,17 @@ done
 #    FB_USED=all/FB_FREE=0 — see docs/observability.md). A wildcard here is satisfied by
 #    that alert alone and would pass with utilisation stuck at zero, which is the one
 #    thing this check exists to prove.
+#    360s, and the message now says what the code does. It used to say 6m while
+#    granting 504s, for the reason DCGM_POLL_SECONDS documents. The rule's `for:` is
+#    1m and the worst measured wait is 46.1s, so 360s keeps ~8x margin.
+GPU_ALERT_POLL_SECONDS=360
 echo "  (polling up to 6m for GPUHighUtilization to fire...)"
 fired=0
-for _ in $(seq 1 36); do
+deadline=$(( SECONDS + GPU_ALERT_POLL_SECONDS ))
+while :; do
   n="$(promql_count 'ALERTS{alertstate="firing", alertname="GPUHighUtilization"}')"
   if [[ "${n:-0}" -gt 0 ]]; then fired=1; break; fi
+  (( SECONDS >= deadline )) && break
   sleep 10
 done
 [[ "$fired" -eq 1 ]] && pass "GPUHighUtilization is firing" \
@@ -381,9 +464,11 @@ llm_obs="$(promql_count 'rate(vllm:time_to_first_token_seconds_count[5m]) > 0')"
   || fail "L3 no TTFT observations — histogram present but empty?"
 
 llm_p95=0
-for _ in $(seq 1 24); do   # recording rules need a couple of evaluations to exist
+deadline=$(( SECONDS + 180 ))   # recording rules need a couple of evaluations to exist
+while :; do
   llm_p95="$(promql_count "llm:ttft:p95_5m{model_name=\"${LLM_STEADY_MODEL}\"} > 0 and llm:ttft:p95_5m{model_name=\"${LLM_STEADY_MODEL}\"} < 2")"
   [[ "${llm_p95:-0}" -gt 0 ]] && break
+  (( SECONDS >= deadline )) && break
   sleep 5
 done
 [[ "${llm_p95:-0}" -gt 0 ]] && pass "L3 steady tenant p95 TTFT is finite and under the 2s alert threshold" \
@@ -433,7 +518,7 @@ llm_tpw="$(promql_count '(sum(rate(vllm:generation_tokens_total[5m])) > 0) / (su
 # target's own namespace/pod labels win the collision. label_replace maps them back
 # so the join has a common key.
 #
-# POLLED, and on DCGM_POLL_ATTEMPTS because it waits on the same producer. The two
+# POLLED, and on DCGM_POLL_SECONDS because it waits on the same producer. The two
 # sides of this join do not appear together: the simulator emits
 # llmsim_gpu_binding_info as soon as it reads MOCK_NVIDIA_VISIBLE_DEVICES at start-up,
 # whereas exported_pod only appears once the fake exporter has re-read the topology
@@ -445,13 +530,15 @@ llm_tpw="$(promql_count '(sum(rate(vllm:generation_tokens_total[5m])) > 0) / (su
 llm_bind="$(promql_count 'llmsim_gpu_binding_info')"
 if [[ "${llm_bind:-0}" -gt 0 ]]; then
   llm_join=0
-  for _ in $(seq 1 "$DCGM_POLL_ATTEMPTS"); do
+  deadline=$(( SECONDS + DCGM_POLL_SECONDS ))
+  while :; do
     llm_join="$(promql_count 'llmsim_gpu_binding_info * on (namespace, pod) group_left(UUID, gpu) label_replace(label_replace(DCGM_FI_DEV_GPU_UTIL{exported_pod!=""}, "namespace", "$1", "exported_namespace", "(.*)"), "pod", "$1", "exported_pod", "(.*)")')"
     [[ "${llm_join:-0}" -gt 0 ]] && break
+    (( SECONDS >= deadline )) && break
     sleep 5
   done
   [[ "${llm_join:-0}" -gt 0 ]] && pass "L4b GPU binding resolves to a real DCGM series (joined on pod)" \
-    || fail "L4b llmsim_gpu_binding_info exists but after $((DCGM_POLL_ATTEMPTS * 5))s no DCGM_FI_DEV_GPU_UTIL series is labelled with that pod"
+    || fail "L4b llmsim_gpu_binding_info exists but after ${DCGM_POLL_SECONDS}s no DCGM_FI_DEV_GPU_UTIL series is labelled with that pod"
 else
   skip "L4b no simulator holds a simulated GPU (unbound) — nothing to join"
 fi
@@ -468,11 +555,16 @@ grafana_uid_check "$LLM_DASHBOARD_UID" "L5 LLM" "$(grafana_llm_dashboard_url)"
 #     verify.sh does NOT patch a profile to make this true. Selected by EXACT
 #     name: a wildcard would be satisfied by LLMQueueBacklog, which is also
 #     permanently firing, and would pass with the latency model broken.
+#     300s, and the message now matches: it said 5m while granting 420s. The rule's
+#     `for:` is 2m and the worst measured wait is 60.2s.
+LLM_ALERT_POLL_SECONDS=300
 echo "  (polling up to 5m for LLMHighTTFT to fire...)"
 llm_fired=0
-for _ in $(seq 1 30); do
+deadline=$(( SECONDS + LLM_ALERT_POLL_SECONDS ))
+while :; do
   n="$(promql_count 'ALERTS{alertstate="firing", alertname="LLMHighTTFT"}')"
   if [[ "${n:-0}" -gt 0 ]]; then llm_fired=1; break; fi
+  (( SECONDS >= deadline )) && break
   sleep 10
 done
 [[ "$llm_fired" -eq 1 ]] && pass "L6 LLMHighTTFT is firing (driven by llm-saturated)" \
@@ -595,20 +687,52 @@ llm_phases="$(promql_count 'count(rate(vllm:request_prefill_time_seconds_count[5
 # adds up" — which is the claim worth making. A tenant whose phase means are
 # permanently missing is not silently excused: the assertion above this one
 # already fails if any of the three histograms is absent or not advancing.
+# ⚠️ 420s, AND THE ONLY BUDGET IN THIS FILE THAT WAS GENUINELY TOO SMALL. Measured
+# across three CI runs on 2026-08-04: the `full` leg converges in 12.1s every time, to
+# two decimal places, while `lite` took 12.1s, 129.5s and 201.7s on the same commit
+# range. Against the effective budget of ~212s (24 passes at 4s of port-forward plus
+# 5s of sleep), the 201.7s run consumed 22 of 24 attempts — roughly 18 seconds from a
+# red leg, on a rig that was working perfectly. Every other bound here is being
+# tightened toward its stated value; this one is doubled, because the evidence points
+# the other way.
+#
+# ⚠️ WHY `lite` VARIES BY 17x IS NOT YET KNOWN, and the obvious causes are ruled out
+# rather than assumed: the diagnostics bundle for the 201.7s run shows Prometheus at
+# RESTARTS 0, no OOM or eviction events, and rule-group evaluationTime of 2.4ms on a
+# 30s interval. Prometheus was healthy and fast on that leg. What remains is the
+# rate()-over-a-partly-filled-window arithmetic the block above anatomises, which is a
+# claim needing measurement rather than another paragraph of reasoning. Hence the
+# instrumentation below: every future run now reports how long this took and what the
+# residual was while it waited, so the next slow leg explains itself instead of
+# needing a rerun to reproduce.
+L8_POLL_SECONDS=420
 llm_sums=0
-for _ in $(seq 1 24); do
+l8_started=$SECONDS
+l8_passes=0
+deadline=$(( SECONDS + L8_POLL_SECONDS ))
+while :; do
   llm_sums="$(promql_count 'count(abs((llm:queue:mean5m + llm:prefill:mean5m + llm:decode:mean5m) - llm:e2e:mean5m)
       / clamp_min(llm:e2e:mean5m, 1e-9) < 1e-3)
     == count((llm:queue:mean5m + llm:prefill:mean5m + llm:decode:mean5m) - llm:e2e:mean5m)')"
   [[ "${llm_sums:-0}" -gt 0 ]] && break
+  (( SECONDS >= deadline )) && break
+  # Every ~30s, not every pass: enough to shape the convergence curve in the log,
+  # quiet enough that a normal run (which exits on the first pass) prints nothing.
+  l8_passes=$(( l8_passes + 1 ))
+  if (( l8_passes % 6 == 0 )); then
+    printf '    L8 still converging after %ds — worst relative residual %s (want < 1e-3)\n' \
+      "$(( SECONDS - l8_started ))" \
+      "$(promql_value 'max(abs((llm:queue:mean5m + llm:prefill:mean5m + llm:decode:mean5m) - llm:e2e:mean5m) / clamp_min(llm:e2e:mean5m, 1e-9))')"
+  fi
   sleep 5
 done
+l8_elapsed=$(( SECONDS - l8_started ))
 # Reported on both paths so a future failure is diagnosable from the summary
 # rather than from a rerun: "3 of 4" and "0 of 0" are different faults.
 llm_ok_n="$(promql_count 'abs((llm:queue:mean5m + llm:prefill:mean5m + llm:decode:mean5m) - llm:e2e:mean5m) / clamp_min(llm:e2e:mean5m, 1e-9) < 1e-3')"
 llm_all_n="$(promql_count '(llm:queue:mean5m + llm:prefill:mean5m + llm:decode:mean5m) - llm:e2e:mean5m')"
-[[ "${llm_sums:-0}" -gt 0 ]] && pass "L8 the phase breakdown accounts for end-to-end latency (${llm_ok_n:-0}/${llm_all_n:-0} tenant(s) with a complete breakdown, within 0.1%)" \
-  || fail "L8 only ${llm_ok_n:-0} of ${llm_all_n:-0} tenant(s) with a complete breakdown account for llm:e2e:mean5m to within 0.1% — all four recording rules applied, and none swapped back to a quantile? (means are additive, percentiles are not). ${llm_all_n:-0} = 0 means the four mean rules are not evaluating at all."
+[[ "${llm_sums:-0}" -gt 0 ]] && pass "L8 the phase breakdown accounts for end-to-end latency (${llm_ok_n:-0}/${llm_all_n:-0} tenant(s) with a complete breakdown, within 0.1%, converged in ${l8_elapsed}s)" \
+  || fail "L8 only ${llm_ok_n:-0} of ${llm_all_n:-0} tenant(s) with a complete breakdown account for llm:e2e:mean5m to within 0.1% after ${L8_POLL_SECONDS}s — all four recording rules applied, and none swapped back to a quantile? (means are additive, percentiles are not). ${llm_all_n:-0} = 0 means the four mean rules are not evaluating at all."
 
 # L9. the four SLO ratios exist and are evaluating.
 #
@@ -634,12 +758,14 @@ llm_all_n="$(promql_count '(llm:queue:mean5m + llm:prefill:mean5m + llm:decode:m
 #     reads slo_ratio6h and slo_ratio30m, and those are the two least likely to
 #     be noticed missing because nothing on this rig drives that alert.
 llm_slo=0
-for _ in $(seq 1 24); do
+deadline=$(( SECONDS + 180 ))
+while :; do
   llm_slo="$(promql_count 'count(llm:ttft:slo_ratio5m) > 0
     and count(llm:ttft:slo_ratio30m) > 0
     and count(llm:ttft:slo_ratio1h) > 0
     and count(llm:ttft:slo_ratio6h) > 0')"
   [[ "${llm_slo:-0}" -gt 0 ]] && break
+  (( SECONDS >= deadline )) && break
   sleep 5
 done
 llm_slo_n="$(promql_count 'llm:ttft:slo_ratio5m')"
