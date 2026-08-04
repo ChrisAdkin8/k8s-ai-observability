@@ -5,6 +5,8 @@
 [![GPU board](https://img.shields.io/badge/grafana.com-25618-F46800.svg)](https://grafana.com/grafana/dashboards/25618-gpu-simulation-dcgm-overview/)
 [![vLLM board](https://img.shields.io/badge/grafana.com-25620-F46800.svg)](https://grafana.com/grafana/dashboards/25620-llm-simulation-vllm-serving-overview/)
 [![Simulator image](https://img.shields.io/badge/ghcr.io-vllm--metrics--sim-2496ed.svg)](https://github.com/ChrisAdkin8/k8s-ai-observability/pkgs/container/vllm-metrics-sim)
+[![Helm chart](https://img.shields.io/badge/ghcr.io-helm%20chart-0f1689.svg)](https://github.com/ChrisAdkin8/k8s-ai-observability/pkgs/container/charts%2Fk8s-ai-observability)
+[![Artifact Hub](https://img.shields.io/endpoint?url=https://artifacthub.io/badge/repository/k8s-ai-observability)](https://artifacthub.io/packages/search?repo=k8s-ai-observability)
 
 # k8s-ai-observability
 
