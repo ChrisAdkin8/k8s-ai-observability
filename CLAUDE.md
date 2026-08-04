@@ -59,9 +59,9 @@ rig knows the right answer.
     flag must fail loudly, not silently do the non-flag thing.
 11. **One logical change per commit** (`CONTRIBUTING.md`). Subjects state the change; bodies
     carry the reasoning — the commit log is part of the documentation.
-12. **Docs drift is a known failure class.** Counts ("emits N metrics") and ids in prose
-    have been corrected repeatedly — when touching docs, re-verify every number against the
-    code it describes, and run the cheap gates before landing, not after.
+12. **Docs drift is a known failure class.** Counts ("emits N metrics", "N jobs") and ids
+    in prose have been corrected repeatedly. Re-verify every number against the code it
+    describes; `doc-claims` mechanises the ones that recur, including this file's.
 13. **Prose style:** em dashes have been deliberately stripped from the README and catalog
     pages twice. Don't reintroduce them there.
 14. **Containers run `readOnlyRootFilesystem`** — hence `PYTHONDONTWRITEBYTECODE`; scripts
@@ -69,16 +69,14 @@ rig knows the right answer.
 15. **Terraform:** commit `.terraform.lock.hcl`, never `*.tfvars` (examples only). GKE's
     `node_count` is **per zone**; EKS's is absolute.
 16. **Outstanding work is marked where it lives — there is no TODO file, and adding one
-    would be a mistake.** Open items carry a `⚠️` in the file that owns them: a CHANGELOG
-    entry, `manifests/dashboards/README.md`, a prompt's acceptance criteria. To find what
-    is open, grep the markers and skip anything struck through. When you finish one,
-    **strike it and say what happened** — `⚠️ ~~the claim~~ **DONE — <what, when>**` — never
-    delete it, "because the reasoning outlives the action". A backlog file would be a
-    second copy of every one of these: unverifiable (`doc-claims` compares prose to code,
-    not intentions to reality) and the first thing here to rot.
-
-17. **`zsh` is not `bash`, and CI is `bash`.** Two bugs today were invisible in the local
-    shell. `echo "$x" | grep -q` returned 0 under zsh and **141 under bash** on the same
+    would be a mistake.** Open items carry a `⚠️` in the file that owns them. `task
+    outstanding` greps the markers and skips struck ones. When you finish one, **strike it
+    and say what happened** — `⚠️ ~~the claim~~ **DONE — <what, when>**` — never delete it,
+    because the reasoning outlives the action. The same applies to *evidence*: a long
+    justification belongs in the file that owns the work, not in this one, which is loaded
+    into every session.
+17. **`zsh` is not `bash`, and CI is `bash`.** Two bugs on **2026-08-04** were invisible in
+    the local shell. `echo "$x" | grep -q` returned 0 under zsh and **141 under bash** on the same
     input, because a SIGPIPE'd producer only fails the pipeline under `pipefail` — that one
     could have skipped the cluster jobs on a code change. Separately, zsh does not
     word-split unquoted parameters, so a test harness passed `"local --skip-monitoring"` as
@@ -99,16 +97,13 @@ rig knows the right answer.
 - **Cluster loop:** phase 1 `terraform apply` / `kind-up.sh`, phase 2
   `./scripts/install.sh <eks|gke|local> [--skip-monitoring]`, then `./scripts/verify.sh`.
   `LITE=1` fits a 4 GiB runtime. `KPS_RELEASE=<name>` for BYO Prometheus.
-- **CI:** the two kind legs (`full`, `lite`) and `chart on kind` are required checks, along
-  with `fast`. The names live in the ruleset AND in `.github/required-checks.txt`; change
-  the ruleset first, then record it, or `settings-drift` reports the disagreement. Matrix
-  values are part
-  of the name. Docs-only changes skip the cluster, and `fast` gates the four expensive
-  jobs. Measured on run 30870290833 (2026-08-04, one run): `full` 6m12s, `lite` 4m42s,
-  whole workflow 6m50s; `verify.sh` itself 215s and 160s. Quote the run id with any
-  figure you take from here.
-  The correction history for those figures moved to `docs/ci.md`, which owns the topic —
-  rule 16 marks work where it lives, and that stopped being here.
+- **CI:** four required checks — `fast`, the two kind legs (`full`, `lite`) and
+  `chart on kind`. Matrix values are part of the name, so the names live in the ruleset AND
+  in `.github/required-checks.txt`; **change the ruleset first, then record it**, or
+  `settings-drift` reports the disagreement. Docs-only changes skip the cluster, and `fast`
+  gates the five expensive jobs. Measured on run 30870290833 (2026-08-04, one run): `full`
+  6m12s, `lite` 4m42s, whole workflow 6m50s; `verify.sh` itself 215s and 160s. Quote the
+  run id with any figure you take from here. `docs/ci.md` is the map.
 - **Review discipline:** specs and plans get **one adversarial review round, then
   implementation** — after one round the remaining risk is empirical (a timing, a default,
   a command's exact syntax) and a desk can't settle it; the first hours of implementation

@@ -199,6 +199,27 @@ def derive_ci_job_count() -> int:
     return len(keys) or die("ci-job-count", f"no jobs found in {CI_WORKFLOW} — dead")
 
 
+def derive_ci_gated_count() -> int:
+    """How many jobs `fast` GATES, which is not the same as how many jobs exist.
+
+    ⚠️ TWO DIFFERENT NUMBERS, AND CONFLATING THEM IS THE EASY MISTAKE. `changes`,
+    `upstream-drift` and `settings-drift` are jobs beyond `fast` that `fast` does not
+    gate, so "jobs beyond fast" and "expensive jobs fast gates" differ — 8 against 5
+    at the time of writing. Each claim gets its own derivation rather than one being
+    quietly reused for the other.
+    """
+    body = read(CI_WORKFLOW).split("\njobs:\n", 1)
+    if len(body) != 2:
+        die("ci-gated", f"no `jobs:` section in {CI_WORKFLOW} — the derivation is dead")
+    blocks = re.split(r"^  ([a-z][a-z0-9-]*):[ \t]*$", body[1], flags=re.M)
+    n = 0
+    for i in range(1, len(blocks), 2):
+        m = re.search(r"^    needs:\s*\[([^\]]*)\]", blocks[i + 1], re.M)
+        if m and "fast" in [x.strip() for x in m.group(1).split(",")]:
+            n += 1
+    return n or die("ci-gated", f"no job in {CI_WORKFLOW} lists `fast` in needs — dead")
+
+
 def within_one_minor(claimed: str, derived: str) -> bool:
     """kubectl is supported within ONE minor of the API server, EITHER direction.
 
@@ -271,6 +292,10 @@ CLAIM_CHECKS = [
          unit="K8S_VERSION minor from config.sh",
          hint="kubectl supports the API server within +/-1 minor; the helm-test image's "
               "kubectl is outside that window against config.sh K8S_VERSION"),
+    # "`fast` gates the four expensive jobs" — a DIFFERENT number from the one below.
+    dict(name="ci-gated", pattern=rf"\b{NUM} expensive jobs\b", context=r"fast|gate",
+         derive=derive_ci_gated_count, unit="jobs gated on `fast` in ci.yml",
+         hint="count jobs whose `needs:` includes `fast` — not the same as the total"),
     # "CI runs six jobs beyond `fast`" — a count in prose about a file in the tree.
     dict(name="ci-job-count", pattern=rf"\b{NUM} jobs beyond\b", context=r"CI|job",
          derive=derive_ci_job_count, unit="jobs in ci.yml beyond `fast`",
@@ -425,6 +450,7 @@ The GPU rule file carries three alerts.
 nine PromQL queries that also work against real hardware
 repoints every `${datasource}` reference — 33 of them on the LLM board — and drops it.
 CI runs eight jobs beyond `fast`: changes, compose, chart, image and the stack legs.
+Docs-only changes skip the cluster, and `fast` gates the five expensive jobs.
 The exporter emits 3 events per scrape, and 12 of them are dropped.\n[![Kubernetes](https://img.shields.io/badge/kubernetes-v1.36.1-326ce5.svg)](kind/gpu-sim.yaml)
 Real vLLM only ever emits one surface — `both` is a rig affordance, not a fidelity claim.\n  image: alpine/k8s:1.36.2
 """
@@ -478,7 +504,7 @@ def selftest() -> None:
     # subject (vLLM) instead of the counted noun.
     expected = {"emits": [15], "alerts": [6], "l-range": [9],
                 "promql": [9], "datasource": [33], "k8s-version": ["1.36.1"],
-                "kubectl-skew": ["1.36"], "ci-job-count": [8]}
+                "kubectl-skew": ["1.36"], "ci-job-count": [8], "ci-gated": [5]}
     for c in CLAIM_CHECKS:
         vals = [v for _, _, v in claims(c["pattern"], c["context"], "f.md",
                                         CLAIM_FIXTURE, c.get("cast", to_int))]

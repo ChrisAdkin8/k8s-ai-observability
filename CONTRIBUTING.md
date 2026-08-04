@@ -170,7 +170,7 @@ order; it has been questioned once and settled.
 - Say why in the body, not just what. The diff already says what.
 - CI must be green. Measured on run 30870290833 (2026-08-04, one run): `fast` 10s, `chart`
   15s, `image` 22s, `compose` 78s, and the two full-stack legs in parallel — `full` 6m12s,
-  `lite` 4m42s — for 6m50s of wall clock. `fast` gates the four expensive jobs, so a broken
+  `lite` 4m42s — for 6m50s of wall clock. `fast` gates the five expensive jobs, so a broken
   rule test costs seconds rather than the ~16 runner-minutes they would otherwise spend
   confirming it.
   ⚠️ ~~the two legs are ~6 minutes each, `chart` and `image` about a minute each~~

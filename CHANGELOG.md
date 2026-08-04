@@ -36,6 +36,12 @@ Comparison links are at the foot of this file, one per released version.
 
 ### Changed
 
+- **`doc-claims` now checks two CI counts, not one.** "Jobs beyond `fast`" and "expensive
+  jobs `fast` gates" are different sets — eight against five — and conflating them is the
+  easy mistake, so each has its own derivation. The second check found a stale "four" in
+  **`CLAUDE.md` and `CONTRIBUTING.md`** on its first run, one of which a manual review of
+  the same file had already missed.
+
 - **`chart-build.py` has a `--selftest`**, and it was the last script in `scripts/` without
   one — while being the script that produced the most bugs. All three were *decisions*
   rather than I/O, so the fixtures are text and lists: a regex that could not match
