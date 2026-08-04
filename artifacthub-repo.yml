@@ -24,8 +24,25 @@
 #      is still private, fix that before going near Artifact Hub, because it
 #      cannot read a private package either.
 #   2. https://artifacthub.io -> sign in -> Control Panel -> Repositories -> Add
-#        kind: Helm charts
-#        url:  oci://ghcr.io/chrisadkin8/charts/k8s-ai-observability
+#        kind:         Helm charts
+#        name:         k8s-ai-observability
+#        display name: GPU and vLLM Observability Simulation
+#        url:          oci://ghcr.io/chrisadkin8/charts/k8s-ai-observability
+#
+#      ⚠️ NAME IT AFTER THE CHART, NOT AFTER THE PUBLISHER. The publisher-style
+#      naming everyone recognises (bitnami, prometheus-community) belongs to
+#      multi-chart HTTP repositories, where one entry holds the lot. An OCI entry
+#      maps to ONE chart, so a publisher name would be spent on this chart alone
+#      and the next one would need a second entry under a different scheme. The
+#      cost is a stutter in the URL
+#      (/packages/helm/k8s-ai-observability/k8s-ai-observability), which is
+#      cosmetic and common — cert-manager/cert-manager reads the same way.
+#
+#      The display name is the one line a stranger reads before deciding to
+#      click, so it says what this is rather than repeating the slug. No em
+#      dashes: CLAUDE.md rule 13 covers catalog pages and this is one.
+#      Both names were free on 2026-08-04 (checked via the Artifact Hub API).
+#      Assume the name is PERMANENT — whether it can be renamed is unconfirmed.
 #   3. The repository's CARD then shows an `ID` (a UUID). That is the value.
 #      Put it in repositoryID below and commit.
 #   4. Push the ownership artefact. The workflow does this on every publish, but
