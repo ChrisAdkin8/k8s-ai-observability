@@ -20,16 +20,19 @@ step, and this is the copy the verification below actually runs against:
 
 ```sh
 helm install rig oci://ghcr.io/chrisadkin8/charts/k8s-ai-observability \
-  --version 0.2.1 \
+  --version 0.2.3 \
   --set releaseLabel=<your monitoring release>
 helm test rig --logs                              # ← do not skip this
 ```
 
-> ⚠️ **Use 0.2.1, not 0.2.0.** 0.2.0 was the first version published and installs fine, but
-> `helm test --logs` exits 1 on it even when every precondition passes — Helm tries to read
-> pod logs from the test's ServiceAccount. A green result reported as red, on the command
-> this page tells you to run. Registry versions are immutable, so 0.2.0 stays where it is
-> and 0.2.1 supersedes it.
+> ⚠️ **Take the newest version.** Registry versions are immutable, so earlier ones stay
+> published with their faults rather than being replaced:
+>
+> | | |
+> |--|--|
+> | `0.2.0` | `helm test --logs` exits 1 even when every precondition passes — Helm tries to read pod logs from the test's ServiceAccount. A green result reported as red, on the command this page tells you to run. |
+> | `0.2.1` | fixes that, but the test greps an 18.7 kB scrape through a pipe, which under `pipefail` can report a present metric as missing. |
+> | `0.2.2`, `0.2.3` | both fixed. |
 
 **If you want to CHANGE this** — build it locally. `task chart` is not going away and is
 not replaced by the published artefact; it is how you test a template edit:

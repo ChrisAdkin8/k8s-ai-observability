@@ -23,6 +23,21 @@ Comparison links are at the foot of this file, one per released version.
 
 ## [Unreleased]
 
+## [0.9.1] — 2026-08-04
+
+**Documentation and tooling only.** `0.9.0` fixed the verifiers; this writes down how they
+are meant to be used, and closes the last gaps a critical read of the standing law turned
+up. Nothing a cluster can see moved — no metric, recording rule, alert, dashboard `uid`,
+profile, chart template or Terraform input — which is what makes it a PATCH by this file's
+own table.
+
+The theme is that several things this repo does constantly had never been written down.
+The release procedure lived in commit messages, after three of four releases in one day hit
+a bug in the procedure rather than in the code. *An assertion that only ever passes is not
+an assertion* appeared in four files and not in `CLAUDE.md`, while being the most applied
+idea in the repo. And the one script that decides what gets published was the only one
+without a selftest.
+
 ### Added
 
 - **`docs/releasing.md`** — the release procedure, which existed only in commit messages.
@@ -35,6 +50,11 @@ Comparison links are at the foot of this file, one per released version.
   dashboard ids and metric counts, and the derivation was already there.
 
 ### Changed
+
+- **Chart `0.2.2` → `0.2.3`.** No template changed; the version moves because a release
+  publishes the chart either way and a registry version cannot be re-used. The chart README
+  now names the current version and tabulates what is wrong with each earlier one, since
+  immutability means they stay published rather than being replaced.
 
 - **`CLAUDE.md` gains the principle the repo actually runs on.** *An assertion that only
   ever passes is not an assertion* appeared in `CONTRIBUTING.md`, `docs/ci.md` and two
@@ -1795,7 +1815,8 @@ Initial public release. Build and test GPU and LLM observability without a GPU.
   a GPU, running the advertised `task local:up` end to end including every acceptance
   check, with a diagnostics bundle on failure and weekly upstream-drift detection.
 
-[Unreleased]: https://github.com/ChrisAdkin8/k8s-ai-observability/compare/v0.9.0...HEAD
+[Unreleased]: https://github.com/ChrisAdkin8/k8s-ai-observability/compare/v0.9.1...HEAD
+[0.9.1]: https://github.com/ChrisAdkin8/k8s-ai-observability/compare/v0.9.0...v0.9.1
 [0.9.0]: https://github.com/ChrisAdkin8/k8s-ai-observability/compare/v0.8.0...v0.9.0
 [0.8.0]: https://github.com/ChrisAdkin8/k8s-ai-observability/compare/v0.7.1...v0.8.0
 [0.7.1]: https://github.com/ChrisAdkin8/k8s-ai-observability/compare/v0.7.0...v0.7.1
