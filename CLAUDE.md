@@ -84,7 +84,10 @@ rig knows the right answer.
 - **Cluster loop:** phase 1 `terraform apply` / `kind-up.sh`, phase 2
   `./scripts/install.sh <eks|gke|local> [--skip-monitoring]`, then `./scripts/verify.sh`.
   `LITE=1` fits a 4 GiB runtime. `KPS_RELEASE=<name>` for BYO Prometheus.
-- **CI:** the two kind legs (`full`, `lite`) are required checks — matrix values are part
+- **CI:** the two kind legs (`full`, `lite`) and `chart on kind` are required checks, along
+  with `fast`. The names live in the ruleset AND in `.github/required-checks.txt`; change
+  the ruleset first, then record it, or `settings-drift` reports the disagreement. Matrix
+  values are part
   of the name. Docs-only changes skip the cluster, and `fast` gates the four expensive
   jobs. Measured on run 30870290833 (2026-08-04, one run): `full` 6m12s, `lite` 4m42s,
   whole workflow 6m50s; `verify.sh` itself 215s and 160s. Quote the run id with any

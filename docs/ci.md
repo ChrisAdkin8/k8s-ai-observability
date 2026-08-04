@@ -219,12 +219,13 @@ to poll rather than single-shot, which is now iron rule 5.
 name: full stack on kind (${{ matrix.profile }})
 ```
 
-This produces two separate status checks, and the branch ruleset on `main` requires three
+This produces two separate status checks, and the branch ruleset on `main` requires four
 things by name:
 
 - `selftest + rule tests + shell syntax`
 - `full stack on kind (full)`
 - `full stack on kind (lite)`
+- `chart on kind (helm test, foreign Prometheus)`
 
 Two consequences follow, and both have teeth.
 

@@ -23,6 +23,42 @@ Comparison links are at the foot of this file, one per released version.
 
 ## [Unreleased]
 
+## [0.9.0] — 2026-08-04
+
+**This release is about the verifiers, not the thing they verify.** Four bugs surfaced in a
+single day and every one of them was in code whose job is to check other code: `helm test`
+reporting a passing chart as a failure, a version guard colliding with the release it
+gated, an archive check failing on a correct archive, and two CI assertions that could only
+ever fail open. In a repo whose product is verification, that is the part that had been
+held to the lowest standard, because nothing verified it.
+
+So the fixes come with the machinery that stops them recurring. `check-sigpipe.py` makes an
+entire failure class mechanical. `chart on kind` runs the chart's own `helm test` on every
+pull request instead of only at release time, which is how the defect in chart `0.2.0`
+reached the registry. `docs/ci.md` gives the pipeline a page of its own, and `doc-claims`
+now checks that page against the workflow that generates it.
+
+MINOR by this file's table. Nothing an existing cluster can see moved: no metric, recording
+rule, alert, dashboard `uid`, profile or Terraform input. `verify.sh` asserts exactly what
+it asserted before; it just refuses to spend 24 minutes doing so when the answer is already
+determined. The argument-parsing change is the only one a user can notice, and it rejects
+input that was previously ignored.
+
+### Added
+
+- **`chart on kind (helm test, foreign Prometheus)` is a required check.** The chart's own
+  verification now runs on every pull request against a kube-prometheus-stack installed
+  under a name this repo would never choose, asserting both that `helm test` **fails** on a
+  mismatched `releaseLabel` and that it passes when set. The steps live in a composite
+  action shared with `publish-chart.yml`, so the local build and the published artefact are
+  checked by one implementation rather than two copies.
+- **`scripts/check-sigpipe.py`**, which finds pipes whose consumer stops reading before the
+  producer finishes. Every hit is rewritten or carries a written justification.
+- **[`docs/ci.md`](docs/ci.md)** — what CI proves, how `full` and `lite` differ, and why the
+  check names are load-bearing.
+- **`.github/required-checks.txt`** plus the `branch ruleset vs required-checks.txt` job,
+  which together close a coupling that previously existed only in GitHub settings.
+
 ### Fixed
 
 - **Nothing on a pull request ever installed the chart, so `helm test` only ran at release
@@ -1720,7 +1756,8 @@ Initial public release. Build and test GPU and LLM observability without a GPU.
   a GPU, running the advertised `task local:up` end to end including every acceptance
   check, with a diagnostics bundle on failure and weekly upstream-drift detection.
 
-[Unreleased]: https://github.com/ChrisAdkin8/k8s-ai-observability/compare/v0.8.0...HEAD
+[Unreleased]: https://github.com/ChrisAdkin8/k8s-ai-observability/compare/v0.9.0...HEAD
+[0.9.0]: https://github.com/ChrisAdkin8/k8s-ai-observability/compare/v0.8.0...v0.9.0
 [0.8.0]: https://github.com/ChrisAdkin8/k8s-ai-observability/compare/v0.7.1...v0.8.0
 [0.7.1]: https://github.com/ChrisAdkin8/k8s-ai-observability/compare/v0.7.0...v0.7.1
 [0.7.0]: https://github.com/ChrisAdkin8/k8s-ai-observability/compare/v0.6.0...v0.7.0

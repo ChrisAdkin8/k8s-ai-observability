@@ -34,3 +34,4 @@
 selftest + rule tests + shell syntax
 full stack on kind (full)
 full stack on kind (lite)
+chart on kind (helm test, foreign Prometheus)
