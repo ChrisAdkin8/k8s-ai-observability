@@ -24,7 +24,7 @@ rig knows the right answer.
 | `charts/` + `scripts/chart-build.py` | Helm chart, assembled into gitignored `dist/` |
 | `terraform/{eks,gke}` + `terraform/modules/contract` | clusters; `contract` holds **cross-cloud identity constants only** — sizing stays in the roots |
 | `kind/gpu-sim.yaml` | local cluster — **single node** |
-| `Taskfile.yml` | `task selftest` / `rule-tests` / `drift-test` / `chart` / `dashboards` / `compose` |
+| `Taskfile.yml` | **`task preflight`** is the gate before landing; also `selftest`, `compose-selftest`, `doc-claims`, `sigpipe`, `rule-tests`, `drift-test`, `chart`, `dashboards`, `compose`, `outstanding` |
 
 ## Iron rules
 
@@ -55,8 +55,9 @@ rig knows the right answer.
    ConfigMap is rebuilt from the file on every install). grafana.com uploads are *derived*
    (`task dashboards`); published ids are GPU **25618**, LLM **25620** — republish as a
    **revision** of the same id, never a new upload.
-10. **`install.sh` flags are positional with strict unknown-argument rejection** — a typo'd
-    flag must fail loudly, not silently do the non-flag thing.
+10. **`install.sh` and `teardown.sh` flags are positional, and EVERY unrecognised argument
+    is rejected** — a typo'd flag must fail loudly, not silently do the non-flag thing.
+    Checking only `$2` is how `--lite` was accepted and ignored.
 11. **One logical change per commit** (`CONTRIBUTING.md`). Subjects state the change; bodies
     carry the reasoning — the commit log is part of the documentation.
 12. **Docs drift is a known failure class.** Counts ("emits N metrics", "N jobs") and ids
@@ -82,6 +83,12 @@ rig knows the right answer.
     word-split unquoted parameters, so a test harness passed `"local --skip-monitoring"` as
     ONE argument and a passing script looked broken. **Test shell with `bash -c`**, never
     interactively. `check-sigpipe.py` covers the first class; nothing covers the second.
+
+18. **An assertion that only ever passes is not an assertion.** Before trusting a new
+    check, break what it watches and confirm it goes red — then fix it. Every `--selftest`
+    here pins bugs that were reintroduced deliberately to prove it fails on them, and CI
+    drives the chart's render-time assertions and `helm test`'s negative case to failure on
+    purpose. A check that has never failed is a guess.
 
 ## Working loop
 

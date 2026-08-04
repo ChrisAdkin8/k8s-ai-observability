@@ -36,6 +36,13 @@ Comparison links are at the foot of this file, one per released version.
 
 ### Changed
 
+- **`CLAUDE.md` gains the principle the repo actually runs on.** *An assertion that only
+  ever passes is not an assertion* appeared in `CONTRIBUTING.md`, `docs/ci.md` and two
+  workflows — everywhere except the file loaded into every session — while being the most
+  applied idea of the day: render-time assertions driven to failure, `helm test` required
+  to fail on the default `releaseLabel`, `check-sigpipe` broken four ways, and both
+  historical `chart-build.py` bugs reintroduced to prove its new selftest catches them.
+
 - **`doc-claims` now checks two CI counts, not one.** "Jobs beyond `fast`" and "expensive
   jobs `fast` gates" are different sets — eight against five — and conflating them is the
   easy mistake, so each has its own derivation. The second check found a stale "four" in
