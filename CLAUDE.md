@@ -84,12 +84,15 @@ rig knows the right answer.
 - **Cluster loop:** phase 1 `terraform apply` / `kind-up.sh`, phase 2
   `./scripts/install.sh <eks|gke|local> [--skip-monitoring]`, then `./scripts/verify.sh`.
   `LITE=1` fits a 4 GiB runtime. `KPS_RELEASE=<name>` for BYO Prometheus.
-- **CI:** the two kind legs (`full`, `lite`) are **not** equal and `lite` is the critical
-  path — measured across three runs on 2026-08-04, `full` took 5m19s-6m25s and `lite`
-  6m39s-8m32s, all of the difference being inside `verify.sh`. Their names are required
-  checks — matrix values are part of the name. Docs-only changes skip the cluster.
-  ⚠️ That measurement predates the poll-budget and port-forward fixes and **still needs**
-  re-deriving from a run after those land.
+- **CI:** the two kind legs (`full`, `lite`) are required checks — matrix values are part
+  of the name. Docs-only changes skip the cluster, and `fast` gates the four expensive
+  jobs. Measured on run 30870290833 (2026-08-04, one run): `full` 6m12s, `lite` 4m42s,
+  whole workflow 6m50s; `verify.sh` itself 215s and 160s. Quote the run id with any
+  figure you take from here.
+  ⚠️ ~~the two legs run ~5.5 minutes each~~ **DONE — wrong twice over. They were never
+  equal, and until the port-forward fix `lite` was the SLOWER leg (6m39s-8m32s against
+  `full`'s 5m19s-6m25s) despite installing less. Both re-derived 2026-08-04 from run
+  30870290833; `verify.sh` on `lite` went 383s → 160s.**
 - **Review discipline:** specs and plans get **one adversarial review round, then
   implementation** — after one round the remaining risk is empirical (a timing, a default,
   a command's exact syntax) and a desk can't settle it; the first hours of implementation

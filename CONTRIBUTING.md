@@ -163,14 +163,16 @@ order; it has been questioned once and settled.
 - One logical change per commit. If two things are genuinely independent, they are two
   commits, even when they arrive together.
 - Say why in the body, not just what. The diff already says what.
-- CI must be green. Measured across three runs on 2026-08-04: `fast` 9-12s, `chart` 10-14s,
-  `image` 19-36s, `compose` 61-78s, and the two full-stack legs in parallel — `full`
-  5m19s-6m25s, `lite` 6m39s-8m32s. **`lite` is the critical path, not `full`**, which is
-  backwards for a profile that installs less; all of the difference is inside `verify.sh`.
-  `fast` now gates the four expensive jobs, so a broken rule test costs seconds rather than
-  the ~14 runner-minutes the two legs would otherwise spend confirming it.
-  ⚠️ This measurement predates the poll-budget and port-forward fixes and **still needs**
-  re-deriving once those land.
+- CI must be green. Measured on run 30870290833 (2026-08-04, one run): `fast` 10s, `chart`
+  15s, `image` 22s, `compose` 78s, and the two full-stack legs in parallel — `full` 6m12s,
+  `lite` 4m42s — for 6m50s of wall clock. `fast` gates the four expensive jobs, so a broken
+  rule test costs seconds rather than the ~16 runner-minutes they would otherwise spend
+  confirming it.
+  ⚠️ ~~the two legs are ~6 minutes each, `chart` and `image` about a minute each~~
+  **DONE — every one of those was wrong. Re-derived 2026-08-04 from run 30870290833.
+  Before the port-forward fix `lite` was the SLOWER leg at 6m39s-8m32s, which is backwards
+  for a profile that drops Alertmanager, kube-state-metrics, node-exporter and ~100 rules;
+  "each" was what hid it.**
 
 ## What is deliberately out of scope
 

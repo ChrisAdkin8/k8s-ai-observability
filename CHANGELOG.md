@@ -23,6 +23,20 @@ Comparison links are at the foot of this file, one per released version.
 
 ## [Unreleased]
 
+## [0.7.1] — 2026-08-04
+
+**This release makes the acceptance suite tell the truth about its own clock.** Every
+timeout `verify.sh` printed was roughly half the one it granted, and ~60% of a run was
+spent asleep — both because a port-forward that was written to be reused was rebuilt on
+every single query. The rig that exists to catch instruments lying about the world had an
+instrument lying about itself.
+
+⚠️ **Nothing here changes what a cluster looks like.** No metric, recording rule, alert,
+dashboard `uid`, profile, chart template or Terraform input moved; `manifests/`, `charts/`,
+`helm/`, `terraform/` and `kind/` are untouched. `verify.sh` asserts exactly what it
+asserted before, on the same objects, with the same expressions. It is a PATCH by this
+file's own table.
+
 ### Fixed
 
 - **`verify.sh` rebuilt its Prometheus port-forward on every single query, and slept 4s
@@ -78,8 +92,16 @@ Comparison links are at the foot of this file, one per released version.
   and **fails**: the age at convergence spreads 188s to 391s. What survives is that `lite`
   converges at 284-391s of simulator age against `full`'s 188-254s — consistently later,
   non-overlapping, across three runs, through a mechanism none of the instrument-level
-  explanations covers. ⚠️ The cause **remains unproven**, and the instrumentation exists so
-  the next slow leg answers it instead of needing a rerun to reproduce.
+  explanations covers.
+
+  ⚠️ **The first post-fix run points at the leak itself, and that is one run, not a
+  proof.** On run 30870290833 L8 converged in **0s on both legs** — it passed on the first
+  poll — and `lite` got there at 177s of simulator age, below its own previous 284-391s
+  band and below even `full`'s previous 188-254s. The mechanism that would explain it is
+  the orphaned port-forward per query: ~37 abandoned SPDY streams accumulating against a
+  Prometheus capped at 512Mi with a 100m CPU request is a load `full` (2Gi, 250m) would
+  absorb and `lite` would not. Plausible, consistent, and **still unproven** on a single
+  observation. The instrumentation stays, and the next slow leg settles it.
 
 ### Changed
 
@@ -100,9 +122,29 @@ Comparison links are at the foot of this file, one per released version.
   which is the whole reason it is not `failure()`.
 
 - **The CI timings in `CLAUDE.md` and `CONTRIBUTING.md` were wrong in the same direction.**
-  Both said the two kind legs take ~5.5-6 minutes *each*. Measured: `full` 5m19s-6m25s,
-  `lite` 6m39s-8m32s. **`lite` is the critical path**, which is backwards for a profile that
-  installs less, and every second of the difference is inside `verify.sh`.
+  Both said the two kind legs take ~5.5-6 minutes *each*, and `CONTRIBUTING` priced `chart`
+  and `image` at "about a minute each" against a real 15s and 22s. The word doing the damage
+  was **"each"**: it averaged away the fact that `lite` was the SLOWER leg at 6m39s-8m32s
+  against `full`'s 5m19s-6m25s, which is backwards for a profile that drops Alertmanager,
+  kube-state-metrics, node-exporter and ~100 rules. Nobody had noticed the trimmed profile
+  was the critical path because no figure in the repo distinguished the two.
+
+  Both files now carry the post-fix measurement from run 30870290833 with its run id, and
+  the superseded claims are struck rather than deleted.
+
+### Measured
+
+The effect of the two `verify.sh` fixes, `full` / `lite`, before → after:
+
+| | before | after |
+|--|--|--|
+| `verify.sh` duration | 247.0s / 383.3s | **215.4s / 160.0s** |
+| L8 convergence | 12.1s / up to 201.7s | **0s / 0s** |
+| stack job | 5m19s-6m25s / 6m39s-8m32s | **6m12s / 4m42s** |
+| whole workflow | 7m02s-8m47s | **6m50s** |
+
+Before is three runs (30866321783, 30867055387, 30867572482); after is one
+(30870290833). `lite` stops being the critical path.
 
 ## [0.7.0] — 2026-08-04
 
@@ -1500,7 +1542,8 @@ Initial public release. Build and test GPU and LLM observability without a GPU.
   a GPU, running the advertised `task local:up` end to end including every acceptance
   check, with a diagnostics bundle on failure and weekly upstream-drift detection.
 
-[Unreleased]: https://github.com/ChrisAdkin8/k8s-ai-observability/compare/v0.7.0...HEAD
+[Unreleased]: https://github.com/ChrisAdkin8/k8s-ai-observability/compare/v0.7.1...HEAD
+[0.7.1]: https://github.com/ChrisAdkin8/k8s-ai-observability/compare/v0.7.0...v0.7.1
 [0.7.0]: https://github.com/ChrisAdkin8/k8s-ai-observability/compare/v0.6.0...v0.7.0
 [0.6.0]: https://github.com/ChrisAdkin8/k8s-ai-observability/compare/v0.5.0...v0.6.0
 [0.5.0]: https://github.com/ChrisAdkin8/k8s-ai-observability/compare/v0.4.0...v0.5.0
