@@ -31,10 +31,21 @@ metadata:
   namespace: {{ .Release.Namespace }}
   labels:
     {{- include "k8s-ai-observability.labels" . | nindent 4 }}
-  annotations:
-    helm.sh/hook: test
-    helm.sh/hook-weight: "-5"
-    helm.sh/hook-delete-policy: before-hook-creation,hook-succeeded
+  # ⚠️ DELIBERATELY NOT `helm.sh/hook: test`, AND IT USED TO BE.
+  # `helm test --logs` fetches logs for EVERY resource carrying the test hook,
+  # BY NAME AND AS IF IT WERE A POD. These three are named <fullname>-test while
+  # the Pod is <fullname>-test-preconditions, so Helm looked for a pod that never
+  # existed and turned a PASSING test into:
+  #
+  #   Phase: Succeeded   (x4)
+  #   Error: unable to get pod logs for <fullname>-test: pods ... not found
+  #   exit 1
+  #
+  # A green result reported as red, on the exact command the chart README tells
+  # people to run. Found on the first publish that ran `helm test` in CI.
+  #
+  # Plain resources are also the right lifecycle: they belong to the release, so
+  # `helm uninstall` removes them. As hooks they leaked past uninstall instead.
 ---
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRole
@@ -42,10 +53,21 @@ metadata:
   name: {{ $sa }}
   labels:
     {{- include "k8s-ai-observability.labels" . | nindent 4 }}
-  annotations:
-    helm.sh/hook: test
-    helm.sh/hook-weight: "-5"
-    helm.sh/hook-delete-policy: before-hook-creation,hook-succeeded
+  # ⚠️ DELIBERATELY NOT `helm.sh/hook: test`, AND IT USED TO BE.
+  # `helm test --logs` fetches logs for EVERY resource carrying the test hook,
+  # BY NAME AND AS IF IT WERE A POD. These three are named <fullname>-test while
+  # the Pod is <fullname>-test-preconditions, so Helm looked for a pod that never
+  # existed and turned a PASSING test into:
+  #
+  #   Phase: Succeeded   (x4)
+  #   Error: unable to get pod logs for <fullname>-test: pods ... not found
+  #   exit 1
+  #
+  # A green result reported as red, on the exact command the chart README tells
+  # people to run. Found on the first publish that ran `helm test` in CI.
+  #
+  # Plain resources are also the right lifecycle: they belong to the release, so
+  # `helm uninstall` removes them. As hooks they leaked past uninstall instead.
 rules:
   # Read-only, and scoped to exactly what the assertions below inspect. The
   # services/proxy verb is what lets this scrape the simulator through the
@@ -73,10 +95,21 @@ metadata:
   name: {{ $sa }}
   labels:
     {{- include "k8s-ai-observability.labels" . | nindent 4 }}
-  annotations:
-    helm.sh/hook: test
-    helm.sh/hook-weight: "-5"
-    helm.sh/hook-delete-policy: before-hook-creation,hook-succeeded
+  # ⚠️ DELIBERATELY NOT `helm.sh/hook: test`, AND IT USED TO BE.
+  # `helm test --logs` fetches logs for EVERY resource carrying the test hook,
+  # BY NAME AND AS IF IT WERE A POD. These three are named <fullname>-test while
+  # the Pod is <fullname>-test-preconditions, so Helm looked for a pod that never
+  # existed and turned a PASSING test into:
+  #
+  #   Phase: Succeeded   (x4)
+  #   Error: unable to get pod logs for <fullname>-test: pods ... not found
+  #   exit 1
+  #
+  # A green result reported as red, on the exact command the chart README tells
+  # people to run. Found on the first publish that ran `helm test` in CI.
+  #
+  # Plain resources are also the right lifecycle: they belong to the release, so
+  # `helm uninstall` removes them. As hooks they leaked past uninstall instead.
 roleRef:
   apiGroup: rbac.authorization.k8s.io
   kind: ClusterRole

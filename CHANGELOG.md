@@ -25,6 +25,30 @@ Comparison links are at the foot of this file, one per released version.
 
 ### Fixed
 
+- **`helm test --logs` reported a passing chart as a failure — chart `0.2.0` → `0.2.1`.**
+  The test's ServiceAccount, ClusterRole and ClusterRoleBinding carried
+  `helm.sh/hook: test`, and `helm test --logs` fetches logs for *every* resource with that
+  hook, by name, as though it were a Pod. They are named `<fullname>-test` while the Pod is
+  `<fullname>-test-preconditions`, so Helm looked for a pod that never existed:
+
+  ```
+  Phase: Succeeded   (x4)
+  Error: unable to get pod logs for rig-k8s-ai-observability-test: pods ... not found
+  exit 1
+  ```
+
+  Every precondition had passed. This is the exact command the chart README tells people to
+  run, so the first thing a new user would have seen is a red result on a working install.
+  The three RBAC objects are now plain release resources, which is also the right lifecycle
+  — `helm uninstall` removes them, where as hooks they leaked past uninstall.
+
+  ⚠️ **`0.2.0` remains published and is not withdrawn.** Registry versions are immutable;
+  it installs correctly and only mis-reports `helm test --logs`. `0.2.1` supersedes it.
+
+  Found by the publish workflow's own verify job, which is the first thing in this repo's
+  history to run `helm test` in CI. Every previous run of it was by hand, where the exit
+  code was read by a human who had already seen `ALL PRECONDITIONS PASSED` scroll past.
+
 - **The chart publish failed on its first real run, on an archive that was correct.** The
   step that opens the packaged `.tgz` to prove the dashboards are inside piped `tar tzf`
   into `head`, and under `set -o pipefail` the consumer exits first, SIGPIPEs `tar` and

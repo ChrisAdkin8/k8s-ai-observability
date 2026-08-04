@@ -20,16 +20,16 @@ step, and this is the copy the verification below actually runs against:
 
 ```sh
 helm install rig oci://ghcr.io/chrisadkin8/charts/k8s-ai-observability \
-  --version 0.2.0 \
+  --version 0.2.1 \
   --set releaseLabel=<your monitoring release>
 helm test rig --logs                              # ← do not skip this
 ```
 
-> ⚠️ **Not published yet.** The workflow that pushes it
-> ([`publish-chart.yml`](../../.github/workflows/publish-chart.yml)) runs on a release tag,
-> and `0.2.0` will be the first version to exist. Until that tag is cut, use the
-> contributor path below. This block is written out rather than held back so the two
-> audiences are visibly different things, and it is marked rather than quietly aspirational.
+> ⚠️ **Use 0.2.1, not 0.2.0.** 0.2.0 was the first version published and installs fine, but
+> `helm test --logs` exits 1 on it even when every precondition passes — Helm tries to read
+> pod logs from the test's ServiceAccount. A green result reported as red, on the command
+> this page tells you to run. Registry versions are immutable, so 0.2.0 stays where it is
+> and 0.2.1 supersedes it.
 
 **If you want to CHANGE this** — build it locally. `task chart` is not going away and is
 not replaced by the published artefact; it is how you test a template edit:
