@@ -144,6 +144,23 @@ def derive_k8s_minor() -> str:
                                     "no K8S_VERSION in config.sh — the derivation is dead")
 
 
+def within_one_minor(claimed: str, derived: str) -> bool:
+    """kubectl is supported within ONE minor of the API server, EITHER direction.
+
+    This is the one check that is not an equality, and deliberately so: equality would
+    assert something stricter than the truth. 1.35 against a 1.36 cluster is supported,
+    so failing it would be a false alarm, and it would also make the pin unsatisfiable
+    on any day the image publisher has not yet cut the exact matching minor. The bug
+    this check exists for — 1.31 against 1.36, five minors out — is caught either way.
+    """
+    try:
+        (cmaj, cmin), (dmaj, dmin) = (tuple(int(x) for x in s.split("."))
+                                      for s in (claimed, derived))
+    except ValueError:
+        return False
+    return cmaj == dmaj and abs(cmin - dmin) <= 1
+
+
 def derive_kind_node_version() -> str:
     """The pinned kind node image — the version the README's badge asserts.
 
@@ -185,13 +202,20 @@ CLAIM_CHECKS = [
     dict(name="k8s-version", pattern=r"(?:kubernetes-|kindest/node:)v([\d.]+)", context=r".",
          derive=derive_kind_node_version, cast=str, unit="pinned kind node image",
          hint="the badge and docs/versions.md must both match kind/gpu-sim.yaml"),
-    # The chart's test image carries a kubectl; its MINOR must match the cluster the
-    # repo pins. Captures "1.36" out of "registry.k8s.io/kubectl:v1.36.2".
+    # The chart's test image carries a kubectl; its MINOR must stay inside Kubernetes'
+    # supported window around the cluster the repo pins. Captures "1.36" out of
+    # "alpine/k8s:1.36.2" or "registry.k8s.io/kubectl:v1.36.2".
+    #
+    # ⚠️ The ONLY non-equality check here. `ok` widens it to the +/-1 minor Kubernetes
+    # actually supports, because equality would fail a supported 1.35 and could be
+    # unsatisfiable when the image publisher has not cut the matching minor yet.
     dict(name="kubectl-skew",
          pattern=r"(?:alpine/k8s|kubectl):v?(\d+\.\d+)\.\d+", context=r"image",
          derive=derive_k8s_minor, cast=str, extra=["charts/k8s-ai-observability/values.yaml"],
+         ok=within_one_minor, relation="are within +/-1 minor of",
          unit="K8S_VERSION minor from config.sh",
-         hint="the helm-test image's kubectl minor must track config.sh K8S_VERSION"),
+         hint="kubectl supports the API server within +/-1 minor; the helm-test image's "
+              "kubectl is outside that window against config.sh K8S_VERSION"),
     dict(name="datasource", pattern=rf"\b{NUM} of them\b", context=r"datasource",
          derive=derive_datasource_refs, unit="${datasource} refs on the LLM board",
          hint="count them in manifests/dashboards/llm-sim-overview.json"),
@@ -267,13 +291,17 @@ def main() -> None:
             die(c["name"], f'no claim matched /{c["pattern"]}/ anywhere — the check is '
                            f"dead. If the wording changed, teach the pattern the new one.")
         actual = c["derive"]()
-        wrong = [(p, n, v) for p, n, v in found if v != actual]
+        # Equality unless the check says otherwise — see kubectl-skew, the one place
+        # where the true invariant is a window rather than a point.
+        ok = c.get("ok", lambda v, a: v == a)
+        relation = c.get("relation", "match")
+        wrong = [(p, n, v) for p, n, v in found if not ok(v, actual)]
         if wrong:
             for p, n, v in wrong:
                 print(f"  {p}:{n}: claims {v}; derived {actual} ({c['unit']})",
                       file=sys.stderr)
             die(c["name"], f"prose drifted from code — {c['hint']}")
-        print(f"  ok  {c['name']:<10} {len(found):>3} claim(s) match the derived "
+        print(f"  ok  {c['name']:<10} {len(found):>3} claim(s) {relation} the derived "
               f"{actual} ({c['unit']})")
 
 
@@ -330,6 +358,14 @@ def selftest() -> None:
                                         CLAIM_FIXTURE, c.get("cast", to_int))]
         assert vals == expected[c["name"]], (c["name"], vals)
         print(f"  ok  {c['name']:<10} extracted {vals} from the fixture, decoys ignored")
+
+    # ⚠️ The skew window's EDGES, which is the whole reason it is not an equality. The
+    # bug it exists for (1.31 vs 1.36) must still fail, and a supported neighbour must
+    # not. A malformed or major-crossing value fails closed rather than raising.
+    assert all(within_one_minor(v, "1.36") for v in ("1.35", "1.36", "1.37"))
+    assert not any(within_one_minor(v, "1.36")
+                   for v in ("1.34", "1.38", "1.31", "2.36", "latest", "1"))
+    print("  ok  skew       1.35/1.36/1.37 supported; 1.34, 1.38, 1.31 and junk rejected")
 
     assert to_int("six") == 6 and to_int("33") == 33
     assert claims(CLAIM_CHECKS[1]["pattern"], CLAIM_CHECKS[1]["context"],
