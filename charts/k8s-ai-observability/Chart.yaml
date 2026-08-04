@@ -13,7 +13,7 @@ type: application
 #                silently wrong. `task chart` and the publish workflow both
 #                cross-check it against the release tag rather than trusting it.
 version: 0.1.0
-appVersion: "v0.6.0"
+appVersion: "v0.7.0"
 
 home: https://github.com/ChrisAdkin8/k8s-ai-observability
 sources:
