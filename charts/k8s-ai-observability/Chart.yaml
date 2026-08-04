@@ -50,7 +50,7 @@ type: application
 # independence above stays visible at a glance, and deliberately not 1.0.0 while
 # artifacthub.io/prerelease below is still "true".
 version: 0.2.2
-appVersion: "v0.8.0"
+appVersion: "v0.9.0"
 
 home: https://github.com/ChrisAdkin8/k8s-ai-observability
 sources:
