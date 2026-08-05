@@ -77,12 +77,14 @@ compose/.generated/
 # each board in the repo, which is the drift the single-artefact design avoids.
 dist/
 
-# Raw screen captures. `demo.mp4` IS tracked — it is the walkthrough the README links, and
-# at ~6 MB it is a reasonable thing to clone. The master it was encoded from is not: a
-# retina `Cmd+Shift+5` capture of a six-minute run is ~74 MB, and git keeps it forever even
-# after a later commit deletes it. Ignoring the CONTAINER rather than a filename, because
-# the name is whatever the recorder chose that day; a `.mov` here is always a capture.
+# Raw screen captures and the intermediate encodes between them. `demo.gif` is the only
+# tracked artefact: GitHub's blob viewer will not display a committed video, so an .mp4
+# here plays nowhere and has no reason to be committed. The master is worse again, a
+# retina `Cmd+Shift+5` capture of a six-minute run being ~74 MB, and git keeps it forever
+# even after a later commit deletes it. Ignoring CONTAINERS rather than filenames, because
+# the name is whatever the recorder chose that day.
 *.mov
+*.mp4
 
 # OS / editor cruft
 .DS_Store

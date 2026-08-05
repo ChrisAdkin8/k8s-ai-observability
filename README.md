@@ -32,9 +32,11 @@ task local:grafana   # holds one port-forward, opens both boards on localhost:30
 task local:destroy   # prompts, then removes everything
 ```
 
-[Watch the first two of those run end to end](demo.mp4) (45s, sped up 4x with the waiting
-trimmed out): the kind cluster coming up, the stack installing, the acceptance checks
-reporting PASS, then both boards live in the browser.
+![task local:up: a kind cluster comes up, the stack installs, then verify.sh reports PASS
+across every acceptance check and both Grafana boards render with live data](demo.gif)
+
+The install is fast-forwarded. `verify.sh` runs at the recording's own pace, because the
+checks are the point.
 
 There's no cloud account, no credentials, no `terraform.tfvars` and no spend. `local` is
 not a reduced-fidelity preview: it runs the same manifests, the same pinned charts and the

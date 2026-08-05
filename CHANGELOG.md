@@ -25,11 +25,23 @@ Comparison links are at the foot of this file, one per released version.
 
 ### Added
 
-- **`demo.mp4` — a 45s walkthrough of `task local:up && task local:grafana`**, linked from
+- **`demo.gif` — a 29s walkthrough of `task local:up && task local:grafana`**, embedded in
   the README's "Try it". It is that section's six-minute claim shown rather than asserted:
   the kind cluster coming up, the stack installing, `verify.sh` reporting PASS, then both
-  boards live in the browser. 74 MB down to 4.5 MB, at 4x speed and half resolution, with
-  the waiting cut out.
+  boards live in the browser. 74 MB down to 3.0 MB.
+
+  **A GIF rather than an MP4, and not by preference.** GitHub's blob viewer refuses to
+  display a committed video at this size — *"Sorry about that, but we can't show files that
+  are this big right now"* at 4.51 MB — so a linked `.mp4` in the repo plays nowhere. The
+  alternative, an externally hosted attachment URL, renders only on github.com and dies on
+  a mirror. A GIF embeds as an ordinary image, which is a different code path from the blob
+  viewer and works wherever the README does.
+
+  The install is fast-forwarded 6x and the `verify.sh` cascade left at the recording's own
+  pace, which is what makes the size work: a GIF costs bytes per *changing* frame, so the
+  scrolling Helm output was most of the file and the least of the argument. Straight
+  conversion was 5.81 MB; fast-forwarding the install brought it to 3.02 MB with the whole
+  narrative intact, where cutting the section outright would have lost it.
 
   **The source was 416 seconds holding 722 distinct frames**, because a macOS capture only
   writes a frame when the screen changes. So the gaps between frame timestamps *are* the
@@ -40,10 +52,7 @@ Comparison links are at the foot of this file, one per released version.
   inside a gap, so only duplicate hold frames were removed. The last 7 seconds went too,
   being the mouse travelling to the Stop Screen Recording button.
 
-  It is **linked, not embedded**. A plain markdown link resolves wherever the README does;
-  a `<video>` tag with a relative `src` was not verified here and is not used.
-
-  `*.mov` is now gitignored, the container rather than a filename. The master a capture is
+  `*.mov` and `*.mp4` are now gitignored, the container rather than a filename. The master a capture is
   encoded from is tens of megabytes, and git keeps it forever — including after a later
   commit deletes it.
 
