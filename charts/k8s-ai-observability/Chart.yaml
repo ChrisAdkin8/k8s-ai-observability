@@ -49,8 +49,8 @@ type: application
 # releases of history says this is not. 0.2.0 is deliberately NOT v0.7.x, so the
 # independence above stays visible at a glance, and deliberately not 1.0.0 while
 # artifacthub.io/prerelease below is still "true".
-version: 0.2.4
-appVersion: "v0.9.2"
+version: 0.2.5
+appVersion: "v0.10.0"
 
 home: https://github.com/ChrisAdkin8/k8s-ai-observability
 sources:
