@@ -54,7 +54,7 @@ See [compose/](compose/) for what it deliberately cannot cover.
   in about a second, with no cluster. The tests cover both sides of every threshold,
   including the ones the rig never drives. If you build alerting here, you can test it here.
 - **Two Grafana dashboards**, one `.json` each and never clicked into place, so a
-  re-install reproduces them exactly. Both are in the catalog — import by id into a Grafana
+  re-install reproduces them exactly. Both are in the catalog. Import by id into a Grafana
   you already run:
   [25618](https://grafana.com/grafana/dashboards/25618-gpu-simulation-dcgm-overview/) (GPU),
   [25620](https://grafana.com/grafana/dashboards/25620-llm-simulation-vllm-serving-overview/) (vLLM).
@@ -63,14 +63,14 @@ See [compose/](compose/) for what it deliberately cannot cover.
 - **A weekly check against real vLLM**, which is what makes the claim above *checked*
   rather than asserted. [`check-vllm-buckets.py`](scripts/check-vllm-buckets.py) fetches
   upstream's own metric definitions and fails if a name or a bucket boundary has moved. It
-  exists because two releases shipped the wrong bucket layout with **every test green** —
-  a drifted boundary returns a confident, plausible, wrong percentile
+  exists because two releases shipped the wrong bucket layout with **every test green**.
+  A drifted boundary returns a confident, plausible, wrong percentile
   ([the full story](docs/versions.md#keeping-them-honest)).
 - **The simulator as a container image**, so you can point your *own* dashboards at a
   realistic vLLM metric surface without cloning anything:
   `docker run --rm -p 9401:9401 ghcr.io/chrisadkin8/vllm-metrics-sim:latest`. Built from
   [`scripts/llm-sim.py`](scripts/llm-sim.py) rather than a copy of it, for `amd64` and
-  `arm64` — [details](docs/llm-simulation.md#the-container-image).
+  `arm64` ([details](docs/llm-simulation.md#the-container-image)).
 - **A path for clusters that already run Prometheus**, so panels blank for want of the
   `llm:*` recording rules are a two-minute fix rather than a reason to hand your monitoring
   stack to an install script. Either
@@ -88,7 +88,7 @@ a p95 of 78s with 16 requests running and 160 queued behind it. Every panel aggr
 
 > **The screenshot's healthy tenant reads ~480 ms rather than ~120 ms**, with its queue flat
 > at zero throughout. Both are right: `~120 ms` is what the profile arithmetic models, while
-> a live capture catches a batch that fills often enough for some requests to wait — which a
+> a live capture catches a batch that fills often enough for some requests to wait, which a
 > 15s-sampled gauge misses and the TTFT histogram records in full. It is still an order of
 > magnitude under the 2s threshold, which is what the panel exists to show.
 > [The arithmetic](docs/llm-simulation.md#why-an-observed-steady-p95-runs-higher-than-01s).
@@ -109,8 +109,8 @@ In short: build the *pipeline* here, tune the *numbers* on real hardware.
 
 ## Install
 
-> Needs `kubectl`, `helm` and `task`, plus `kind` + a container runtime for `local` —
-> see [Prerequisites](#prerequisites). ⚠️ **Size your container runtime first**: colima's
+> Needs `kubectl`, `helm` and `task`, plus `kind` + a container runtime for `local`.
+> See [Prerequisites](#prerequisites). ⚠️ **Size your container runtime first**: colima's
 > 2 CPU / 2 GiB default cannot run this. `task tools` checks the lot.
 
 Three targets (`local`, `eks`, `gke`), each with two phases. **Phase 1** creates the
@@ -162,7 +162,7 @@ the drift assertions; Task only wraps it. To drive the phases as scripts instead
 ### Bring your own Prometheus
 
 The default path installs `kube-prometheus-stack`. **If you already run one**, this repo
-does not need to touch it — either `install.sh --skip-monitoring` or the
+does not need to touch it. Use either `install.sh --skip-monitoring` or the
 [Helm chart](charts/k8s-ai-observability/README.md):
 
 ```sh
@@ -170,7 +170,7 @@ does not need to touch it — either `install.sh --skip-monitoring` or the
 ./scripts/verify.sh   local --byo
 ```
 
-⚠️ **Two labels decide whether that works, and both fail with no error at all** — no
+⚠️ **Two labels decide whether that works, and both fail with no error at all**: no
 scrape, no rule evaluation, empty boards, every object reporting itself as created. The
 `release:` selector on the rules and ServiceMonitors, and the Grafana sidecar's discovery
 label. **[docs/byo-prometheus.md](docs/byo-prometheus.md)** has both, what to set them to,

@@ -157,7 +157,7 @@ The one recorded percentile is `llm:decode:p95_5m`, scoped to decode because it 
 
 ## Building an SLO on this: a ratio at a bucket boundary, not a percentile
 
-Everything above says *don't* — don't set a prefill SLO on a p95, don't set an ITL SLO from a number in a wide bucket, don't ship the 2s threshold as an objective. Here is the other half, because the constraint that makes those warnings true is also the one that says how to build an objective that works.
+Everything above says *don't*: don't set a prefill SLO on a p95, don't set an ITL SLO from a number in a wide bucket, don't ship the 2s threshold as an objective. Here is the other half, because the constraint that makes those warnings true is also the one that says how to build an objective that works.
 
 **Every caveat on this page is a property of `histogram_quantile` interpolating *inside* a bucket.** That is where the 3.03x on prefill and the 1.71x on e2e come from. A ratio evaluated *at* a boundary does no interpolation and carries no bucket-width dependence at all:
 
@@ -168,23 +168,23 @@ sum by (model_name) (rate(vllm:time_to_first_token_seconds_bucket{le="2.5"}[5m])
 
 That is "the proportion of requests that reached a first token within 2.5s", and it is exact. The bucket layout is not an obstacle to an SLO. It is the design constraint: **your threshold must be a boundary.**
 
-The board ships this as `llm:ttft:slo_ratio5m` / `30m` / `1h` / `6h` against a 99% objective, with the standard fast/slow burn-rate pair over it — `> 14.4x` on the 1h and 5m windows, `> 6x` on the 6h and 30m. Both are in [`manifests/alerts/llm-prometheusrule.yaml`](https://github.com/ChrisAdkin8/k8s-ai-observability/blob/main/manifests/alerts/llm-prometheusrule.yaml).
+The board ships this as `llm:ttft:slo_ratio5m` / `30m` / `1h` / `6h` against a 99% objective, with the standard fast/slow burn-rate pair over it, `> 14.4x` on the 1h and 5m windows, `> 6x` on the 6h and 30m. Both are in [`manifests/alerts/llm-prometheusrule.yaml`](https://github.com/ChrisAdkin8/k8s-ai-observability/blob/main/manifests/alerts/llm-prometheusrule.yaml).
 
-⚠️ **`le="2"` matches nothing.** `TTFT_BUCKETS` steps `… 1.0, 2.5, 5.0 …` — there is no 2.0 boundary. A matcher that misses returns an empty vector, the ratio evaluates to nothing, and the burn alerts never fire: green forever, on a rule that reads correctly. Check the boundary you are asking for is in the list.
+⚠️ **`le="2"` matches nothing.** `TTFT_BUCKETS` steps `… 1.0, 2.5, 5.0 …`, so there is no 2.0 boundary. A matcher that misses returns an empty vector, the ratio evaluates to nothing, and the burn alerts never fire: green forever, on a rule that reads correctly. Check the boundary you are asking for is in the list.
 
 ### Four things this technique costs you
 
-**1. Your threshold is constrained to the boundaries you have.** If your business wants 2s, this method cannot express it. The honest options are to move the objective to a real boundary, to accept an interpolated percentile and carry its error bar, or to change the bucket list — which forfeits the transferability that made the query worth building here. This belongs to the approach, not to this rig, so you inherit it against real vLLM too.
+**1. Your threshold is constrained to the boundaries you have.** If your business wants 2s, this method cannot express it. The honest options are to move the objective to a real boundary, to accept an interpolated percentile and carry its error bar, or to change the bucket list, which forfeits the transferability that made the query worth building here. This belongs to the approach, not to this rig, so you inherit it against real vLLM too.
 
-**2. "Exact" has a condition.** It holds because numerator and denominator are the same histogram, on the same target, at the same scrape timestamps — so `rate()`'s extrapolation factor is common to both and cancels. Sum across replicas whose scrapes are out of phase and the cancellation stops being exact. One pod per model here; if you run four, know why it might not hold.
+**2. "Exact" has a condition.** It holds because numerator and denominator are the same histogram, on the same target, at the same scrape timestamps, so `rate()`'s extrapolation factor is common to both and cancels. Sum across replicas whose scrapes are out of phase and the cancellation stops being exact. One pod per model here; if you run four, know why it might not hold.
 
-**3. It is a latency objective, not an availability one — a total stall reads as healthy.** A request that never reaches a first token contributes no observation at all: not a slow one, not a failed one. So a tenant whose queue has stopped draining produces nothing of either kind, and the burn alerts carry a traffic guard that then suppresses them by design. `LLMQueueBacklog` is what fires when requests arrive and never complete; `LLMMetricsAbsent` when the series stop entirely. An SLO whose scope is unstated gets read as covering availability. This one does not.
+**3. It is a latency objective, not an availability one, and a total stall reads as healthy.** A request that never reaches a first token contributes no observation at all: not a slow one, not a failed one. So a tenant whose queue has stopped draining produces nothing of either kind, and the burn alerts carry a traffic guard that then suppresses them by design. `LLMQueueBacklog` is what fires when requests arrive and never complete; `LLMMetricsAbsent` when the series stop entirely. An SLO whose scope is unstated gets read as covering availability. This one does not.
 
-⚠️ That guard is also a trade rather than a free win: it stops pages for idle models, and it stops a burned budget alerting once traffic stops. Its window must match each alert's own short window — 5m on the fast one, 30m on the slow — because a guard narrower than the alert it protects silences a real burn.
+⚠️ That guard is also a trade rather than a free win: it stops pages for idle models, and it stops a burned budget alerting once traffic stops. Its window must match each alert's own short window, 5m on the fast one and 30m on the slow, because a guard narrower than the alert it protects silences a real burn.
 
 **4. The 6h window is not exercised on this rig**, which lives minutes. The slow-burn alert transfers but cannot be watched moving here; it is covered on both sides by [`promtool` tests](https://github.com/ChrisAdkin8/k8s-ai-observability/tree/main/tests) instead, which synthesise six hours in about a second. To watch it on the rig, shorten both windows in a fork of the rule.
 
-Finally: **Prometheus native histograms would dissolve limit 1 entirely** — exponential buckets with configurable resolution mean any threshold is expressible. The constraint above is a property of classic histograms, not a law of nature. Real vLLM emits classic histograms today, which is why this board is built on them.
+Finally: **Prometheus native histograms would dissolve limit 1 entirely**: exponential buckets with configurable resolution mean any threshold is expressible. The constraint above is a property of classic histograms, not a law of nature. Real vLLM emits classic histograms today, which is why this board is built on them.
 
 ## Read the inter-token latency panel carefully
 

@@ -180,6 +180,12 @@ def derive_chart_version() -> str:
 COMPOSE = "compose/compose.yaml"
 VERSIONS_DOC = "docs/versions.md"
 
+# CLAUDE.md rule 13. The README is the front door; the two `.grafana-com.md` pages are
+# uploaded to grafana.com, where this repo's prose is read by people who never see it.
+EM_DASH_FREE = ["README.md",
+                "manifests/dashboards/gpu-sim-dcgm.grafana-com.md",
+                "manifests/dashboards/llm-sim-overview.grafana-com.md"]
+
 
 def compose_pins() -> dict:
     """Every `image: name:tag` in the compose file, as {base name: tag}.
@@ -437,6 +443,28 @@ def main() -> None:
                    f"(someone else's board), give it a home in {DASHBOARDS_README} first.")
     print(f"  ok  ids        {len(refs):>3} references, all known to the catalog "
           f"({', '.join(sorted(blessed))})")
+
+    # ---- CLAUDE.md rule 13: no em dashes in the README or the catalog pages.
+    #
+    # Stripped by hand twice before this, and back both times. The catalog pages are
+    # rendered by grafana.com and the README is the front door, so the house style there
+    # is a decision rather than a preference — and a decision nothing enforces is a
+    # decision that gets re-litigated by accident.
+    #
+    # ⚠️ This is the one check here that asserts an ABSENCE, so the docstring's rule
+    # ("a checker that finds nothing must die") cannot apply as written: finding nothing
+    # IS the pass. What would make it dead instead is the file list going empty or naming
+    # something that no longer exists, so both of those are fatal.
+    if not EM_DASH_FREE:
+        die("em-dash", "the em-dash file list is empty — the check is dead")
+    offenders = [(f, n) for f in EM_DASH_FREE
+                 for n, line in enumerate(read(f).splitlines(), 1) if "\u2014" in line]
+    if offenders:
+        for f, n in offenders:
+            print(f"  {f}:{n}: em dash", file=sys.stderr)
+        die("em-dash", "em dashes are kept out of the README and the catalog pages "
+                       "(CLAUDE.md rule 13). Use a colon, a comma, or two sentences.")
+    print(f"  ok  em-dash     {len(EM_DASH_FREE)} file(s) free of em dashes")
 
     # ---- docs/versions.md claims completeness. Hold it to that.
     #
