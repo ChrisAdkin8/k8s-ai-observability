@@ -141,8 +141,9 @@ class of visual asset here that no script can re-render, because a human has to 
 board. Retake [docs/gpu-dashboard.png](docs/gpu-dashboard.png) or
 [docs/llm-dashboard.png](docs/llm-dashboard.png) to match.
 
-If you retook the LLM one, regenerate the social card as well —
-`python3 docs/social-preview.py docs/social-preview.png`.
+If you retook the LLM one, regenerate the social card as well — `python3
+docs/social-preview.py`, which needs Pillow and nothing else, and writes back over
+`docs/social-preview.png` from wherever you run it.
 [docs/social-preview.py](docs/social-preview.py) crops that screenshot **by fraction rather
 than by pixel**, so the card survives a resize, but the comment above the crop records the
 row boundaries it was measured against: re-check them whenever the screenshot is retaken.

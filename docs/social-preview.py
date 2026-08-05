@@ -3,9 +3,19 @@
 from PIL import Image, ImageDraw, ImageFont
 import os, sys
 
-REPO = "/Users/chris.adkin/projects/k8s-ai-observability"
-SRC = os.path.join(REPO, "docs/llm-dashboard.png")
-OUT = sys.argv[1] if len(sys.argv) > 1 else "social-preview.png"
+# Both paths resolve from THIS FILE, never from the working directory. The repo
+# root was hardcoded to one machine's home directory, so the script ran nowhere
+# else — and CONTRIBUTING.md now sends contributors here. Same idiom as
+# optimize-images.py and dashboard-logos.py, which are the two scripts beside it.
+DOCS = os.path.dirname(os.path.abspath(__file__))
+SRC = os.path.join(DOCS, "llm-dashboard.png")
+
+# ⚠️ The default OUT was "social-preview.png" — relative to the CWD. Run from the
+# repo root with no argument and it wrote a stray card THERE, exited 0 and printed
+# a success line, while docs/social-preview.png, the file that is committed and the
+# one GitHub serves, was never touched. Same shape as the crop trap below: a
+# plausible result, no failure, wrong file.
+OUT = sys.argv[1] if len(sys.argv) > 1 else os.path.join(DOCS, "social-preview.png")
 
 W, H = 1280, 640
 BG = (13, 14, 18)
