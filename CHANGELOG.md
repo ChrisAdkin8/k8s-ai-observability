@@ -23,6 +23,30 @@ Comparison links are at the foot of this file, one per released version.
 
 ## [Unreleased]
 
+### Added
+
+- **`demo.mp4` — a 45s walkthrough of `task local:up && task local:grafana`**, linked from
+  the README's "Try it". It is that section's six-minute claim shown rather than asserted:
+  the kind cluster coming up, the stack installing, `verify.sh` reporting PASS, then both
+  boards live in the browser. 74 MB down to 4.5 MB, at 4x speed and half resolution, with
+  the waiting cut out.
+
+  **The source was 416 seconds holding 722 distinct frames**, because a macOS capture only
+  writes a frame when the screen changes. So the gaps between frame timestamps *are* the
+  inactive stretches, and measuring them found **81 of the 104 seconds left after the 4x
+  speed-up were static** — one of them a 93-second stop while Helm installed. Each hold
+  over 2s is now capped at 1.5s, which is enough to read the screen and not enough to
+  wonder whether it has frozen. No distinct frame was dropped: every cut falls strictly
+  inside a gap, so only duplicate hold frames were removed. The last 7 seconds went too,
+  being the mouse travelling to the Stop Screen Recording button.
+
+  It is **linked, not embedded**. A plain markdown link resolves wherever the README does;
+  a `<video>` tag with a relative `src` was not verified here and is not used.
+
+  `*.mov` is now gitignored, the container rather than a filename. The master a capture is
+  encoded from is tens of megabytes, and git keeps it forever — including after a later
+  commit deletes it.
+
 ### Removed
 
 - **`docs/record-demo.md`, and the `docs/llm-demo.gif` it specified**, which was never

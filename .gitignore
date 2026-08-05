@@ -77,6 +77,13 @@ compose/.generated/
 # each board in the repo, which is the drift the single-artefact design avoids.
 dist/
 
+# Raw screen captures. `demo.mp4` IS tracked — it is the walkthrough the README links, and
+# at ~6 MB it is a reasonable thing to clone. The master it was encoded from is not: a
+# retina `Cmd+Shift+5` capture of a six-minute run is ~74 MB, and git keeps it forever even
+# after a later commit deletes it. Ignoring the CONTAINER rather than a filename, because
+# the name is whatever the recorder chose that day; a `.mov` here is always a capture.
+*.mov
+
 # OS / editor cruft
 .DS_Store
 *.swp
