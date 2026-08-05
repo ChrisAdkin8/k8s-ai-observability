@@ -146,9 +146,13 @@ tasks:
   # CLAUDE.md rule 16. Derived, never a second copy: there is no TODO file here, and
   # adding one would duplicate every line this prints.
   #
-  # ⚠️ It matches PHRASES, not the ⚠️ glyph. There are 91 of those in tracked
-  # markdown and they are the repo's general warning marker, so keying on them would
-  # return almost the whole documentation set. The phrase list below is CURATED,
+  # ⚠️ It matches PHRASES, not the ⚠️ glyph. The glyph is the repo's general warning
+  # marker and appears in tracked markdown by the hundred, so keying on it would return
+  # almost the whole documentation set. (Count them with
+  # `git ls-files '*.md' | xargs grep -o '⚠️' | wc -l` — deliberately not quoted here,
+  # because a decorative number that carries no argument is a number that goes stale:
+  # this comment said 91 while the true figure had reached 140.)
+  # The phrase list below is CURATED,
   # which means it is also incomplete by construction: an open item written in new
   # words is silently missed. Printing nothing is therefore "the matchers found
   # nothing", not "there is no outstanding work" — and the task says so out loud

@@ -22,7 +22,7 @@ rig knows the right answer.
 | `docs/ci.md` + `docs/releasing.md` | what CI proves; how to cut a release without breaking it |
 | `.github/actions/verify-chart/` | the chart's cluster verification, called by CI **and** the publish workflow |
 | `scripts/config.sh` | single source for version pins, names, labels; asserts cross-file invariants |
-| `charts/` + `scripts/chart-build.py` | Helm chart, assembled into gitignored `dist/` |
+| `charts/` + `scripts/chart-build.py` | Helm chart, assembled into gitignored `dist/`. ⚠️ `charts/k8s-ai-observability/README.md` **ships inside the published artifact** and renders on Artifact Hub, where there is no repo: no relative links out, no `task chart`. Contributor detail lives in `charts/README.md`, a sibling `helm package` never picks up |
 | `terraform/{eks,gke}` + `terraform/modules/contract` | clusters; `contract` holds **cross-cloud identity constants only** — sizing stays in the roots |
 | `kind/gpu-sim.yaml` | local cluster — **single node** |
 | `Taskfile.yml` | **`task preflight`** is the gate before landing; also `selftest`, `compose-selftest`, `doc-claims`, `sigpipe`, `rule-tests`, `drift-test`, `chart`, `dashboards`, `compose`, `cache:*`, `outstanding` |
@@ -43,9 +43,9 @@ rig knows the right answer.
    are exact and additive; quantiles are neither. An SLO threshold must **be** a boundary:
    there is no 2.0 in `TTFT_BUCKETS`, so `le="2"` matches nothing and reads green forever.
 5. **Poll any check that races its producer** — never single-shot. Written down at
-   `7ef0aa9` "after the fourth time it bit".
+   `7ef0aa9` "after the fourth time it bit". *(A specific case of rule 18.)*
 6. **Write expected values into a check's comment before running it.** A threshold chosen
-   after seeing the data is not a test.
+   after seeing the data is not a test. *(A specific case of rule 18.)*
 7. **`verify.sh` asserts invariants only.** A finding with a shelf life ("the platform has
    this weakness at these settings") belongs in a scenario script you invoke —
    `drive-llm-load.sh` is the pattern — never in CI.
@@ -72,10 +72,15 @@ rig knows the right answer.
 15. **Terraform:** commit `.terraform.lock.hcl`, never `*.tfvars` (examples only). GKE's
     `node_count` is **per zone**; EKS's is absolute.
 16. **Outstanding work is marked where it lives — there is no TODO file, and adding one
-    would be a mistake.** Open items carry a `⚠️` in the file that owns them. `task
-    outstanding` greps the markers and skips struck ones. When you finish one, **strike it
-    and say what happened** — `⚠️ ~~the claim~~ **DONE — <what, when>**` — never delete it,
-    because the reasoning outlives the action. The same applies to *evidence*: a long
+    would be a mistake.** Open items carry a `⚠️` in the file that owns them.
+    ⚠️ **The glyph is for the reader; the tool needs a PHRASE.** `task outstanding` matches
+    a curated phrase list — kept in `Taskfile.yml`, and deliberately not copied here,
+    because quoting it makes this rule match itself and report as an open item. It does
+    *not* key on `⚠️`, which is the repo's general warning marker and appears in tracked
+    markdown by the hundred. An item phrased in new words is silently missed, and rule
+    17's own gap sat unseen that way. Match an existing phrasing, or extend the list. When you finish one, **strike it and say what happened** —
+    `⚠️ ~~the claim~~ **DONE — <what, when>**` — never delete it, because the reasoning
+    outlives the action. The same applies to *evidence*: a long
     justification belongs in the file that owns the work, not in this one, which is loaded
     into every session.
 17. **`zsh` is not `bash`, and CI is `bash`.** Two bugs on **2026-08-04** were invisible in
@@ -87,8 +92,10 @@ rig knows the right answer.
     interactively. `check-sigpipe.py` covers the first class. ⚠️ **Unverified:** the second
     has no check at all, so a word-splitting bug still reaches CI unaided.
 
-18. **An assertion that only ever passes is not an assertion.** Before trusting a new
-    check, break what it watches and confirm it goes red — then fix it. Every `--selftest`
+18. **An assertion that only ever passes is not an assertion.** This is the general rule
+    that **5** (poll, never single-shot) and **6** (expected values written first) are the
+    two specific cases of. Before trusting a new check, break what it watches and confirm
+    it goes red — then fix it. Every `--selftest`
     here pins bugs that were reintroduced deliberately to prove it fails on them, and CI
     drives the chart's render-time assertions and `helm test`'s negative case to failure on
     purpose. A check that has never failed is a guess.
