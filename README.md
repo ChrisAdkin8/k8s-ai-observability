@@ -144,7 +144,7 @@ Every command below takes any of the three prefixes ( `local` | `eks` | `gke` ):
 | `task prefix:teardown` / `prefix:destroy` | remove the stacks / and the cluster too |
 | `task rule-tests` / `task selftest` | no cluster needed, see [tests/](tests/) |
 | `task compose` | no cluster at all: both boards in ~1 min, see [compose/](compose/) |
-| `task chart` | assemble the [Helm chart](charts/k8s-ai-observability/README.md) into `dist/`, lint and render it |
+| `task chart` | assemble the [Helm chart](charts/README.md) into `dist/`, lint and render it |
 | `task image` | build the simulator container image and smoke-test it |
 
 Both load drivers target opt-in Deployments that `install.sh` does *not* apply, so apply
@@ -293,7 +293,8 @@ you give up.
 | [docs/observability.md](docs/observability.md) | where each metric comes from, reading the GPU board, nine PromQL queries that also work against real hardware, derived temperature and power, driving load |
 | [docs/llm-simulation.md](docs/llm-simulation.md) | the vLLM simulator, load profiles, LLM alerts and the TTFT error budget |
 | [docs/byo-prometheus.md](docs/byo-prometheus.md) | installing against a Prometheus you already run, and the two labels that fail silently |
-| [charts/k8s-ai-observability/](charts/k8s-ai-observability/README.md) | the Helm chart: the BYO story, the build step and why it exists, the two labels that fail silently, and where each invariant is caught |
+| [charts/k8s-ai-observability/](charts/k8s-ai-observability/README.md) | installing the Helm chart: the BYO story, the two labels that fail silently, and where each invariant is caught. Ships with the chart |
+| [charts/](charts/README.md) | changing the Helm chart: the build step and why it exists, the script path it mirrors, and what CI drives to failure |
 | [tests/](tests/) | the rule tests and the simulator selftest: what they cover and how to add one |
 | [compose/](compose/) | the no-Kubernetes path: what it shares with the cluster, and what it cannot exercise |
 | [CONTRIBUTING.md](CONTRIBUTING.md) | the invariants that fail *silently* if broken, what to re-check when bumping a pinned version, and what is deliberately out of scope |

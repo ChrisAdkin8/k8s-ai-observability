@@ -143,7 +143,7 @@ ConfigMap**, and that is a consequence of Helm rather than a preference: `.Files
 cannot read outside the chart directory, so the chart cannot reach `scripts/llm-sim.py`
 where it lives, and a second committed copy is refused. Referencing a published image needs
 a *tag* instead of the file, which is what makes the constraint tractable at all — see the
-chart's [README](../charts/k8s-ai-observability/README.md).
+chart's [build notes](../charts/README.md).
 
 ## Data flow
 

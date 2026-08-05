@@ -5,18 +5,12 @@ GPU and vLLM observability simulation for **a cluster that already runs Promethe
 Both boards are published in the Grafana catalog
 ([25618](https://grafana.com/grafana/dashboards/25618), [25620](https://grafana.com/grafana/dashboards/25620)),
 so people arrive from there, import a board, and find the panels blank for want of the
-`llm:*` recording rules. Until this chart, the only route was
-[`scripts/install.sh`](../../scripts/install.sh), which installs kube-prometheus-stack over
-the top of whatever you already run — which nobody with a production monitoring stack will
-do. This chart is the other route: it installs the simulators, workloads, rules and
-dashboards and **leaves your monitoring stack alone**.
+`llm:*` recording rules. This chart is the fix: it installs the simulators, workloads,
+rules and dashboards and **leaves your monitoring stack alone**.
 
 ---
 
-## Two ways in, for two different people
-
-**If you want to USE this** — install the published chart. Nothing to clone, no build
-step, and this is the copy the verification below actually runs against:
+## Install
 
 ```sh
 helm install rig oci://ghcr.io/chrisadkin8/charts/k8s-ai-observability \
@@ -34,53 +28,20 @@ helm test rig --logs                              # ← do not skip this
 > | `0.2.1` | fixes that, but the test greps an 18.7 kB scrape through a pipe, which under `pipefail` can report a present metric as missing. |
 > | `0.2.2` onwards | both fixed. |
 
-**If you want to CHANGE this** — build it locally. `task chart` is not going away and is
-not replaced by the published artefact; it is how you test a template edit:
+### What it installs
 
-```sh
-task chart                                        # assembles into gitignored dist/
-helm install rig dist/charts/k8s-ai-observability \
-  --set releaseLabel=<your monitoring release>
-helm test rig --logs
-```
+| | |
+|--|--|
+| 2 dashboard `ConfigMap`s | the GPU and vLLM boards, carrying the Grafana sidecar label |
+| 2 `PrometheusRule`s | 19 recording rules and 9 alerts across both domains |
+| 2 `ServiceMonitor`s | for the LLM simulators and the fake DCGM exporter |
+| LLM simulation | two tenants, one healthy and one deliberately overloaded, plus a Service and their profile `ConfigMap`s |
+| 3 GPU workloads | `gpu-idle`, `gpu-steady`, `gpu-busy` |
+| a `helm test` hook | the preconditions below, checked against your live cluster |
 
----
-
-## ⚠️ There is a build step. `helm install ./charts/...` does not work.
-
-This is why the contributor path above says `dist/` and not `./charts/`.
-
-**Why.** Helm's `.Files.Get` cannot read outside the chart directory, so a chart under
-`charts/` cannot reference `manifests/dashboards/*.json` or `manifests/alerts/*.yaml` where
-those files live. There were three ways out:
-
-| | | |
-|--|--|--|
-| **(a)** | build step — assemble into gitignored `dist/` from the canonical files | **chosen** |
-| (b) | symlinks under `charts/.../files/` | `helm package` and `git archive` follow them inconsistently across platforms |
-| (c) | generate and **commit** the copies, with a CI check that they still match | the copies exist |
-
-**(a) is the only option where the second copy never exists in the tree.** This repo
-refuses second copies everywhere else — the DCGM surface contract, the dashboards, the
-simulator image — because a drifted copy is invisible from the outside. The cost is this
-step, and it is a real cost: cloning and running `helm install ./charts/...` fails.
-`scripts/chart-build.py` has the full argument.
-
-> If you do try `./charts/...` directly, Helm complains about **missing dependencies**
-> first, which is misleading — the real problem is the missing `files/`. Run
-> `helm dependency build`, try again, and the chart's own assertion then tells you to build
-> it properly.
-
-**`scripts/llm-sim.py` is not in that list any more.** It used to be the hardest item —
-executable code, the one file a drifted copy of would be genuinely dangerous. The
-[published image](../../docs/llm-simulation.md#the-container-image) removed it from the
-problem entirely: a chart whose simulator Deployment references an image needs a **tag** in
-`values.yaml`, not the file. That is the one structural difference between this chart and
-`install.sh`, which still mounts the script from a ConfigMap.
-
-**The profiles are not copied either**, for a different reason: the chart *templates* them
-from `values.yaml`, so the numbers are genuinely reachable. A verbatim copy would freeze
-every one of them at its default while appearing configurable.
+Two optional subcharts: `fakeGpuOperator` (**on** by default — without it nothing
+advertises `nvidia.com/gpu`) and `kubePrometheusStack` (**off** by default — `true` serves
+a greenfield cluster instead of a BYO one).
 
 ---
 
@@ -103,24 +64,12 @@ Upstream kube-prometheus-stack defaults `ruleSelectorNilUsesHelmValues` and its 
 siblings to **true**, which makes its selector `release=<its own release name>`. So:
 
 ```sh
-helm install rig dist/charts/k8s-ai-observability --set releaseLabel=my-monitoring
+helm install rig oci://ghcr.io/chrisadkin8/charts/k8s-ai-observability \
+  --set releaseLabel=my-monitoring
 ```
 
 You have two possible fixes and should know both: set `releaseLabel`, or set those three
 values `false` on your side — and the second is often not yours to change.
-
-### Reaching the boards when your release is not called `kube-prometheus-stack`
-
-`scripts/grafana.sh` and `scripts/prometheus.sh` build the Service name from the release
-(`<release>-grafana`, `<release>-prometheus`), which is a chart convention rather than a
-Kubernetes one. They read it from the environment:
-
-```sh
-KPS_RELEASE=my-monitoring ./scripts/grafana.sh local
-KPS_RELEASE=my-monitoring ./scripts/verify.sh local --byo
-```
-
-Chart users hit this first, before anything else in this file matters.
 
 ---
 
@@ -134,49 +83,46 @@ label, or the fake operator watches a pool nothing belongs to — a green instal
 kubectl label node <node> run.ai/simulated-gpu-node-pool=default
 ```
 
-This is the [three-way naming invariant](../../docs/architecture.md#the-naming-invariant-read-before-editing):
-the node label value, the fake operator's topology pool name and the workloads' selector
+The node label value, the fake operator's topology pool name and the workloads' selector
 must all agree. The chart checks the two halves it can see at render time and the third in
 `helm test`.
+
+You also need the Prometheus Operator CRDs (`PrometheusRule`, `ServiceMonitor`) already
+present, which any kube-prometheus-stack install gives you. `helm test` checks that too.
 
 ---
 
 ## Where each invariant is caught
 
-`scripts/install.sh` runs five assertions before it creates anything, and a `helm install`
-runs none of them. Reproducing that net is a first-class requirement of this chart, not a
-nicety — a chart that installs cleanly and produces an empty dashboard is worse than no
-chart, because the failure arrives later and looks like your fault.
+A `helm install` runs no preflight of its own, and a chart that installs cleanly and
+produces an empty dashboard is worse than no chart, because the failure arrives later and
+looks like your fault. So the checks are built in, half at render time and half live:
 
-This table maps [`CONTRIBUTING.md`'s invariants table](../../CONTRIBUTING.md) onto where
-each row is enforced here, so the two cannot drift silently.
+| Invariant | Caught by | When |
+|--|--|--|
+| dashboard filename vs the `uid` inside it | `fail` in `_assertions.tpl` | **`--dry-run`** |
+| every board parses as JSON | `fail` in `_assertions.tpl` | **`--dry-run`** |
+| the two LLM `model_name`s are distinct and non-empty | `fail` in `_assertions.tpl` | **`--dry-run`** |
+| node-pool label key matches the operator's topology | `fail` in `_assertions.tpl` | **`--dry-run`** |
+| node-pool **name** is one of the topology pools | `fail` in `_assertions.tpl` | **`--dry-run`** |
+| namespaces are non-empty | `fail` in `_assertions.tpl` | **`--dry-run`** |
+| the rules were actually extracted | `fail` in `_assertions.tpl` | **`--dry-run`** |
+| **the capacity arithmetic still separates the tenants** | `fail` in `_assertions.tpl` | **`--dry-run`** |
+| value types and ranges | `values.schema.json` | **`--dry-run`** |
+| Prometheus Operator CRDs exist | `helm test` | live |
+| **`releaseLabel` matches a real `ruleSelector`** | `helm test` | live |
+| dashboard `ConfigMap`s carry the sidecar label | `helm test` | live |
+| a node carries the GPU pool label | `helm test` | live |
+| `nvidia.com/gpu` is advertised | `helm test` | live |
+| the simulators serve the `vllm:` surface | `helm test` | live |
 
-| Invariant | `install.sh` | This chart | When |
-|--|--|--|--|
-| dashboard filename vs the `uid` inside it | `assert_dashboard_contract` | `fail` in `_assertions.tpl` | **`--dry-run`** |
-| every board parses as JSON | `assert_dashboard_contract` | `fail` in `_assertions.tpl`, and again in `chart-build.py` | **`--dry-run`** |
-| the two LLM `model_name`s are distinct and non-empty | `assert_llm_contract` | `fail` in `_assertions.tpl` | **`--dry-run`** |
-| node-pool label key matches the operator's topology | `assert_gpu_contract` | `fail` in `_assertions.tpl` | **`--dry-run`** |
-| node-pool **name** is one of the topology pools | `assert_gpu_contract` | `fail` in `_assertions.tpl` | **`--dry-run`** |
-| namespaces are non-empty | `assert_manifest_namespaces` | `fail` in `_assertions.tpl` | **`--dry-run`** |
-| the rules were actually extracted | — | `fail` in `_assertions.tpl` | **`--dry-run`** |
-| **the capacity arithmetic still separates the tenants** | — *(profiles are static files there)* | `fail` in `_assertions.tpl` | **`--dry-run`** |
-| value types and ranges | — | `values.schema.json` | **`--dry-run`** |
-| Prometheus Operator CRDs exist | `assert_monitoring_crds` | `helm test` | live |
-| **`releaseLabel` matches a real `ruleSelector`** | — *(cannot: it is another chart's object)* | `helm test` | live |
-| dashboard ConfigMaps carry the sidecar label | — | `helm test` | live |
-| a node carries the GPU pool label | `assert_kind_contract` / `assert_terraform_contract` | `helm test` | live |
-| `nvidia.com/gpu` is advertised | `verify.sh` check 1 | `helm test` | live |
-| the simulators serve the `vllm:` surface | `verify.sh` L1–L9 | `helm test` | live |
-
-The **capacity** row is the one with no `install.sh` counterpart, and it is new hazard
-rather than an oversight there: the script path's profiles are static files, so nobody can
-set an arrival rate that stops the two tenants straddling the 2s alert threshold. Making
-them templatable created that possibility, so the chart refuses to render it.
+`--dry-run` means `helm install --dry-run` or `helm template` catches it before anything
+is created. **`releaseLabel` is the one that cannot be checked at render time** — it names
+an object belonging to another release, so only a live cluster can answer it.
 
 ⚠️ **`helm test` is opt-in.** `helm install` does not run it, and the two silent selectors
 are *only* checked there. That is a genuine weakness of this design, stated rather than
-hidden; the chart's `NOTES.txt` tells you to run it in the imperative for that reason.
+hidden; `NOTES.txt` tells you to run it in the imperative for that reason.
 
 ---
 
@@ -201,8 +147,7 @@ Full annotated list in [`values.yaml`](values.yaml). The ones that matter:
 Empty means "use `Chart.appVersion`", which is what keeps the chart and the published
 simulator image in step automatically. Pinning it by hand is exactly how it goes stale, and
 a stale tag is not a visible failure: **the chart installs cleanly and runs an old
-simulator.** `task chart` and the publish workflow both cross-check it rather than trusting
-it, which is the only reason that coupling is safe.
+simulator.**
 
 ### ⚠️ `llm.profile.*` — these numbers interlock
 
@@ -215,22 +160,21 @@ capacity = maxConcurrency / (baseTtftSeconds + genMean x itl_full) = 2.74 rps
 queue fills to `maxInFlight - maxConcurrency = 160` and TTFT plateaus at ~58s. The 2s
 `LLMHighTTFT` threshold sits between them, and that separation is the entire demonstration.
 
-Change one and the threshold, `verify.sh`'s L3b bound and every promtool expectation have
-to be re-derived. The chart refuses to render values where the tenants stop straddling
-capacity — it cannot re-derive the rest for you, but it will not let you silently lose the
-thing the rig exists to show.
+Change one and the alert threshold and every rule expectation have to be re-derived. The
+chart refuses to render values where the tenants stop straddling capacity — it cannot
+re-derive the rest for you, but it will not let you silently lose the thing the rig exists
+to show.
 
 ---
 
 ## What this chart deliberately does not do
 
-- **Replace `scripts/install.sh`.** That stays the source of truth for install ordering and
-  the wrong-context guard, and remains what CI exercises end to end.
-- **Publish to Artifact Hub or a `helm repo`.** Separate, mostly-administrative work.
-- **Template the Terraform**, or any cloud-specific resource.
+- **Template Terraform**, or any cloud-specific resource.
 - **Create the monitoring namespace** by default. On a BYO cluster it already exists and is
   someone else's; creating it would make `helm uninstall` delete their namespace and take
   their Prometheus with it. `createMonitoringNamespace=true` for greenfield.
+- **Tune anything to real hardware.** These metrics are synthetic: names, types and
+  histogram bucket boundaries transfer to real vLLM, absolute values do not.
 
 ## Uninstalling
 
@@ -238,10 +182,14 @@ thing the rig exists to show.
 helm uninstall rig
 ```
 
-Removes what the chart created and nothing else. The dashboard ConfigMaps carry
+Removes what the chart created and nothing else. The dashboard `ConfigMap`s carry
 `app.kubernetes.io/part-of=gpu-sim-dashboards` as well as the sidecar label, so a manual
 cleanup can select on ownership rather than on `grafana_dashboard=1` — which would take the
-several boards kube-prometheus-stack ships with it. That is the trap
-[`teardown.sh`](../../scripts/teardown.sh) avoids for the script path; `helm uninstall` is
-scoped by release ownership and does not have it, but the labels are carried so both paths
-produce identical objects.
+several boards kube-prometheus-stack ships with it.
+
+---
+
+Source, issues and the rest of the rig:
+**<https://github.com/ChrisAdkin8/k8s-ai-observability>**. Building the chart from a clone
+is a different path with its own prerequisites, documented at
+[`charts/README.md`](https://github.com/ChrisAdkin8/k8s-ai-observability/blob/main/charts/README.md).

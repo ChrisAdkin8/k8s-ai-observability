@@ -133,7 +133,7 @@ Three ways to get them, cheapest first:
 | | |
 |--|--|
 | paste the rules | both catalog pages give them inline — enough for a board you just want to look at |
-| [the Helm chart](../../charts/k8s-ai-observability/README.md) | installs the rules, the simulators and the workloads **without touching your monitoring stack**. `task chart && helm install rig dist/charts/k8s-ai-observability --set releaseLabel=<yours>` |
+| [the Helm chart](../../charts/k8s-ai-observability/README.md) | installs the rules, the simulators and the workloads **without touching your monitoring stack**. `helm install rig oci://ghcr.io/chrisadkin8/charts/k8s-ai-observability --set releaseLabel=<yours>` |
 | [`scripts/install.sh`](../../scripts/install.sh) | the whole rig, including its own kube-prometheus-stack unless you pass `--skip-monitoring` |
 
 ⚠️ Whichever you choose, the `release:` label on the `PrometheusRule` has to match what
