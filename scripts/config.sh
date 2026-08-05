@@ -357,6 +357,37 @@ if [[ -z "${KIND_EXPERIMENTAL_PROVIDER:-}" ]] \
    && command -v podman >/dev/null 2>&1; then
   export KIND_EXPERIMENTAL_PROVIDER=podman
 fi
+# Derived from the same decision, so the cache containers and the kind nodes can never
+# end up on different runtimes.
+# ⚠️ The podman path for the pull-through caches is untested. The open item is marked
+# in README.md's cache section, because `task outstanding` only scans markdown — see
+# CLAUDE.md rule 16.
+CONTAINER_CLI="${CONTAINER_CLI:-docker}"
+[[ "${KIND_EXPERIMENTAL_PROVIDER:-}" == "podman" ]] && CONTAINER_CLI="${CONTAINER_CLI/docker/podman}"
+
+# ---- pull-through image caches (local target, opt-in) ------------------------
+# ONE ENTRY PER UPSTREAM THE COLD INSTALL ACTUALLY PULLS FROM, as `host|slug|upstream`.
+# Derived 2026-08-05 by reading the kubelet Pulled events of a full `task local:up`, not
+# from what the charts might reference: an upstream nothing pulls from would be a
+# container doing nothing.
+#
+# Lives here rather than in registry-cache.sh because TWO scripts need it and they must
+# agree — registry-cache.sh starts the containers, kind-up.sh points containerd's
+# per-host mirror config at them. A second copy is how they start disagreeing about
+# which registries are mirrored, which fails silently as a slow pull.
+REGISTRY_CACHES=(
+  "docker.io|docker|https://registry-1.docker.io"
+  "quay.io|quay|https://quay.io"
+  "registry.k8s.io|k8s|https://registry.k8s.io"
+  "gcr.io|gcr|https://gcr.io"
+  "ghcr.io|ghcr|https://ghcr.io"
+)
+REGISTRY_CACHE_PREFIX="${REGISTRY_CACHE_PREFIX:-kind-cache}"
+# Where kind's containerd looks for per-registry hosts.toml. Must match the
+# containerdConfigPatches block in kind/gpu-sim.yaml, which is what turns this path on;
+# without that patch containerd never reads the directory and the mirrors are silently
+# ignored. kind-up.sh checks for the setting rather than assuming it.
+CONTAINERD_CERTS_DIR="${CONTAINERD_CERTS_DIR:-/etc/containerd/certs.d}"
 
 # ---- context aliases ---------------------------------------------------------
 context_for() {

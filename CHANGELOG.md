@@ -23,6 +23,23 @@ Comparison links are at the foot of this file, one per released version.
 
 ## [Unreleased]
 
+### Added
+
+- **Opt-in pull-through image caches for the `local` target** (`scripts/registry-cache.sh`,
+  `task cache:up` / `cache:status` / `cache:down` / `cache:purge`). `kind delete cluster`
+  destroys the node's containerd image store, so every cold `task local:up` re-pulls the
+  whole stack: measured 2026-08-05, ~915 MB across 14 images and 215s of a 555s run, with
+  `grafana:13.1.0` alone 352 MB and 52.1s, plus two registries that timed out into
+  `ImagePullBackOff` and cost ~60s before succeeding on retry. The caches are one
+  `registry:2` per upstream on the kind network, and they outlive the cluster: the
+  kube-prometheus-stack install went 171.7s to 110.8s and the fake-gpu-operator 44.7s to
+  6.7s, with no pull timeouts. All five upstreams were probed before being wired up.
+  **Off by default and never a dependency**: `kind-up.sh` writes containerd mirror config
+  only for caches that are actually running, removes it for ones that are not, and warns
+  rather than failing when a cluster predates the `containerdConfigPatches` block that
+  makes the mechanism work. Verified that a mirror whose container is stopped still pulls,
+  through containerd's `server` fallback.
+
 ### Changed
 
 - **`install.sh` applies the ServiceMonitors and rules before Prometheus starts**, taking

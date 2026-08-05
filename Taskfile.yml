@@ -35,6 +35,16 @@ includes:
     taskfile: taskfiles/target.yml
     vars: {CLOUD: gke}
 
+# Shared by the four cache:* tasks. Stated once rather than pasted four times, which
+# would be four chances to later fix three of them. `x-` keys are ignored by Task; the
+# anchor has to be defined before its first use, hence up here rather than beside them.
+x-cache-needs-docker: &cache-needs-docker
+  - sh: docker info >/dev/null 2>&1
+    msg: |
+      docker is not available (`docker info` failed). The caches are containers, so
+      there is no dockerless path. They are optional: `task local:up` works without
+      them, it just pulls every image from the internet on each new cluster.
+
 tasks:
   default:
     desc: List available tasks
@@ -286,6 +296,52 @@ tasks:
         b=$(python3 -c 'import hashlib,sys;print(hashlib.sha256(open(sys.argv[1],"rb").read()).hexdigest())' scripts/llm-sim.py)
         [ "$a" = "$b" ] || { echo "image payload differs from scripts/llm-sim.py" >&2; exit 1; }
         echo "  ok  payload matches scripts/llm-sim.py ($a)"
+
+  # ---- pull-through image caches (local target, opt-in) -----------------------
+  # They persist across `kind delete`, which is the whole point: that is what throws
+  # the node's image store away and makes every cold build re-pull ~915 MB.
+  #
+  # HERE RATHER THAN IN taskfiles/target.yml, though only `local` uses them: that file
+  # exists so eks, gke and local cannot drift apart, and a task meaningless on two of
+  # the three targets is not something they should share a definition for. These sit
+  # with `image` and `compose`, the other Docker-side tasks outside a cluster's
+  # lifecycle.
+  #
+  # ⚠️ ENUMERATED AS cache:<verb>, NOT `cache -- <verb>`, AND THE DIFFERENCE IS NOT
+  # COSMETIC. `--` is this repo's passthrough idiom, for handing arguments to a tool
+  # that owns its own vocabulary: `compose -- down|logs|ps` reaches `docker compose`,
+  # which has dozens of subcommands, and `load -- ramp` reaches a script's argument.
+  # These four verbs are a CLOSED set this repo defines, so they belong in
+  # `task --list` where they can be read, rather than hidden in one task's desc
+  # string. The `:` here groups verbs rather than naming a target, which is what it
+  # means under local:/eks:/gke:; those come from includes and stay grouped together
+  # in the listing regardless.
+  #
+  # Deliberately still four thin wrappers over scripts/registry-cache.sh, which keeps
+  # its own up|down|status interface and stays runnable on its own. Task is the front
+  # door, not a replacement for the scripts (taskfiles/target.yml says the same).
+  cache:up:
+    desc: Start the pull-through image caches (makes every cold local:up after the next one faster)
+    preconditions: *cache-needs-docker
+    cmds: [./scripts/registry-cache.sh up]
+
+  cache:status:
+    desc: Show which pull-through caches are running, and how much each has cached
+    preconditions: *cache-needs-docker
+    cmds: [./scripts/registry-cache.sh status]
+
+  cache:down:
+    desc: Stop and remove the pull-through caches, KEEPING what they have cached
+    preconditions: *cache-needs-docker
+    cmds: [./scripts/registry-cache.sh down]
+
+  # Separate task rather than `cache:down -- --purge`: mixing the two conventions in
+  # one command line is the worst of both, and discarding a warmed cache is worth
+  # naming out loud — it is the one action here that costs you a slow rebuild.
+  cache:purge:
+    desc: Stop and remove the pull-through caches AND discard every cached blob
+    preconditions: *cache-needs-docker
+    cmds: [./scripts/registry-cache.sh down --purge]
 
   # ---- the no-Kubernetes path ------------------------------------------------
   # Both boards and both alert sets in under a minute, reading the same dashboards,

@@ -18,13 +18,14 @@ rig knows the right answer.
 | `scripts/verify.sh` | numbered acceptance checks (L1…) — invariants only |
 | `scripts/check-vllm-buckets.py` | CI canary for upstream vLLM bucket/metric-set drift |
 | `scripts/check-sigpipe.py` | finds pipes whose consumer exits before the producer — see rule 17 |
+| `scripts/registry-cache.sh` | opt-in pull-through image caches for `local`; `kind-up.sh` mirrors only the ones actually running, so the default path is unchanged |
 | `docs/ci.md` + `docs/releasing.md` | what CI proves; how to cut a release without breaking it |
 | `.github/actions/verify-chart/` | the chart's cluster verification, called by CI **and** the publish workflow |
 | `scripts/config.sh` | single source for version pins, names, labels; asserts cross-file invariants |
 | `charts/` + `scripts/chart-build.py` | Helm chart, assembled into gitignored `dist/` |
 | `terraform/{eks,gke}` + `terraform/modules/contract` | clusters; `contract` holds **cross-cloud identity constants only** — sizing stays in the roots |
 | `kind/gpu-sim.yaml` | local cluster — **single node** |
-| `Taskfile.yml` | **`task preflight`** is the gate before landing; also `selftest`, `compose-selftest`, `doc-claims`, `sigpipe`, `rule-tests`, `drift-test`, `chart`, `dashboards`, `compose`, `outstanding` |
+| `Taskfile.yml` | **`task preflight`** is the gate before landing; also `selftest`, `compose-selftest`, `doc-claims`, `sigpipe`, `rule-tests`, `drift-test`, `chart`, `dashboards`, `compose`, `cache:*`, `outstanding` |
 
 ## Iron rules
 

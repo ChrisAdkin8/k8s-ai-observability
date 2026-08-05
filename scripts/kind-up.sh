@@ -138,6 +138,75 @@ EOF
   fi
 fi
 
+# --- point containerd at whichever pull-through caches are running ---------------
+#
+# Written AFTER the cluster exists and on the reuse path too, because hosts.toml is read
+# per pull rather than at containerd start-up: a cache started later is picked up by the
+# next `task local:up` without recreating anything. (The config_path setting that makes
+# this directory meaningful is the opposite — see kind/gpu-sim.yaml.)
+#
+# Nothing here is fatal. A cache that is not running is simply not mirrored, which is
+# the documented default, and the only cost of getting it wrong is the pull time the
+# cache exists to save.
+configure_registry_mirrors() {
+  local entry host slug upstream name state node mirrored=0 nodes cfg
+  nodes="$(kind get nodes --name "$CLUSTER_NAME" 2>/dev/null || true)"
+  [[ -n "$nodes" ]] || return 0
+
+  for entry in "${REGISTRY_CACHES[@]}"; do
+    IFS='|' read -r host slug upstream <<< "$entry"
+    name="${REGISTRY_CACHE_PREFIX}-${slug}"
+    state="$("$CONTAINER_CLI" inspect -f '{{.State.Status}}' "$name" 2>/dev/null || true)"
+
+    # ⚠️ A STOPPED CACHE MUST HAVE ITS MIRROR FILE REMOVED, not merely skipped.
+    # hosts.toml lives in the node and outlives the container it points at, so
+    # `registry-cache.sh down` on a reused cluster would otherwise leave containerd
+    # dialling a host that no longer exists on every pull. That is survivable (the
+    # `server` fallback below still fetches the image) but it buys a failed connection
+    # per layer for nothing, and it is invisible unless you read the file.
+    if [[ "$state" != "running" ]]; then
+      for node in $nodes; do
+        "$CONTAINER_CLI" exec "$node" rm -f "${CONTAINERD_CERTS_DIR}/${host}/hosts.toml" 2>/dev/null || true
+      done
+      continue
+    fi
+
+    for node in $nodes; do
+      # `server` is set explicitly so the fallback is unambiguous: containerd tries the
+      # [host.*] mirrors in order and the server last, so a cache that is up but broken
+      # costs a retry rather than the image.
+      "$CONTAINER_CLI" exec -i "$node" sh -c \
+        "mkdir -p '${CONTAINERD_CERTS_DIR}/${host}' && cat > '${CONTAINERD_CERTS_DIR}/${host}/hosts.toml'" <<EOF
+server = "${upstream}"
+
+[host."http://${name}:5000"]
+  capabilities = ["pull", "resolve"]
+EOF
+    done
+    mirrored=$(( mirrored + 1 ))
+  done
+
+  if (( mirrored == 0 )); then
+    echo "==> no pull-through cache running — images come from the internet on every new cluster"
+    echo "    (./scripts/registry-cache.sh up makes the NEXT cold build read from disk)"
+    return 0
+  fi
+
+  # The mirrors are inert without the config_path patch, and silently so. A cluster
+  # created before that block existed is the realistic case, and "nothing got faster"
+  # is a terrible thing to have to diagnose.
+  cfg="$("$CONTAINER_CLI" exec "${nodes%%$'\n'*}" cat /etc/containerd/config.toml 2>/dev/null || true)"
+  if [[ "$cfg" != *"config_path"* ]]; then
+    echo "WARNING: ${mirrored} cache(s) running, but this cluster's containerd has no" >&2
+    echo "         registry config_path, so it will IGNORE them and pull as usual." >&2
+    echo "         The cluster predates the containerdConfigPatches block in $KIND_CONFIG." >&2
+    echo "         Recreate it to benefit:  ./scripts/teardown.sh local --destroy && task local:up" >&2
+    return 0
+  fi
+  echo "==> ${mirrored} pull-through cache(s) mirrored into containerd"
+}
+configure_registry_mirrors
+
 CTX="$(ensure_context local)"
 
 # The invariant, checked against the cluster that now exists rather than the file that

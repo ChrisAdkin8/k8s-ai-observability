@@ -17,6 +17,31 @@ apiVersion: kind.x-k8s.io/v1alpha4
 # three targets present the same gpu-sim-<target> context shape to the wrong-context guard.
 name: gpu-sim
 
+# ---- per-registry mirror lookup (opt-in pull-through caches) ------------------
+#
+# This only turns the MECHANISM on. It points containerd at a directory of per-host
+# hosts.toml files; scripts/kind-up.sh writes those files, and only for caches that
+# are actually running (scripts/registry-cache.sh up). With no caches, the directory
+# stays empty and every pull goes to the internet exactly as it did before.
+#
+# ⚠️ IT HAS TO BE HERE, AT CREATION TIME, RATHER THAN WRITTEN IN AFTERWARDS. This is
+# containerd's own config.toml, read at start-up; adding it to a running node would
+# need a containerd restart on a live cluster. hosts.toml files, by contrast, are read
+# per pull, which is why kind-up.sh can write those into an existing node and they take
+# effect immediately.
+#
+# ⚠️ AND IT IS WHY A CLUSTER BUILT BEFORE THIS BLOCK CANNOT USE THE CACHES. There is no
+# error in that case, just full-speed pulls, so kind-up.sh checks for the setting and
+# says so rather than leaving you to wonder why nothing got faster.
+#
+# The `registry.mirrors` form that most guides still show was REMOVED in containerd 2.0.
+# The node image here runs containerd v2.3.1, so config_path is not a preference, it is
+# the only mechanism that exists.
+containerdConfigPatches:
+  - |-
+    [plugins."io.containerd.grpc.v1.cri".registry]
+      config_path = "/etc/containerd/certs.d"
+
 nodes:
   # Single node. kind removes the control-plane NoSchedule taint when it is the only
   # node, so the GPU workloads and the LLM simulators schedule here. 8 simulated GPUs

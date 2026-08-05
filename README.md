@@ -182,6 +182,27 @@ and why `verify.sh --byo` is what tells you.
 
 No GPU instances or GPU quota are used on any target.
 
+### Faster cold builds on `local`
+
+`kind delete cluster` throws away the node's image store, so every cold `task local:up`
+re-pulls the whole stack: ~915 MB across 14 images, `grafana` alone 352 MB. Optional
+pull-through caches sit on the kind network and outlive the cluster.
+
+```sh
+task cache:up          # once; they persist across kind delete
+task cache:status      # what each one is holding
+task cache:down        # stop them, keeping what they cached
+task cache:purge       # stop them and discard it
+```
+
+The build that *populates* them is slower, not faster. Every cold build after it reads
+from local disk instead of from five registries.
+
+Off by default, and safe to stop at any point: with no cache running `kind-up.sh` writes
+no mirror config, and containerd falls back to the real registry regardless.
+
+⚠️ Unverified: the podman path. These have only ever been run against Docker.
+
 ## Opening the dashboards
 
 Grafana stays ClusterIP, so there is no load balancer, no ingress and no cost.
