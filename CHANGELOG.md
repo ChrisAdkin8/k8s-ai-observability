@@ -23,6 +23,29 @@ Comparison links are at the foot of this file, one per released version.
 
 ## [Unreleased]
 
+## [0.10.0] — 2026-08-05
+
+**A cold `task local:up` was waiting on two things that were not work.** One was a
+three-minute config-reloader poll, entered every time because this repo applied its own
+ServiceMonitors after Prometheus had already started. The other was the image pulls kind
+discards with every `kind delete`. Measured end to end on one machine, 2026-08-05:
+**555.7s before, 321.0s after**, with `verify.sh` check 3 alone going 126.5s to 4.7s.
+What remains in `verify.sh` is 155s of the two alerts' own `for:` durations, which is the
+floor rather than a wait.
+
+The sizing fix came out of the same measurement. `kind-up.sh` warned that a machine given
+exactly the recommended 8 GiB was under 8 GiB, which is the instrument being wrong about
+the world, and this repo opens by saying to suspect the instrument first.
+
+MINOR by this file's table. Nothing an existing cluster can see moved: no metric,
+recording rule, alert, dashboard `uid`, profile, namespace, chart template or Terraform
+input. The install produces the same objects in the same order, just sooner. The one
+user-visible behaviour change is the sizing check accepting machines it used to refuse,
+which is strictly more permissive.
+
+⚠️ CI has not yet re-measured its own timings against this, so the figures quoted in
+`CLAUDE.md` remain an upper bound until a run id replaces them.
+
 ### Added
 
 - **Opt-in pull-through image caches for the `local` target** (`scripts/registry-cache.sh`,
@@ -1906,7 +1929,8 @@ Initial public release. Build and test GPU and LLM observability without a GPU.
   a GPU, running the advertised `task local:up` end to end including every acceptance
   check, with a diagnostics bundle on failure and weekly upstream-drift detection.
 
-[Unreleased]: https://github.com/ChrisAdkin8/k8s-ai-observability/compare/v0.9.2...HEAD
+[Unreleased]: https://github.com/ChrisAdkin8/k8s-ai-observability/compare/v0.10.0...HEAD
+[0.10.0]: https://github.com/ChrisAdkin8/k8s-ai-observability/compare/v0.9.2...v0.10.0
 [0.9.2]: https://github.com/ChrisAdkin8/k8s-ai-observability/compare/v0.9.1...v0.9.2
 [0.9.1]: https://github.com/ChrisAdkin8/k8s-ai-observability/compare/v0.9.0...v0.9.1
 [0.9.0]: https://github.com/ChrisAdkin8/k8s-ai-observability/compare/v0.8.0...v0.9.0
