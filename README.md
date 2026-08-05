@@ -27,12 +27,10 @@ That's the fastest way to see it. To exercise Kubernetes itself (scheduling on
 `nvidia.com/gpu`, the device plugin, ServiceMonitor discovery, the Grafana sidecar):
 
 ```sh
-task local:up        # kind cluster -> full stack -> acceptance checks. ~6 min, $0.
-task local:grafana   # holds one port-forward, opens both boards on localhost:3000
-task local:destroy   # prompts, then removes everything
+task local:up && task local:grafana # deploy the kind cluster & full stack then open the grafana dashboards ~6 min.
 ```
 
-![task local:up: a kind cluster comes up, the stack installs, then verify.sh reports PASS
+![task local:up && task local:grafana: a kind cluster comes up, the stack installs, then verify.sh reports PASS
 across every acceptance check and both Grafana boards render with live data](demo.gif)
 
 The install is fast-forwarded. `verify.sh` runs at the recording's own pace, because the
