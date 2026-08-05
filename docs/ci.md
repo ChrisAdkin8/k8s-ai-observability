@@ -282,10 +282,39 @@ important part. Every rollout wait is `|| true`, so a partially broken cluster d
 fail fast: it walks every timeout in turn and then fails in `verify.sh`. A tighter cap would
 guillotine exactly the run whose diagnostics you need.
 
-A healthy run is nowhere near it. Current measured timings live in
-[`CLAUDE.md`](../CLAUDE.md) under *Working loop*, with the run id they came from; they are
-not repeated here, because a number stated in two places is a fork waiting to disagree. If a
-green run ever approaches 35 minutes, something is waiting that should not be.
+A healthy run is nowhere near it. If a green run ever approaches 35 minutes, something is
+waiting that should not be.
+
+### Current measured timings
+
+⚠️ **This page owns these numbers.** They used to live in `CLAUDE.md`, which is loaded into
+every session, and this page pointed there. That was backwards twice over: timings are
+reference data rather than standing law, and the pointer did not stop `CONTRIBUTING.md`
+keeping a second copy anyway. Both copies then drifted from the runs they named. State them
+once, here, and point at this section.
+
+Measured on run [`30998470446`](https://github.com/ChrisAdkin8/k8s-ai-observability/actions/runs/30998470446)
+(2026-08-05, a single run, so read every total as one sample of a variable quantity):
+
+| Job | |
+|--|--|
+| `what changed` | 5s |
+| `helm chart (lint, render, assertions fire)` | 12s |
+| `selftest + rule tests + shell syntax` (`fast`) | 16s |
+| `simulator image (build both arches, smoke-test amd64)` | 19s |
+| `compose stack (no Kubernetes)` | 60s |
+| `chart on kind (helm test, foreign Prometheus)` | 4m09s |
+| `full stack on kind (lite)` | 4m38s |
+| `full stack on kind (full)` | 5m00s |
+| **whole workflow** | **5m27s** |
+
+`verify.sh` itself accounts for 160s of `full` and 150s of `lite`.
+
+⚠️ ~~These predate the early ServiceMonitor apply.~~ **DONE — re-measured 2026-08-05 on run
+`30998470446`, the first run after it.** The pre-change figures, on run `30870290833`, were
+`full` 6m12s, `lite` 4m42s, workflow 6m27s, and `verify.sh` 215s and 160s. Read the totals
+as single samples; the unambiguous evidence is **check 3, which now lands in 4s (`full`) and
+5s (`lite`)** rather than waiting out a 0-180s config-reload poll.
 
 ### The timings have been wrong twice
 

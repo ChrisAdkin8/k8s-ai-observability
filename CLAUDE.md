@@ -64,8 +64,9 @@ rig knows the right answer.
 12. **Docs drift is a known failure class.** Counts ("emits N metrics", "N jobs") and ids
     in prose have been corrected repeatedly. Re-verify every number against the code it
     describes; `doc-claims` mechanises the ones that recur, including this file's.
-13. **Prose style:** em dashes have been deliberately stripped from the README and catalog
-    pages twice. Don't reintroduce them there.
+13. **Prose style:** em dashes stay out of the README and the two `.grafana-com.md`
+    catalog pages. Stripped by hand three times; **`doc-claims` now enforces it**, so a
+    fourth is a red `preflight` rather than something a reader has to notice.
 14. **Containers run `readOnlyRootFilesystem`** — hence `PYTHONDONTWRITEBYTECODE`; scripts
     stay dependency-free.
 15. **Terraform:** commit `.terraform.lock.hcl`, never `*.tfvars` (examples only). GKE's
@@ -83,7 +84,8 @@ rig knows the right answer.
     could have skipped the cluster jobs on a code change. Separately, zsh does not
     word-split unquoted parameters, so a test harness passed `"local --skip-monitoring"` as
     ONE argument and a passing script looked broken. **Test shell with `bash -c`**, never
-    interactively. `check-sigpipe.py` covers the first class; nothing covers the second.
+    interactively. `check-sigpipe.py` covers the first class. ⚠️ **Unverified:** the second
+    has no check at all, so a word-splitting bug still reaches CI unaided.
 
 18. **An assertion that only ever passes is not an assertion.** Before trusting a new
     check, break what it watches and confirm it goes red — then fix it. Every `--selftest`
@@ -109,14 +111,9 @@ rig knows the right answer.
   `chart on kind`. Matrix values are part of the name, so the names live in the ruleset AND
   in `.github/required-checks.txt`; **change the ruleset first, then record it**, or
   `settings-drift` reports the disagreement. Docs-only changes skip the cluster, and `fast`
-  gates the five expensive jobs. Measured on run 30998470446 (2026-08-05, one run): `full`
-  5m00s, `lite` 4m38s, whole workflow 5m27s; `verify.sh` itself 160s and 150s. Quote the
-  run id with any figure you take from here. ⚠️ ~~These predate the early ServiceMonitor
-  apply.~~ **DONE — re-measured 2026-08-05 on run 30998470446**, the first CI run after
-  it. The pre-change figures, on run 30870290833, were `full` 6m12s, `lite` 4m42s,
-  workflow 6m27s, `verify.sh` 215s and 160s. Read the totals as single samples of a
-  variable quantity; the unambiguous evidence is **check 3, which now lands in 4s (full)
-  and 5s (lite)** rather than waiting out a 0-180s config-reload poll. `docs/ci.md` is the map.
+  gates the five expensive jobs. **Timings live in `docs/ci.md`, not here** — with the run
+  id they came from, which you quote with any figure you take from them. They sat in this
+  file until 2026-08-05 and drifted: a wrong run id and a total no run produced.
 - **Review discipline:** specs and plans get **one adversarial review round, then
   implementation** — after one round the remaining risk is empirical (a timing, a default,
   a command's exact syntax) and a desk can't settle it; the first hours of implementation
@@ -127,8 +124,10 @@ rig knows the right answer.
 
 ## Prompt files
 
-`prompt-*.md` in the root are task specifications (currently **gitignored** — decide
-deliberately if that should change). House conventions: numbered W-items; a Background of
+`prompt-*.md` in the root are task specifications. ⚠️ **Unverified:** whether they should
+stay **gitignored** has never been decided, only inherited.
+
+House conventions: numbered W-items; a Background of
 **verified facts** with `file:line` citations and the date they were read; an effort table
 ("estimates from reading the code — **treat the ordering as firmer than the numbers**, and
 re-derive the largest line"); Non-goals; acceptance criteria written before the work.
