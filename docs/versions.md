@@ -12,13 +12,16 @@ in `scripts/config.sh` at install time.
 | kube-prometheus-stack chart | `scripts/config.sh` | `87.17.0` |
 | fake-gpu-operator chart | `scripts/config.sh` | `0.0.59` |
 | vLLM metric surface mirrored | `scripts/config.sh` (`LLM_VLLM_VERSION`) | `v1` — names and buckets, drift-checked weekly, see below |
+| Grafana (compose) | `compose/compose.yaml` | `11.6.0` — ⚠️ the boards' kiosk-mode URL syntax is Grafana 11; a major bump changes it |
+| Prometheus (compose) | `compose/compose.yaml` | `v3.7.3` — deliberately the same as promtool below, so the rules are tested against what evaluates them |
+| `busybox` (compose `generate`) | `compose/compose.yaml` | `1.36` — runs `scripts/extract.sh`, which is POSIX sh + awk so `docker compose up` needs nothing on the host |
 | promtool (rule tests) | `.github/workflows/ci.yml` (`PROMETHEUS_VERSION`) | `3.7.3` — CI only; locally any promtool works |
 | LLM simulator base image (cluster) | `manifests/llm/20-simulators.yaml` | `python:3.12-slim` — the ConfigMap-mounted path, which is how the rig itself runs it |
 | LLM simulator base image (published) | `Dockerfile` | `python:3.12-slim` — the same base for `ghcr.io/<owner>/vllm-metrics-sim` |
 | Published simulator image tag | `charts/.../Chart.yaml` (`appVersion`) | the repo's release tag. The chart's `llm.image.tag` defaults to it; see below |
-| Helm chart version | `charts/.../Chart.yaml` (`version`) | `0.1.0` — moves independently of `appVersion` |
+| Helm chart version | `charts/.../Chart.yaml` (`version`) | `0.2.5` — moves independently of `appVersion`, and on **every** release, because a release publishes the chart whether or not a template changed |
 | Helm (CI) | `.github/workflows/ci.yml` (`HELM_VERSION`) | `3.21.3` — **v3, not the v4 line.** Helm 4 is a major this repo has not been validated against, and CI should exercise what users run |
-| `kubectl` image for `helm test` | `charts/.../values.yaml` (`tests.image`) | `bitnami/kubectl:1.31` |
+| `kubectl` image for `helm test` | `charts/.../values.yaml` (`tests.image`) | `alpine/k8s:1.36.2` — ⚠️ **was `bitnami/kubectl:1.31`, which no longer exists**: Bitnami retired much of its public Docker Hub catalogue, so the test pod sat in `ImagePullBackOff`. Needs kubectl **and** `/bin/bash`, which rules out the distroless `registry.k8s.io/kubectl`. Its minor must stay within +/-1 of `K8S_VERSION`; `check-doc-claims.py` enforces that |
 | DCGM dashboard | `manifests/dashboards/gpu-sim-dcgm.json` | shipped in-repo, published as grafana.com [25618](https://grafana.com/grafana/dashboards/25618-gpu-simulation-dcgm-overview/) (board 12239 is an optional swap-in) |
 | vLLM dashboard | `manifests/dashboards/llm-sim-overview.json` | shipped in-repo, published as grafana.com [25620](https://grafana.com/grafana/dashboards/25620-llm-simulation-vllm-serving-overview/) |
 | aws provider | `terraform/eks/versions.tf` | `~> 6.55` |

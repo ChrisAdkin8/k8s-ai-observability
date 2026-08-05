@@ -37,6 +37,12 @@ WHAT IT CHECKS
      chart at 0.2.5, three lines above its own "take the newest version" warning. Registry
      versions are immutable, so a stale pin installs an OLD chart instead of failing, and
      releasing.md moves this number on every release.
+ 10. The same chart version where docs/versions.md states it a second time. That row said
+     `0.1.0` against a chart at `0.2.5` — four releases stale, in the file whose entire job
+     is to be the single record of every pin.
+ 11. docs/versions.md's COMPLETENESS, against compose/compose.yaml. It opens "Every version
+     this repo pins", and omitted `grafana/grafana:11.6.0` while the boards' kiosk-mode URL
+     syntax depends on Grafana 11 being the major. A set comparison, not a count.
 
 WHAT IT DELIBERATELY DOES NOT CHECK
   * **The drift-check gap count** ("23 upstream metrics this simulator does not emit",
@@ -169,6 +175,28 @@ def derive_chart_version() -> str:
     m = re.search(r'^version:\s*"?([\d.]+)"?', read(CHART_YAML), re.MULTILINE)
     return m.group(1) if m else die(
         "chart-version", f"no `version:` in {CHART_YAML} — the derivation is dead")
+
+
+COMPOSE = "compose/compose.yaml"
+VERSIONS_DOC = "docs/versions.md"
+
+
+def compose_pins() -> dict:
+    """Every `image: name:tag` in the compose file, as {base name: tag}.
+
+    docs/versions.md opens by claiming to hold "Every version this repo pins, and the
+    single place each one is set". It did not: `grafana/grafana:11.6.0` was absent, and
+    that pin is behaviour-bearing — the boards' kiosk-mode URL syntax is Grafana 11.
+    `busybox` and the compose Prometheus were missing too.
+
+    Keyed on the LAST path segment so `prom/prometheus` matches prose saying
+    "Prometheus", which is how the table names things.
+    """
+    out = {}
+    for ref in re.findall(r"^\s*image:\s*([\w./-]+:[\w.-]+)\s*$", read(COMPOSE), re.M):
+        name, _, tag = ref.rpartition(":")
+        out[name.rpartition("/")[2]] = tag
+    return out
 
 
 CI_WORKFLOW = ".github/workflows/ci.yml"
@@ -343,6 +371,13 @@ CLAIM_CHECKS = [
          hint="the README's `helm install --version` must match Chart.yaml. Registry "
               "versions are immutable, so a stale pin installs an OLD chart rather "
               "than failing"),
+    # The same truth, stated a second time in docs/versions.md's table. That row said
+    # `0.1.0` against a chart at `0.2.5` — four releases stale, in the file whose whole
+    # job is to be the single record of every pin.
+    dict(name="chart-version-row", pattern=r"`(\d+\.\d+\.\d+)`",
+         context=r"Helm chart version", derive=derive_chart_version, cast=str,
+         unit=f"chart version in {CHART_YAML}",
+         hint=f"the `Helm chart version` row in {VERSIONS_DOC} must match Chart.yaml"),
 ]
 
 URL_ID = re.compile(r"grafana\.com/grafana/dashboards/(\d+)")
@@ -402,6 +437,29 @@ def main() -> None:
                    f"(someone else's board), give it a home in {DASHBOARDS_README} first.")
     print(f"  ok  ids        {len(refs):>3} references, all known to the catalog "
           f"({', '.join(sorted(blessed))})")
+
+    # ---- docs/versions.md claims completeness. Hold it to that.
+    #
+    # Its first sentence is "Every version this repo pins, and the single place each one
+    # is set". A table that says so and then omits a pin is worse than one that never
+    # claimed it, because the omission reads as "not pinned" rather than "not written
+    # down". `grafana/grafana:11.6.0` was missing while the boards' kiosk URLs depend on
+    # Grafana 11 being the major.
+    #
+    # A set comparison, not a count: a count would pass on the wrong three.
+    pins = compose_pins()
+    if not pins:
+        die("versions-pins", f"no image pins parsed from {COMPOSE} — the comparison is dead")
+    vtext = read(VERSIONS_DOC)
+    absent = sorted(f"{n}:{v}" for n, v in pins.items()
+                    if not any(n.lower() in ln.lower() and v in ln for ln in vtext.splitlines()))
+    if absent:
+        for a in absent:
+            print(f"  {COMPOSE} pins '{a}' and {VERSIONS_DOC} has no row naming both",
+                  file=sys.stderr)
+        die("versions-pins", f"{VERSIONS_DOC} opens by claiming every pinned version. Add a "
+                             f"row, or stop claiming it.")
+    print(f"  ok  versions-pins {len(pins)} compose pin(s) each have a row in {VERSIONS_DOC}")
 
     # ---- CI check names: two set comparisons, not counts
     #
@@ -495,6 +553,8 @@ The exporter emits 3 events per scrape, and 12 of them are dropped.\n[![Kubernet
 Real vLLM only ever emits one surface — `both` is a rig affordance, not a fidelity claim.\n  image: alpine/k8s:1.36.2
   helm install rig oci://ghcr.io/chrisadkin8/charts/k8s-ai-observability --version 0.2.5 \\
 Tag locally, then python3 scripts/chart-build.py --strict-version 9.9.9 --skip-deps.
+| Helm chart version | `charts/.../Chart.yaml` (`version`) | `0.2.5` — moves independently |
+| kube-prometheus-stack chart | `scripts/config.sh` | `87.17.0` |
 """
 
 
@@ -550,7 +610,7 @@ def selftest() -> None:
     expected = {"emits": [15], "alerts": [6], "l-range": [9],
                 "promql": [9], "datasource": [33], "k8s-version": ["1.36.1"],
                 "kubectl-skew": ["1.36"], "ci-job-count": [8], "ci-gated": [5],
-                "chart-version": ["0.2.5"]}
+                "chart-version": ["0.2.5"], "chart-version-row": ["0.2.5"]}
     for c in CLAIM_CHECKS:
         vals = [v for _, _, v in claims(c["pattern"], c["context"], "f.md",
                                         CLAIM_FIXTURE, c.get("cast", to_int))]
