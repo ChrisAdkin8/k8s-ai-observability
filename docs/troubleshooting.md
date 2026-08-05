@@ -36,14 +36,27 @@ causes apart by working outwards from the producer.
 metrics are flowing, that the dashboard is present under uid `gpu-sim-dcgm`, and that Grafana
 serves it to an anonymous request.
 
-## Why a 3 GiB runtime is refused when the floor reads 3
+## The floors are read from what the runtime reports
 
-`LITE=1` lowers `KIND_MIN_MEMORY_GIB` to 3, yet allocating exactly 3 GiB fails the preflight
-before anything is created. The floor is checked against what the runtime *reports*, not against
-what you asked for: `kind-up.sh` reads the runtime's own `MemTotal` and floors it with integer
-division, so a colima VM asked for 3 GiB reports 2.83 and reads as `2`. Allocating 4 reports
-3.81 and passes.
+The sizing preflight is checked against what the runtime *reports*, not against what you
+asked for, and those are never the same number: firmware and the kernel take a few hundred
+MB before Linux counts `MemTotal`. A colima VM asked for 8 GiB reports 8307175424 bytes,
+which is 7.738 GiB.
 
-Measured on colima/aarch64, 2026-08-04: `ALL CHECKS PASSED` at 4 GiB, with the stack using
-2.197 GiB of it. The constants are set in `scripts/config.sh`, and the
+⚠️ ~~Allocating exactly 3 GiB fails the preflight before anything is created; allocate 4.~~
+**DONE — fixed 2026-08-05, and the workaround above was the tell.** `kind-up.sh` floored
+that reading with integer division, so 7.738 read as `7` and **every threshold was
+silently one GiB higher than it said**. The recommendation was unreachable at its own
+value: a machine given exactly the recommended 8 GiB warned "under the recommended 8 GiB"
+on every run. The floors refused correctly-sized machines: asked for 5, reports ~4.83,
+reads 4, refused. Three separate documents had written the workaround down (*allocate 4 to
+get 3.81*) rather than suspecting the instrument.
+
+It now rounds. Asked for 8 reads 8, asked for 5 reads 5, asked for 3 reads 3, and colima's
+2 GiB default still reads 2 and is still refused. The cost is half a GiB of strictness at
+the boundary, which buys back a floor that means what it says.
+
+Measured on colima/aarch64, 2026-08-04: `ALL CHECKS PASSED` under `LITE=1` at 4 GiB, with
+the stack using 2.197 GiB of it. 3 GiB is the floor, not a measured configuration. The
+constants are set in `scripts/config.sh`, and the
 [README](../README.md#prerequisites) gives the `colima` command.

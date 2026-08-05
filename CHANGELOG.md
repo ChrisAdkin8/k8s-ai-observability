@@ -23,6 +23,20 @@ Comparison links are at the foot of this file, one per released version.
 
 ## [Unreleased]
 
+### Fixed
+
+- **The container-runtime sizing check read a whole GiB low, so every threshold it
+  enforced was one higher than it stated.** `scripts/kind-up.sh` floored the runtime's
+  reported `MemTotal` with integer division, and a guest never counts its whole
+  allocation: a colima VM asked for 8 GiB reports 8307175424 bytes, which is 7.738 GiB.
+  Two consequences, neither cosmetic. The recommendation was unreachable at its own
+  value, so a machine sized to exactly the recommended 8 GiB warned that it was under
+  8 GiB on every run. And the floors refused correctly-sized machines: asked for 5,
+  reports ~4.83, reads `4`, refused before anything is created. Three documents had
+  written the workaround down (*allocate 4 to clear a floor of 3*) rather than
+  suspecting the instrument. It now rounds, so 8 reads 8, 5 reads 5 and 3 reads 3,
+  while colima's 2 GiB default still reads 2 and is still refused.
+
 ## [0.9.2] — 2026-08-05
 
 **Static analysis, and the half of it that does not work here.** CodeQL is enabled and

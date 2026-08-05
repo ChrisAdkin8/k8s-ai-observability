@@ -326,12 +326,16 @@ KPS_VALUES=(-f helm/kube-prometheus-stack/values.yaml)
 # 256Mi/512Mi and Alertmanager, kube-state-metrics and node-exporter go away. The
 # floor still is not 2 GiB: the kind node, the control plane, the operator and two
 # Helm releases have a cost that trimming values cannot remove.
-# ⚠️ THESE ARE REPORTED GiB, NOT ALLOCATED GiB, and the difference is a whole unit.
-# kind-up.sh reads the runtime's own MemTotal and floors it with integer division, so a
-# colima VM asked for 3 GiB reports 2.83 and reads as 2 — under this floor, refused
-# before anything starts. Allocating 4 reports 3.81 and passes. Measured 2026-08-04 on
-# colima/aarch64; the README's LITE block gives the command, and
-# docs/troubleshooting.md carries the user-facing version of this paragraph.
+# ⚠️ THESE ARE REPORTED GiB, NOT ALLOCATED GiB, and they are not the same number: a
+# guest never counts its whole allocation (colima asked for 8 GiB reports 7.738).
+# kind-up.sh ROUNDS that reading, so each floor below is reachable at its own value —
+# ask for 3 and 3 is what the check sees.
+#
+# ⚠️ ~~Allocating 4 to clear a floor of 3 is the documented workaround.~~ **DONE —
+# 2026-08-05: the reading was floored, so every threshold here was silently one GiB
+# higher than it said, and the recommendation warned on a machine sized to it exactly.**
+# See runtime_preflight in kind-up.sh for the arithmetic and the trade, and
+# docs/troubleshooting.md for the user-facing version.
 if [[ "$LITE" == "1" ]]; then
   KIND_MIN_MEMORY_GIB="${KIND_MIN_MEMORY_GIB:-3}"
   KIND_WANT_MEMORY_GIB="${KIND_WANT_MEMORY_GIB:-4}"

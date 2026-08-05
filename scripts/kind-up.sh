@@ -65,7 +65,28 @@ EOF
     return 0
   fi
 
-  local mem_gib=$(( mem_bytes / 1024 / 1024 / 1024 ))
+  # ⚠️ ROUNDED, NOT FLOORED, AND THAT IS A FIX RATHER THAN A PREFERENCE.
+  #
+  # A guest NEVER reports the whole allocation — firmware and the kernel take a few
+  # hundred MB before Linux counts MemTotal. Measured on colima/aarch64 2026-08-05:
+  # `colima start --memory 8` yields MemTotal=8307175424, which is 7.738 GiB.
+  #
+  # Flooring that read 7, so EVERY THRESHOLD IN THIS FILE WAS SILENTLY ONE GiB HIGHER
+  # THAN IT SAID. The consequences were not cosmetic:
+  #   * the recommendation was unreachable at its own value — a VM given exactly the
+  #     recommended 8 GiB warned "under the recommended 8 GiB", on every single run
+  #   * the FLOOR refused correctly-sized machines: asked for 5, reports ~4.83, reads
+  #     4, and the install is refused before anything is created. Same at the LITE
+  #     floor of 3, which reports 2.83 and reads 2
+  # The repo had documented the workaround in three places (allocate 4 to get 3.81)
+  # rather than fixing the arithmetic that made it necessary.
+  #
+  # Rounding costs a little strictness at the boundary: a VM with a true 4.5 GiB now
+  # reads 5 and passes a floor of 5. That is the right trade. This floor is a
+  # heuristic guard against a runtime that cannot fit Prometheus at all — colima's
+  # 2 GiB default still reads 2 and is still refused — and half a GiB of slack in it
+  # is worth far less than refusing the configuration the README tells you to build.
+  local mem_gib=$(( (mem_bytes + 512 * 1024 * 1024) / 1024 / 1024 / 1024 ))
   echo "==> runtime: $runtime, ${mem_gib} GiB / ${cpus} CPU"
 
   if (( mem_gib < KIND_MIN_MEMORY_GIB || cpus < KIND_MIN_CPUS )); then

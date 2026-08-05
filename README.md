@@ -231,17 +231,17 @@ colima start --cpu 4 --memory 8 --disk 40
 
 **Or run the trimmed stack instead.** `LITE=1` drops Alertmanager, kube-state-metrics,
 node-exporter and the chart's ~100 default rules, and puts Prometheus on 256Mi/512Mi.
-Measured at 2.2 GiB in use, so it fits a small runtime. **Allocate 4 GiB**:
+Measured at 2.2 GiB in use, so it fits a small runtime. Allocate 4 GiB:
 
 ```sh
 colima stop && colima start --cpu 4 --memory 4 --disk 40
 LITE=1 task local:up
 ```
 
-⚠️ **Allocate 4 even though the floor reads 3, and do not try 3.** The floor is checked
-against what the runtime *reports*, not against what you asked for, and a VM asked for
-3 GiB reports less than 3. It is refused before anything is created.
-[Why 3 is refused](docs/troubleshooting.md#why-a-3-gib-runtime-is-refused-when-the-floor-reads-3).
+4 is the recommendation, not the floor. The floor is 3 and it now means what it says:
+ask for 3 and the preflight accepts it, where it used to refuse. What it has never
+been is *measured* at 3, which is why the command above still says 4.
+[How the floors are read](docs/troubleshooting.md#the-floors-are-read-from-what-the-runtime-reports).
 
 It keeps everything `local` exists to prove: ServiceMonitor discovery, PrometheusRule
 evaluation, the Grafana sidecar import, and scheduling on `nvidia.com/gpu`. Both
