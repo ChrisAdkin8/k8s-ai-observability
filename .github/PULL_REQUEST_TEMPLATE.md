@@ -17,7 +17,9 @@ is probably two PRs — the changelog entry is easier to write when it is one.
 <!--
 ⚠️ Two things here fail SILENTLY and CI cannot catch either:
 
-  * A dashboard panel change makes the README demo GIF stale — docs/record-demo.md.
+  * A dashboard panel change makes the README screenshots stale, and the social preview
+    card cropped from docs/llm-dashboard.png with it — CONTRIBUTING.md, "Editing
+    dashboards".
   * A dashboard change does not reach anyone who imported the board by id until
     it is re-uploaded to grafana.com as a REVISION of the existing id, never as a
     new dashboard — manifests/dashboards/README.md.

@@ -23,6 +23,22 @@ Comparison links are at the foot of this file, one per released version.
 
 ## [Unreleased]
 
+### Removed
+
+- **`docs/record-demo.md`, and the `docs/llm-demo.gif` it specified**, which was never
+  built. The page described capturing a twelve-second compose clip of the two tenants
+  diverging across the 2s threshold, and its line 8 stated the result was "embedded above
+  the fold in `README.md`". It was not: the image above the fold is `docs/gpu-dashboard.png`.
+  `.github/PULL_REQUEST_TEMPLATE.md` separately listed a stale demo GIF among the things CI
+  cannot catch. Two live files asserting an asset that never existed is the prose-drift
+  class `doc-claims` exists for, and `doc-claims` checks numbers and ids rather than
+  whether a named file is there.
+
+  The invariant that survived the deletion is now in `CONTRIBUTING.md` under "Editing
+  dashboards", where the rest of the dashboard-editing rules already live: change a board
+  and the **screenshots** go stale, along with the social preview cropped from
+  `docs/llm-dashboard.png`. The PR template points there instead of at a deleted file.
+
 ## [0.10.0] — 2026-08-05
 
 **A cold `task local:up` was waiting on two things that were not work.** One was a

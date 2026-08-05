@@ -135,10 +135,17 @@ in `manifests/dashboards/`. Keep the `uid` unchanged. A change made only in the 
 is reverted on the next install, because the ConfigMap is rebuilt from the file every
 time — see [manifests/dashboards/](manifests/dashboards/).
 
-If you change what the LLM board looks like — a panel added or removed, but equally a query, threshold, title, layout or refresh interval — the README's demo GIF is now stale — it is
-the one visual asset here that no script can re-render, because a human has to drive the
-board. [docs/record-demo.md](docs/record-demo.md) is the recipe, and exists mainly to hold
-the two settings that decide whether a recording is usable at all.
+If you change what either board looks like — a panel added or removed, but equally a query,
+threshold, title or layout — the README screenshots are now stale, and they are the one
+class of visual asset here that no script can re-render, because a human has to drive the
+board. Retake [docs/gpu-dashboard.png](docs/gpu-dashboard.png) or
+[docs/llm-dashboard.png](docs/llm-dashboard.png) to match.
+
+If you retook the LLM one, regenerate the social card as well —
+`python3 docs/social-preview.py docs/social-preview.png`.
+[docs/social-preview.py](docs/social-preview.py) crops that screenshot **by fraction rather
+than by pixel**, so the card survives a resize, but the comment above the crop records the
+row boundaries it was measured against: re-check them whenever the screenshot is retaken.
 
 ## Docs
 
