@@ -20,7 +20,7 @@ step, and this is the copy the verification below actually runs against:
 
 ```sh
 helm install rig oci://ghcr.io/chrisadkin8/charts/k8s-ai-observability \
-  --version 0.2.4 \
+  --version 0.2.5 \
   --set releaseLabel=<your monitoring release>
 helm test rig --logs                              # ← do not skip this
 ```

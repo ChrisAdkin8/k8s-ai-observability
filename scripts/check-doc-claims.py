@@ -33,6 +33,10 @@ WHAT IT CHECKS
      supports the API server within +/-1 minor; this was 1.31 against 1.36.
   8. `${datasource}` reference count — vs the LLM board. Said 22, "true when that board had
      nine panels, 33 now".
+  9. The chart README's `helm install --version` vs Chart.yaml. It pinned 0.2.4 against a
+     chart at 0.2.5, three lines above its own "take the newest version" warning. Registry
+     versions are immutable, so a stale pin installs an OLD chart instead of failing, and
+     releasing.md moves this number on every release.
 
 WHAT IT DELIBERATELY DOES NOT CHECK
   * **The drift-check gap count** ("23 upstream metrics this simulator does not emit",
@@ -142,6 +146,29 @@ def derive_k8s_minor() -> str:
     m = re.search(r'^K8S_VERSION="([\d.]+)"', read("scripts/config.sh"), re.MULTILINE)
     return m.group(1) if m else die("kubectl-skew",
                                     "no K8S_VERSION in config.sh — the derivation is dead")
+
+
+CHART_YAML = "charts/k8s-ai-observability/Chart.yaml"
+
+
+def derive_chart_version() -> str:
+    """The chart `version:` from Chart.yaml — the version the registry publishes.
+
+    The chart README opens with a `helm install --version X.Y.Z` a stranger is meant to
+    paste, and it pinned 0.2.4 while Chart.yaml said 0.2.5. This is worse than a stale
+    number elsewhere: registry versions are IMMUTABLE, so the stale pin does not fail,
+    it silently installs an older published chart carrying whatever faults it shipped
+    with. The same page lists those faults in a "take the newest version" warning three
+    lines below the command that ignores it.
+
+    It will drift again: releasing.md moves this number on EVERY release, because a
+    release publishes the chart whether or not a template changed.
+
+    `^version:` is anchored so `appVersion:` cannot satisfy it.
+    """
+    m = re.search(r'^version:\s*"?([\d.]+)"?', read(CHART_YAML), re.MULTILINE)
+    return m.group(1) if m else die(
+        "chart-version", f"no `version:` in {CHART_YAML} — the derivation is dead")
 
 
 CI_WORKFLOW = ".github/workflows/ci.yml"
@@ -303,6 +330,19 @@ CLAIM_CHECKS = [
     dict(name="datasource", pattern=rf"\b{NUM} of them\b", context=r"datasource",
          derive=derive_datasource_refs, unit="${datasource} refs on the LLM board",
          hint="count them in manifests/dashboards/llm-sim-overview.json"),
+    # The chart README's paste-able `helm install --version` vs the chart it installs.
+    # Not a count, hence cast=str.
+    #
+    # ⚠️ The lookbehind is load-bearing. Without it `--version` matches inside
+    # `--strict-version`, and releasing.md tells you to run
+    # `chart-build.py --strict-version` — so the release page would start failing this
+    # check the moment anyone wrote a version after that flag.
+    dict(name="chart-version",
+         pattern=r"(?<![\w-])--version\s+(\d+\.\d+\.\d+)", context=r"version",
+         derive=derive_chart_version, cast=str, unit=f"chart version in {CHART_YAML}",
+         hint="the README's `helm install --version` must match Chart.yaml. Registry "
+              "versions are immutable, so a stale pin installs an OLD chart rather "
+              "than failing"),
 ]
 
 URL_ID = re.compile(r"grafana\.com/grafana/dashboards/(\d+)")
@@ -453,6 +493,8 @@ CI runs eight jobs beyond `fast`: changes, compose, chart, image and the stack l
 Docs-only changes skip the cluster, and `fast` gates the five expensive jobs.
 The exporter emits 3 events per scrape, and 12 of them are dropped.\n[![Kubernetes](https://img.shields.io/badge/kubernetes-v1.36.1-326ce5.svg)](kind/gpu-sim.yaml)
 Real vLLM only ever emits one surface — `both` is a rig affordance, not a fidelity claim.\n  image: alpine/k8s:1.36.2
+  helm install rig oci://ghcr.io/chrisadkin8/charts/k8s-ai-observability --version 0.2.5 \\
+Tag locally, then python3 scripts/chart-build.py --strict-version 9.9.9 --skip-deps.
 """
 
 
@@ -502,9 +544,13 @@ def selftest() -> None:
     # "emits one surface" must not reach the families comparison — it did, on this
     # check's first real run against the tree, because the context regex named the
     # subject (vLLM) instead of the counted noun.
+    # ⚠️ "chart-version": the fixture's second line is the DECOY that pins the
+    # lookbehind — `--strict-version 9.9.9` must not reach the comparison, or
+    # docs/releasing.md would fail this check for quoting the release command.
     expected = {"emits": [15], "alerts": [6], "l-range": [9],
                 "promql": [9], "datasource": [33], "k8s-version": ["1.36.1"],
-                "kubectl-skew": ["1.36"], "ci-job-count": [8], "ci-gated": [5]}
+                "kubectl-skew": ["1.36"], "ci-job-count": [8], "ci-gated": [5],
+                "chart-version": ["0.2.5"]}
     for c in CLAIM_CHECKS:
         vals = [v for _, _, v in claims(c["pattern"], c["context"], "f.md",
                                         CLAIM_FIXTURE, c.get("cast", to_int))]
