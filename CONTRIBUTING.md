@@ -176,16 +176,21 @@ order; it has been questioned once and settled.
 - One logical change per commit. If two things are genuinely independent, they are two
   commits, even when they arrive together.
 - Say why in the body, not just what. The diff already says what.
-- CI must be green. Measured on run 30870290833 (2026-08-04, one run): `fast` 10s, `chart`
-  15s, `image` 22s, `compose` 78s, and the two full-stack legs in parallel — `full` 6m12s,
-  `lite` 4m42s — for 6m50s of wall clock. `fast` gates the five expensive jobs, so a broken
-  rule test costs seconds rather than the ~16 runner-minutes they would otherwise spend
-  confirming it.
+- CI must be green. Measured on run 30998470446 (2026-08-05, one run): `fast` 16s, `chart`
+  12s, `image` 19s, `compose` 60s, `chart on kind` 4m09s, and the two full-stack legs in
+  parallel — `full` 5m00s, `lite` 4m38s — for 5m27s of wall clock. `fast` gates the five
+  expensive jobs, so a broken rule test costs seconds rather than the ~16 runner-minutes
+  they would otherwise spend confirming it.
   ⚠️ ~~the two legs are ~6 minutes each, `chart` and `image` about a minute each~~
   **DONE — every one of those was wrong. Re-derived 2026-08-04 from run 30870290833.
   Before the port-forward fix `lite` was the SLOWER leg at 6m39s-8m32s, which is backwards
   for a profile that drops Alertmanager, kube-state-metrics, node-exporter and ~100 rules;
   "each" was what hid it.**
+  ⚠️ ~~The figures above were run 30870290833's, and its total was quoted as 6m50s.~~
+  **DONE — corrected 2026-08-05. That run's own total was 6m27s, not 6m50s, under every
+  way of measuring it (job span, created-to-last-job, and the API's own wall clock, which
+  agree to within 2s and reproduce the 5m27s figure above exactly). The per-job numbers
+  were right; only the total was invented.**
 
 ## What is deliberately out of scope
 

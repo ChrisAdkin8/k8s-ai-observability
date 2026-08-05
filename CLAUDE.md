@@ -109,12 +109,12 @@ rig knows the right answer.
   `chart on kind`. Matrix values are part of the name, so the names live in the ruleset AND
   in `.github/required-checks.txt`; **change the ruleset first, then record it**, or
   `settings-drift` reports the disagreement. Docs-only changes skip the cluster, and `fast`
-  gates the five expensive jobs. Measured on run 30870290833 (2026-08-04, one run): `full`
+  gates the five expensive jobs. Measured on run 30998470446 (2026-08-05, one run): `full`
   5m00s, `lite` 4m38s, whole workflow 5m27s; `verify.sh` itself 160s and 150s. Quote the
   run id with any figure you take from here. ⚠️ ~~These predate the early ServiceMonitor
   apply.~~ **DONE — re-measured 2026-08-05 on run 30998470446**, the first CI run after
   it. The pre-change figures, on run 30870290833, were `full` 6m12s, `lite` 4m42s,
-  workflow 6m50s, `verify.sh` 215s and 160s. Read the totals as single samples of a
+  workflow 6m27s, `verify.sh` 215s and 160s. Read the totals as single samples of a
   variable quantity; the unambiguous evidence is **check 3, which now lands in 4s (full)
   and 5s (lite)** rather than waiting out a 0-180s config-reload poll. `docs/ci.md` is the map.
 - **Review discipline:** specs and plans get **one adversarial review round, then
