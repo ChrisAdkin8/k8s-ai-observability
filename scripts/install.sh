@@ -99,6 +99,85 @@ apply_with_release_label() {
   done
 }
 
+# --- the early apply, and the three minutes it exists to save -------------------
+#
+# ⚠️ THE ServiceMonitors AND RULES ARE APPLIED TWICE, ON PURPOSE. This one races the
+# Helm install; [2b] below applies the same files again, unconditionally. The second
+# apply is not a leftover — it is what makes this one safe to lose.
+#
+# WHAT IT COSTS TO APPLY THEM LATE. Measured on a fresh kind cluster, 2026-08-05:
+# [2b] applied them at 08:55:21, Prometheus recorded its next successful config
+# reload at 08:58:25, and the first nvidia-dcgm-exporter sample landed at 08:58:31 —
+# 184s after the objects existed. The chart's OWN scrape targets were all being
+# collected by 08:55:46. verify.sh check 3 therefore sat in its first-scrape poll for
+# 126.5s of a 288s run, waiting for a target whose ServiceMonitor had been applied
+# before the check even started.
+#
+# THE CAUSE IS THE RELOADER, NOT THE OPERATOR. prometheus-operator regenerates the
+# config Secret in seconds. The config-reloader sidecar then has to notice: its
+# `--watch-interval` defaults to **3m0s** (read from `prometheus-config-reloader
+# --help` inside the running pod) and the inotify path does not fire for the gzipped
+# Secret volume, so an object applied after Prometheus is running waits for the next
+# poll. Confirmed rather than inferred: a throwaway ServiceMonitor applied to a
+# settled cluster took 70s to reach the scrape config — a different draw from the
+# same 3-minute cycle. Expect uniform 0-180s, mean ~90s, every cold install.
+#
+# An object that exists BEFORE the operator writes the first config needs no reload
+# at all. The CRDs are Established within seconds of `helm upgrade` starting, while
+# the Prometheus pod did not start until 175s into the same run (it is behind a
+# 352 MB Grafana pull and friends), so the window is wide — but it IS a race, and
+# losing it must not matter.
+#
+# ⚠️ SO EVERY FAILURE HERE IS REPORTED AND NONE IS FATAL. If the CRDs never arrive,
+# if the webhook is not serving yet, if the apply fails for any reason at all, [2b]
+# still applies the same files and the install is exactly what it was before this
+# function existed: slower, never broken. A silent skip would be the failure mode
+# this repo writes assertions against, hence the messages.
+#
+# The rules go in the same pass as the ServiceMonitors because they ride the same
+# reload: the operator renders PrometheusRules into the rulefile ConfigMaps the
+# reloader watches as directories, on the same 3-minute poll. Fixing only the
+# scrapes would just move the wait to verify.sh check 4c, which asserts a series
+# those rules derive.
+SM_EARLY_POLL_SECONDS=120   # wall-clock, like every poll in verify.sh
+apply_observability_objects_early() {
+  local deadline=$(( SECONDS + SM_EARLY_POLL_SECONDS )) out=""
+  local sm_crd="servicemonitors.monitoring.coreos.com"
+  local rule_crd="prometheusrules.monitoring.coreos.com"
+  # Read into variables rather than piped into grep: this file runs under pipefail,
+  # and a `kubectl ... | grep -q` on a one-word output is the SIGPIPE shape rule 17
+  # is about. There is nothing to gain by piping a single field.
+  local sm_est rule_est ns
+  while :; do
+    sm_est="$("${KUBECTL[@]}" get crd "$sm_crd" \
+      -o jsonpath='{.status.conditions[?(@.type=="Established")].status}' 2>/dev/null || true)"
+    rule_est="$("${KUBECTL[@]}" get crd "$rule_crd" \
+      -o jsonpath='{.status.conditions[?(@.type=="Established")].status}' 2>/dev/null || true)"
+    ns="$("${KUBECTL[@]}" get ns "$MONITORING_NS" -o name 2>/dev/null || true)"
+    if [[ "$sm_est" == "True" && "$rule_est" == "True" && -n "$ns" ]]; then
+      # The CRDs exist; the PrometheusRule validating webhook may not be serving
+      # yet, and that is a transient rejection rather than a fault — retry until
+      # the deadline. `apply` is idempotent, so re-applying the ServiceMonitors
+      # while waiting for the webhook costs nothing.
+      if out="$(apply_with_release_label manifests/servicemonitor/*.yaml manifests/alerts/*.yaml 2>&1)"; then
+        echo "    ServiceMonitors + rules applied before Prometheus started"
+        echo "    (they land in its FIRST config — no 3m config-reloader poll to wait out)"
+        return 0
+      fi
+    fi
+    if (( SECONDS >= deadline )); then
+      echo "    (could not apply them early within ${SM_EARLY_POLL_SECONDS}s — [2b] will apply them"
+      echo "     as usual. Nothing is broken; expect up to 3m more before the first scrape.)"
+      # Last line via parameter expansion rather than `| tail -1`: command
+      # substitution has already stripped the trailing newline, and this file runs
+      # under pipefail (rule 17).
+      [[ -n "$out" ]] && echo "     last error: ${out##*$'\n'}"
+      return 0
+    fi
+    sleep 3
+  done
+}
+
 echo "==> [1/5] Helm repos"
 "${HELM[@]}" repo add prometheus-community "$KPS_REPO" >/dev/null 2>&1 || true
 "${HELM[@]}" repo add fake-gpu-operator "$FAKE_GPU_REPO" >/dev/null 2>&1 || true
@@ -117,11 +196,28 @@ else
   [[ "$LITE" == "1" ]] && echo "    LITE=1 — trimmed stack, see helm/kube-prometheus-stack/values-lite.yaml"
   # KPS_VALUES is built in config.sh so kind-up.sh's sizing floor and this values
   # stack can never disagree about which profile is being installed.
+  #
+  # ⚠️ BACKGROUNDED SO THE APPLY ABOVE CAN RACE IT — see
+  # apply_observability_objects_early for the 184s that buys, and for why losing
+  # the race is harmless. `--wait` still blocks the install: `wait` below is where
+  # this branch actually finishes, and its exit status is still the helm one.
+  #
+  # No trap is needed to clean this up on Ctrl-C. Job control is off in a
+  # non-interactive shell, so the background helm shares this script's process
+  # group and receives the terminal's SIGINT along with it.
   "${HELM[@]}" upgrade --install "$KPS_RELEASE" "$KPS_CHART" \
     --version "$KPS_CHART_VERSION" \
     --namespace "$MONITORING_NS" --create-namespace \
     "${KPS_VALUES[@]}" \
-    --wait --timeout 15m
+    --wait --timeout 15m &
+  kps_pid=$!
+  apply_observability_objects_early
+  # `if !` rather than a bare `wait`, so a failed install reports as one thing
+  # instead of as `set -e` killing the script at a line that reads like a no-op.
+  if ! wait "$kps_pid"; then
+    echo "ERROR: the kube-prometheus-stack install failed (helm output above)." >&2
+    exit 1
+  fi
   # Readiness (not just ordering): the PrometheusRule validating webhook must be serving
   # before we apply custom rules. `helm --wait` above already blocks until the operator +
   # its webhook are Ready, so this is a redundant, NON-FATAL belt-and-braces check
@@ -165,6 +261,12 @@ done
 # Relabelled on the way past rather than applied as-is: the `release:` selector in
 # these four files is right for this repo's own install and wrong for any other, and
 # on a BYO cluster a wrong one is silent — see RELEASE_LABEL in config.sh.
+#
+# ⚠️ THE SECOND APPLY, AND IT STAYS UNCONDITIONAL. On the greenfield path
+# apply_observability_objects_early has usually applied these already and this is a
+# no-op; under --skip-monitoring, or whenever that race is lost, this is the only
+# apply there is. Making it conditional on the early one having succeeded would
+# trade a free re-apply for a way to install nothing at all.
 apply_with_release_label manifests/servicemonitor/*.yaml manifests/alerts/*.yaml
 
 echo "==> [3/5] fake-gpu-operator"

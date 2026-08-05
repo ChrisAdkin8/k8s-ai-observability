@@ -23,6 +23,24 @@ Comparison links are at the foot of this file, one per released version.
 
 ## [Unreleased]
 
+### Changed
+
+- **`install.sh` applies the ServiceMonitors and rules before Prometheus starts**, taking
+  a 0-180s wait off the front of every cold install. They were applied after
+  `helm --wait` returned, so Prometheus was already running and the objects had to reach
+  it through the config-reloader sidecar, whose `--watch-interval` defaults to **3m0s**.
+  Measured on a fresh kind cluster 2026-08-05: applied 08:55:21, next successful config
+  reload 08:58:25, first `nvidia-dcgm-exporter` sample 08:58:31, while the chart's own
+  targets were all being collected by 08:55:46. Confirmed rather than inferred by
+  applying a throwaway ServiceMonitor to a settled cluster, which took 70s: a different
+  draw from the same 3-minute cycle. The Helm install is now backgrounded so the apply
+  can race it, and an object that exists before the operator writes the first config
+  needs no reload at all. `verify.sh` check 3 went from 126.5s to 4.7s. The rules go in
+  the same pass because they ride the same reload, so fixing only the scrapes would have
+  moved the wait to check 4c. **Purely additive**: `[2b]` still applies the same files
+  unconditionally, so losing the race, a missing CRD or a webhook that is not serving yet
+  costs the old speed and nothing else.
+
 ### Fixed
 
 - **The container-runtime sizing check read a whole GiB low, so every threshold it
