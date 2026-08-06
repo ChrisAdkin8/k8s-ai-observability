@@ -30,11 +30,12 @@ That's the fastest way to see it. To exercise Kubernetes itself (scheduling on
 task local:up && task local:grafana    # deploy the kind cluster & full stack then open the grafana dashboards ~6 min.
 ```
 
-![task local:up && task local:grafana: a kind cluster comes up, the stack installs, then verify.sh reports PASS
-across every acceptance check and both Grafana boards render with live data](demo.gif)
+[![task local:up && task local:grafana: a kind cluster comes up, the stack installs, then verify.sh reports PASS
+across every acceptance check and both Grafana boards render with live data](demo.gif)](demo.gif)
 
 The install is fast-forwarded. `verify.sh` runs at the recording's own pace, because the
-checks are the point.
+checks are the point. GitHub scales the recording down to the column width, so click
+through for it at full size.
 
 There's no cloud account, no credentials, no `terraform.tfvars` and no spend. `local` is
 not a reduced-fidelity preview: it runs the same manifests, the same pinned charts and the
