@@ -187,8 +187,20 @@ VERSIONS_DOC = "docs/versions.md"
 # not published anywhere, it was simply written em-dash-free on request. That is exactly
 # the state the README was in before this check existed, and the README drifted back three
 # times from it. A style held by hand is a style that returns.
+#
+# ⚠️ THE CRITERION IS "PAGES A STRANGER READS FIRST", and it is what stops this list
+# becoming an unstated house-wide rule. An em dash in docs/ci.md is fine; membership here
+# has to mean something, or the rest of docs/ becomes ambiguous rather than excluded.
+#
+# docs/development-method.md joined on 2026-08-06 on both counts. It is linked from the
+# README's opening paragraph, and it is the page that EXPLAINS this preference — a page
+# saying "this page follows that preference throughout" and then not doing so is a
+# contradiction a reader meets before the author does. It is also the likeliest source of
+# the fourth hand-strip: this repo's prose is drafted by a tool whose default punctuation
+# is the em dash, and that page is about how the drafting works.
 EM_DASH_FREE = ["README.md",
                 "ROADMAP.md",
+                "docs/development-method.md",
                 "manifests/dashboards/gpu-sim-dcgm.grafana-com.md",
                 "manifests/dashboards/llm-sim-overview.grafana-com.md"]
 

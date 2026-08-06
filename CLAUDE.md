@@ -64,11 +64,12 @@ rig knows the right answer.
 12. **Docs drift is a known failure class.** Counts ("emits N metrics", "N jobs") and ids
     in prose have been corrected repeatedly. Re-verify every number against the code it
     describes; `doc-claims` mechanises the ones that recur, including this file's.
-13. **Prose style:** em dashes stay out of the README, `ROADMAP.md`, and the two
-    `.grafana-com.md` catalog pages. Stripped by hand three times; **`doc-claims` now
-    enforces it**, so a fourth is a red `preflight` rather than something a reader has to
-    notice. `EM_DASH_FREE` in `check-doc-claims.py` is the list — extend it there, and
-    only mention here that it grew.
+13. **Prose style:** em dashes stay out of **the pages a stranger reads first**. Stripped by
+    hand three times; **`doc-claims` now enforces it**, so a fourth is a red `preflight`
+    rather than something a reader has to notice. `EM_DASH_FREE` in `check-doc-claims.py`
+    is the list and states that criterion beside it — extend it there, and only mention
+    here that it grew, **which it has**. Everything else under `docs/` is deliberately out:
+    membership has to mean something.
 14. **Containers run `readOnlyRootFilesystem`** — hence `PYTHONDONTWRITEBYTECODE`; scripts
     stay dependency-free.
 15. **Terraform:** commit `.terraform.lock.hcl`, never `*.tfvars` (examples only). GKE's
