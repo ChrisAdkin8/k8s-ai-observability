@@ -303,6 +303,7 @@ you give up.
 | [docs/versions.md](docs/versions.md) | every pinned version and the one place each is set |
 | [docs/eks.md](docs/eks.md) / [docs/gke.md](docs/gke.md) | per-cloud specifics |
 | [docs/troubleshooting.md](docs/troubleshooting.md) | empty panels, 404s, dead targets, warm-up |
+| [ROADMAP.md](ROADMAP.md) | where the rig goes next: fault injection so the alerts fire against real broken states, an ingest path so load arrives from outside, llm-d-inference-sim as a graded second opinion, autoscaling with a fixed point, and what a fuller provisioned sandbox would have to prove |
 
 ## Contributing and support
 

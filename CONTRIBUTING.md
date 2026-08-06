@@ -236,3 +236,11 @@ Still out of scope, and worth knowing before proposing them:
   works; distributing it is separate, mostly-administrative work.
 - Replacing `scripts/install.sh` with the chart. It remains the source of truth for
   install ordering and the wrong-context guard, and it is what CI exercises end to end.
+
+**Out of scope is not the same as unbuilt.** [ROADMAP.md](ROADMAP.md) holds the directions
+the rig does not go in yet — fault injection so the alerts fire against real broken states,
+an ingest path so load arrives from outside, llm-d-inference-sim as a graded second opinion,
+autoscaling with a fixed point, and a fuller provisioned sandbox — along with the ordering
+that makes them depend on each other, and the three costs (CI budget, the chart, the pins)
+that any of them has to pay. Proposing one of those is welcome. Proposing one of the bullets
+above means overturning the reasoning behind it first.
