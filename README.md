@@ -30,8 +30,13 @@ That's the fastest way to see it. To exercise Kubernetes itself (scheduling on
 task local:up && task local:grafana    # deploy the kind cluster & full stack then open the grafana dashboards ~6 min.
 ```
 
+### Watch it run
+
 [![task local:up && task local:grafana: a kind cluster comes up, the stack installs, then verify.sh reports PASS
 across every acceptance check and both Grafana boards render with live data](demo.gif)](demo.gif)
+
+Link straight here:
+<https://github.com/ChrisAdkin8/k8s-ai-observability#watch-it-run>
 
 The install is fast-forwarded. `verify.sh` runs at the recording's own pace, because the
 checks are the point. GitHub scales the recording down to the column width, so click
