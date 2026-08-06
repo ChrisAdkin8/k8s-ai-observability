@@ -14,6 +14,11 @@
 a simulated vLLM serving stack, and Prometheus + Grafana, on kind, EKS or GKE. No
 hardware, no quota, no drivers, no model weights.
 
+Every line of it is built by one method: a written specification, an adversarial review of
+that specification, a throwaway spike that settles what reading cannot, and only then the
+implementation. [docs/development-method.md](docs/development-method.md) describes how, and
+why the checks matter more here than the code they check.
+
 ![Four time-series panels tracking utilisation, memory, temperature and power across
 eight simulated GPUs](docs/gpu-dashboard.png)
 
@@ -303,6 +308,7 @@ you give up.
 | [charts/](charts/README.md) | changing the Helm chart: the build step and why it exists, the script path it mirrors, and what CI drives to failure |
 | [tests/](tests/) | the rule tests and the simulator selftest: what they cover and how to add one |
 | [compose/](compose/) | the no-Kubernetes path: what it shares with the cluster, and what it cannot exercise |
+| [docs/development-method.md](docs/development-method.md) | how the code is developed: the prompt file, the review round, what a spike is and why its findings rewrite the specification, and the disciplines that run through every stage |
 | [CONTRIBUTING.md](CONTRIBUTING.md) | the invariants that fail *silently* if broken, what to re-check when bumping a pinned version, and what is deliberately out of scope |
 | [docs/ci.md](docs/ci.md) | what CI actually proves, the two kind legs and how they differ, why the check names are load-bearing, and how to reproduce a failure locally |
 | [docs/usage.md](docs/usage.md) | running every phase as scripts instead of Task |
