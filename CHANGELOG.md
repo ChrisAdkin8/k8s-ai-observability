@@ -28,7 +28,7 @@ Comparison links are at the foot of this file, one per released version.
 - **`demo.gif` — a 29s walkthrough of `task local:up && task local:grafana`**, embedded in
   the README's "Try it". It is that section's six-minute claim shown rather than asserted:
   the kind cluster coming up, the stack installing, `verify.sh` reporting PASS, then both
-  boards live in the browser. 74 MB down to 3.0 MB.
+  boards live in the browser. 74 MB of screen capture down to 6.7 MB.
 
   **A GIF rather than an MP4, and not by preference.** GitHub's blob viewer refuses to
   display a committed video at this size — *"Sorry about that, but we can't show files that
@@ -38,10 +38,33 @@ Comparison links are at the foot of this file, one per released version.
   viewer and works wherever the README does.
 
   The install is fast-forwarded 6x and the `verify.sh` cascade left at the recording's own
-  pace, which is what makes the size work: a GIF costs bytes per *changing* frame, so the
-  scrolling Helm output was most of the file and the least of the argument. Straight
-  conversion was 5.81 MB; fast-forwarding the install brought it to 3.02 MB with the whole
-  narrative intact, where cutting the section outright would have lost it.
+  pace, which is what makes the length work: a GIF costs bytes per *changing* frame, so the
+  scrolling Helm output was most of the file and the least of the argument. Cutting that
+  section outright would have hit the same size and lost the narrative.
+
+  **What makes the text legible is the crop, not the encoder.** The first cut of this file
+  scaled the full 1728px-wide screen down to 900px, so every glyph rendered at 52% and the
+  strokes collapsed — readable only if you already knew what it said. But the terminal text
+  never leaves the left 1184px, and the top 60 rows are the macOS menu bar, so most of what
+  was being paid for and scaled down was empty. Cropping to the measured content ships the
+  terminal at 1:1 with the recording, with no scaling step at all, in an image only 32%
+  wider on the page. The last two seconds get their own crop, to the Safari window rather
+  than the desktop it sat on, which is the difference between the boards being visible and
+  being present. `docs/record-demo.md` holds the recipe and how each constant was measured.
+
+  Two encoder findings are worth the space. `hqdn3d=0:0:2:2` took the `verify.sh` segment
+  from 4.98 MB to 2.58 MB with nothing visibly changed: that cascade is near-static, but
+  h264 noise makes every frame differ pixel-for-pixel, and GIF frame differencing needs
+  exact equality to skip a pixel, so the file was paying full price for 90 frames of noise.
+  And the palette has to be weighted toward the Grafana frames, which are 7 of 114 and draw
+  their series as thin lines: left to frequency, the palette spent nothing on them and blue
+  rendered grey while orange rendered pink.
+
+  **6.7 MB renders, and that was tested rather than assumed** — pushed to a branch and
+  loaded from the README GitHub rendered off it. The 5 MB people cite is camo's
+  `CAMO_LENGTH_LIMIT`, which governs externally hosted images; a repo-relative one is
+  rewritten to GitHub's own `/raw/` path and tagged `data-animated-image=""`. The 10 MB
+  figure is the upload cap for issue and comment attachments. Neither reaches this file.
 
   **The source was 416 seconds holding 722 distinct frames**, because a macOS capture only
   writes a frame when the screen changes. So the gaps between frame timestamps *are* the
@@ -55,6 +78,13 @@ Comparison links are at the foot of this file, one per released version.
   `*.mov` and `*.mp4` are now gitignored, the container rather than a filename. The master a capture is
   encoded from is tens of megabytes, and git keeps it forever — including after a later
   commit deletes it.
+
+- **`docs/record-demo.md`**, the recipe `demo.gif` is built by: the ffmpeg invocation, the
+  crop rectangles and speed ramp with the measurements each was derived from, what every
+  lever was worth in bytes, and the levers that did not work. None of it is guessable, and
+  the sources it runs on are gitignored, so a rebuild without this page re-guesses
+  constants that took measurement to find. It carries the size ceiling finding too, since
+  "how big can a README GIF be" has no documented answer and cost a branch to settle.
 
 ### Removed
 
@@ -71,6 +101,9 @@ Comparison links are at the foot of this file, one per released version.
   dashboards", where the rest of the dashboard-editing rules already live: change a board
   and the **screenshots** go stale, along with the social preview cropped from
   `docs/llm-dashboard.png`. The PR template points there instead of at a deleted file.
+
+  The path is reused above, for a page describing `demo.gif`, which exists. What made the
+  old one worth deleting was that it specified an asset nobody had built, not its name.
 
 ## [0.10.0] — 2026-08-05
 
