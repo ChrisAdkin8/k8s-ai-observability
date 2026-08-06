@@ -182,7 +182,13 @@ VERSIONS_DOC = "docs/versions.md"
 
 # CLAUDE.md rule 13. The README is the front door; the two `.grafana-com.md` pages are
 # uploaded to grafana.com, where this repo's prose is read by people who never see it.
+#
+# ROADMAP.md joined on 2026-08-06, and for a different reason than the other three: it is
+# not published anywhere, it was simply written em-dash-free on request. That is exactly
+# the state the README was in before this check existed, and the README drifted back three
+# times from it. A style held by hand is a style that returns.
 EM_DASH_FREE = ["README.md",
+                "ROADMAP.md",
                 "manifests/dashboards/gpu-sim-dcgm.grafana-com.md",
                 "manifests/dashboards/llm-sim-overview.grafana-com.md"]
 
@@ -462,7 +468,7 @@ def main() -> None:
     if offenders:
         for f, n in offenders:
             print(f"  {f}:{n}: em dash", file=sys.stderr)
-        die("em-dash", "em dashes are kept out of the README and the catalog pages "
+        die("em-dash", f"em dashes are kept out of these {len(EM_DASH_FREE)} file(s) "
                        "(CLAUDE.md rule 13). Use a colon, a comma, or two sentences.")
     print(f"  ok  em-dash     {len(EM_DASH_FREE)} file(s) free of em dashes")
 
