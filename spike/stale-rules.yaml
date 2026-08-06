@@ -1,0 +1,24 @@
+# SPIKE — the candidate detector from prompt-fault-injection.md W3.5, plus the
+# deliberately broken variant W3.6 asks for.
+groups:
+  - name: spike.stale
+    rules:
+      - alert: LLMMetricsStale
+        expr: >-
+          vllm:num_requests_running > 0
+          and rate(vllm:generation_tokens_total[10m]) == 0
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Model {{ $labels.model_name }} is up but its counters are frozen"
+          description: >-
+            Requests are reported running while no generation tokens have been
+            produced for 10m (simulated).
+
+      # The guard dropped: what the rule looks like if someone "simplifies" it.
+      - alert: LLMMetricsStaleNoGuard
+        expr: rate(vllm:generation_tokens_total[10m]) == 0
+        for: 5m
+        labels:
+          severity: warning

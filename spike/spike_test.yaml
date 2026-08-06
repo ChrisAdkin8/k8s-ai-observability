@@ -1,0 +1,86 @@
+# SPIKE — not a repo file. Settles four claims made in prompt-fault-injection.md:
+#   1. absent() is global: one tenant of two disappearing cannot fire LLMMetricsAbsent
+#   2. total loss DOES fire it (so the alert is not simply broken)
+#   3. the proposed LLMMetricsStale expression's `and` matches across two metric names
+#   4. its idle-tenant negative case holds, and dropping the guard breaks it
+rule_files:
+  - llm-rules.yaml
+  - stale-rules.yaml
+
+evaluation_interval: 30s
+
+tests:
+  # ---- 1. one tenant of two disappears -----------------------------------
+  # steady runs throughout; driven stops after 10m (20 samples at 30s).
+  - interval: 30s
+    input_series:
+      - series: 'vllm:num_requests_running{model_name="sim-llama-3-8b-steady", job="llm-sim", instance="a:9401"}'
+        values: '3+0x60'
+      - series: 'vllm:num_requests_running{model_name="sim-llama-3-8b-driven", job="llm-sim", instance="b:9401"}'
+        values: '3+0x20 _x40'
+    alert_rule_test:
+      # 25m in: the driven tenant has been gone for 15m, three times the `for: 5m`.
+      - eval_time: 25m
+        alertname: LLMMetricsAbsent
+        exp_alerts: []
+
+  # ---- 2. every tenant disappears ----------------------------------------
+  - interval: 30s
+    input_series:
+      - series: 'vllm:num_requests_running{model_name="sim-llama-3-8b-steady", job="llm-sim", instance="a:9401"}'
+        values: '3+0x20 _x40'
+      - series: 'vllm:num_requests_running{model_name="sim-llama-3-8b-driven", job="llm-sim", instance="b:9401"}'
+        values: '3+0x20 _x40'
+    alert_rule_test:
+      - eval_time: 25m
+        alertname: LLMMetricsAbsent
+        exp_alerts:
+          - exp_labels:
+              severity: critical
+            exp_annotations:
+              summary: "No LLM serving metrics are being scraped"
+              description: "vllm:num_requests_running absent for 5m — is the llm-sim ServiceMonitor matching, and are the simulator pods Running?"
+
+  # ---- 3 + 4. stale but up, and the idle tenant that must not fire -------
+  # driven: 5 requests running, generation counter FROZEN at 900000.
+  # steady: 0 running, counter also flat (a genuinely idle tenant).
+  - interval: 30s
+    input_series:
+      - series: 'vllm:num_requests_running{model_name="sim-llama-3-8b-driven", job="llm-sim", instance="b:9401"}'
+        values: '5+0x80'
+      - series: 'vllm:generation_tokens_total{model_name="sim-llama-3-8b-driven", job="llm-sim", instance="b:9401"}'
+        values: '900000+0x80'
+      - series: 'vllm:num_requests_running{model_name="sim-llama-3-8b-steady", job="llm-sim", instance="a:9401"}'
+        values: '0+0x80'
+      - series: 'vllm:generation_tokens_total{model_name="sim-llama-3-8b-steady", job="llm-sim", instance="a:9401"}'
+        values: '500000+0x80'
+    alert_rule_test:
+      # 25m: well past the 10m rate window plus the 5m `for:`.
+      # ONLY the driven tenant may appear. If `and` failed to match across the two
+      # metric names, this list would be empty and the test would fail here.
+      - eval_time: 25m
+        alertname: LLMMetricsStale
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+              model_name: sim-llama-3-8b-driven
+              job: llm-sim
+              instance: b:9401
+            exp_annotations:
+              summary: "Model sim-llama-3-8b-driven is up but its counters are frozen"
+              description: "Requests are reported running while no generation tokens have been produced for 10m (simulated)."
+      # The same input against the guard-less variant: the idle tenant fires too.
+      # This is the rule-18 half — it shows the `running > 0` conjunct is load-bearing.
+      - eval_time: 25m
+        alertname: LLMMetricsStaleNoGuard
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+              model_name: sim-llama-3-8b-driven
+              job: llm-sim
+              instance: b:9401
+          - exp_labels:
+              severity: warning
+              model_name: sim-llama-3-8b-steady
+              job: llm-sim
+              instance: a:9401
