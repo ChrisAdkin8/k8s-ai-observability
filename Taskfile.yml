@@ -213,12 +213,20 @@ tasks:
       - python3 scripts/check-action-shell.py --selftest
       - python3 scripts/check-action-shell.py
 
+  # The MATCHING RULES of the weekly ruleset check, offline. The check itself needs the
+  # network and the live GitHub API, so it runs weekly in CI and not here.
+  required-checks-test:
+    desc: Unit-test the branch-ruleset drift check's rules (no network)
+    cmds:
+      - python3 scripts/check-required-checks.py --selftest
+
   preflight:
     desc: Run every no-cluster gate (selftests, rules, doc claims, chart) before pushing
     cmds:
       - task: selftest
       - task: compose-selftest
       - task: drift-test
+      - task: required-checks-test
       - task: doc-claims
       - task: sigpipe
       - task: shellcheck

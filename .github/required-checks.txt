@@ -29,6 +29,19 @@
 # not a control plane. Change the ruleset first, then record it here, or
 # settings-drift will tell you they disagree — which is exactly its job.
 #
+# ⚠️ THREE JOBS THAT ENCODE THIS REPO'S CENTRAL CLAIMS ARE NOT REQUIRED, and that has
+# never been written down as a decision. `helm chart (lint, render, assertions fire)` —
+# the job whose entire purpose is driving every render-time assertion to its FAILURE —
+# plus `compose stack (no Kubernetes)` and `simulator image (build both arches,
+# smoke-test amd64)` can all be red on a pull request that merges. CodeQL's advisory
+# status is argued at length in codeql.yml; these three are not mentioned anywhere.
+#
+# NOT FIXED BY ADDING THEM HERE. This file is a record, not a control plane — the note
+# above says so, and adding a line the ruleset does not carry makes `settings-drift`
+# report a disagreement, correctly. Change the ruleset in the browser FIRST, then add
+# the three names below. Until someone does, this paragraph is the record that it was
+# considered rather than overlooked.
+#
 # The ruleset: https://github.com/ChrisAdkin8/k8s-ai-observability/settings/rules
 
 selftest + rule tests + shell syntax
