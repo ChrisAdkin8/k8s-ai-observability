@@ -28,10 +28,14 @@ creates false confidence — which is worse than no check at all:
 
   * only tracked `*.sh`. The bash inside workflows and composite actions is not read
     here; `check-action-shell.py` owns that surface and does not ask this question;
-  * only a LITERAL multi-word assignment later used unquoted. `x=$(cmd a b)` is not a
-    finding: the space is inside a substitution and the result is one token at runtime.
-    That distinction is the entire difference between this file and a first draft of it
-    that reported 29 findings on 12 correct scripts;
+  * only a LITERAL multi-word assignment later used unquoted. Any `$` or backtick in the
+    value disqualifies it, because a space between two expansions says nothing about how
+    many words result. `x="$1 --skip-monitoring"` IS this bug and is not reported —
+    catching it needs to know what `$1` holds. That narrowing is the entire difference
+    between this file and a first draft that reported 29 findings on 12 correct scripts;
+  * only one assignment per line. `local a="x" b="y"` is skipped rather than mis-parsed,
+    which is what the first draft did — inventing a value of `x" b="y` and reporting
+    `drive-llm-load.sh` twice;
   * it cannot see splitting that is CORRECT and intended. There is no way to tell
     "deliberately splitting a flag list" from "accidentally splitting a path with a
     space" by reading. Both are the bug this covers, because both behave differently in
@@ -48,46 +52,91 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
 
-# `name="a b"` / `local name='a b'`, and the value captured whole.
+# `name="a b"` / `local name='a b'`, one assignment occupying the whole line.
+#
+# ⚠️ THE VALUE IS `[^"]*`, NOT `.*?`, AND THE ANCHOR IS NOT DECORATION. With a non-greedy
+# `.*?` before `\s*$` this matched `local rps="$1" note="$2"` as ONE assignment whose
+# value was `$1" note="$2` — a string containing a space, so a literal, so a finding.
+# It reported `scripts/drive-llm-load.sh` twice on correct code. A line declaring two
+# variables is now simply not matched: narrower than ideal, and the alternative is
+# parsing shell.
 ASSIGN = re.compile(
     r"""^\s*(?:local\s+|readonly\s+|export\s+|declare\s+)?"""
-    r"""([A-Za-z_][A-Za-z0-9_]*)=(["'])(.*?)\2\s*$""")
+    r"""([A-Za-z_][A-Za-z0-9_]*)="(?P<d>[^"]*)"\s*$"""
+    r"""|^\s*(?:local\s+|readonly\s+|export\s+|declare\s+)?"""
+    r"""([A-Za-z_][A-Za-z0-9_]*)='(?P<s>[^']*)'\s*$""")
 
-# Anything whose value is decided at runtime. A space inside one of these says nothing
-# about how many words the expansion produces, and treating it as a finding is how the
-# first draft of this file reported 29 false positives on correct code.
-DYNAMIC = re.compile(r"\$\(|`|\$\{")
+# ⚠️ ANY `$` MAKES THE VALUE RUNTIME, not just `$(` and `${`. A space between two
+# expansions — `x="$1 $2"` — says nothing about how many words result, because either
+# may be empty or may itself contain spaces. Treating a space as proof of a multi-word
+# literal is how the first draft reported 29 findings across 12 correct scripts, every
+# one of them a `x="$(cmd a b)"` yielding a single token.
+#
+# The cost is real and accepted: `args="$1 --skip-monitoring"` is genuinely the bug this
+# file is about and is not reported. Catching it needs to know what `$1` holds, which
+# reading cannot. The literal case is the one that bit, and it is the one covered.
+DYNAMIC = re.compile(r"[$`]")
 
-# `$name` NOT inside double quotes and not part of a longer identifier. Deliberately
-# crude: it does not parse the shell. A quoted `"$name"` is already correct, and an
-# unquoted one in a context where splitting cannot happen is a false positive this
-# accepts — see the docstring.
+# Any assignment at all, in any form — `x=`, `x=$(...)`, `x=(a b)`. Used to CLEAR a
+# tracked literal: once a variable has been reassigned to something else, what the
+# earlier literal contained says nothing about how the next use expands.
+ANY_ASSIGN = re.compile(
+    r"""^\s*(?:local\s+|readonly\s+|export\s+|declare\s+)?"""
+    r"""([A-Za-z_][A-Za-z0-9_]*)=""")
+
+
+# `$name` and `${name}`, NOT inside double quotes and not part of a longer identifier.
+# ⚠️ BOTH FORMS SPLIT IDENTICALLY, and the first version of this file matched only the
+# first — so `cmd ${args}` was the bug it exists to find, going unreported.
+#
+# Deliberately crude: it does not parse the shell. A quoted `"$name"` is already
+# unambiguous, and an unquoted one in a context where splitting cannot happen is a false
+# positive this accepts — see the docstring.
 def _use(name: str) -> re.Pattern:
-    return re.compile(r'(?<!["\w$])\$' + re.escape(name) + r'\b(?!["\w])')
+    n = re.escape(name)
+    return re.compile(r'(?<!["\w$])\$(?:\{' + n + r'\}|' + n + r'\b)(?!["\w])')
 
 MARKER = "word-split-ok:"
 
 
 def offenders(lines: list) -> list:
-    """[(line number, variable, assignment line, value)] for each reliance found."""
-    literal = {}
-    for i, ln in enumerate(lines, 1):
-        m = ASSIGN.match(ln)
-        if not m:
-            continue
-        value = m.group(3)
-        if " " in value.strip() and not DYNAMIC.search(value):
-            literal[m.group(1)] = (i, value)
+    """[(line number, variable, assignment line, value)] for each reliance found.
 
-    found = []
+    ⚠️ ONE PASS, IN SOURCE ORDER, BECAUSE A VARIABLE IS NOT ONE VALUE. The first
+    version collected every literal assignment in the file and then scanned every line
+    against all of them, which is wrong in three ways a shell script hits routinely:
+
+        cmd $args            # a use BEFORE the assignment was reported
+        args="one"           # a later single-word reassignment did not clear
+        args="$(cmd a b)"    # nor did a reassignment to a substitution
+
+    Each of those reported a line that expands to one word at runtime. State is now
+    tracked as the file is read: a use is judged against what the variable holds at
+    that point, and any reassignment in any form drops the tracked literal.
+    """
+    literal, found = {}, []
     for i, ln in enumerate(lines, 1):
         code = re.sub(r"#.*$", "", ln)
-        if MARKER in ln:
+
+        # Uses are judged BEFORE this line's own assignment is applied, so `args="a b"`
+        # is not read as a use of the value it is in the middle of setting.
+        if MARKER not in ln:
+            for name, (assigned_at, value) in literal.items():
+                if _use(name).search(code):
+                    found.append((i, name, assigned_at, value))
+
+        m = ANY_ASSIGN.match(ln)
+        if not m:
             continue
-        for name, (assigned_at, value) in literal.items():
-            if i != assigned_at and _use(name).search(code):
-                found.append((i, name, assigned_at, value))
-    return sorted(found)
+        name = m.group(1)
+        lit = ASSIGN.match(ln)
+        val = (lit.group("d") if lit and lit.group("d") is not None
+               else lit.group("s") if lit else None)
+        if val is not None and " " in val.strip() and not DYNAMIC.search(val):
+            literal[name] = (i, val)
+        else:
+            literal.pop(name, None)
+    return found
 
 
 def tracked() -> list:
@@ -175,8 +224,30 @@ def selftest() -> int:
     check(hits(f'args="a b"\ncmd $args  # {MARKER} intentional, see ...\n') == [],
           "an explicitly marked line is allowed through")
 
-    # 9. ⚠️ PROVE IT IS NOT INERT. Every case above except 1 is a negative, and a rule
-    #    that matched nothing would pass all of them.
+    # 9. ⚠️ THE BRACED FORM SPLITS IDENTICALLY, and the first version matched only `$a`.
+    #    Expected: caught, exactly as the unbraced form is.
+    check(hits('args="local --skip-monitoring"\ncmd ${args}\n') == ["2:args"],
+          "the braced ${args} form is caught too")
+    #    Expected: [] — quoting is quoting, braces or not.
+    check(hits('args="local --skip-monitoring"\ncmd "${args}"\n') == [],
+          "...and a quoted ${args} is not")
+
+    # 10. ⚠️ A VARIABLE IS NOT ONE VALUE, and the first version treated it as one: it
+    #     gathered every literal assignment in the file and then judged every line
+    #     against all of them. Each case below expands to ONE word at runtime and was
+    #     reported. Expected: [] for all three.
+    check(hits('cmd $args\nargs="a b"\n') == [],
+          "a use BEFORE the assignment is not reported")
+    check(hits('args="a b"\nargs="one"\ncmd $args\n') == [],
+          "a later single-word reassignment clears the tracked literal")
+    check(hits('args="a b"\nargs="$(cmd x y)"\ncmd $args\n') == [],
+          "...and so does a reassignment to a command substitution")
+    #     Expected: caught — the literal is still what it holds at the point of use.
+    check(hits('args="one"\nargs="a b"\ncmd $args\n') == ["3:args"],
+          "but a reassignment TO a multi-word literal is still tracked")
+
+    # 11. ⚠️ PROVE IT IS NOT INERT. Almost every case above is a negative, and a rule
+    #     that matched nothing would pass all of them. Expected: 2 findings.
     check(len(hits('a="x y"\nrun $a\nb="p q"\nrun $b\n')) == 2,
           "two independent reliances are both found (the rule is not inert)")
 

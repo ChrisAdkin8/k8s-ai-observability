@@ -355,7 +355,7 @@ Measured on run [`30998470446`](https://github.com/ChrisAdkin8/k8s-ai-observabil
 |--|--|
 | `what changed` | 5s |
 | `helm chart (lint, render, assertions fire)` | 12s |
-| `selftest + rule tests + shell syntax` (`fast`) | 17s |
+| `selftest + rule tests + shell syntax` (`fast`) | 17s ⚠️ **run `31177224542`, not the run above** |
 | `simulator image (build both arches, smoke-test amd64)` | 19s |
 | `compose stack (no Kubernetes)` | 60s |
 | `chart on kind (helm test, foreign Prometheus)` | 4m09s |
@@ -383,8 +383,17 @@ steps or job-level `if:`, so it does identical work on every one of them:
 The old 16s sits inside that spread. What the table was recording as staleness was runner
 variance, and the added work is not visible above it — which is the answer only a
 measurement could give, and the reason the row was left standing rather than adjusted by
-guess. **A single figure here is worth ±3s at best**; treat it as an order of magnitude,
-and re-measure rather than reason if a change to `fast` ever needs defending.
+guess.
+
+⚠️ **The `fast` row therefore comes from a different run to every other row in that
+table**, which is why it is annotated. The table's own preamble says a single run, and
+this one is not from it.
+
+⚠️ **Three samples is not an error bar.** Against the 17s recorded, the observed span is
+**-2s to +4s** — not symmetric, and stating it as "±3s" would be an invented number
+dressed as a measured one, which is the failure this repo exists to prevent. Treat every
+row here as one sample of a variable quantity, and re-measure rather than reason if a
+change to `fast` ever needs defending.
 
 ⚠️ ~~These predate the early ServiceMonitor apply.~~ **DONE — re-measured 2026-08-05 on run
 `30998470446`, the first run after it.** The pre-change figures, on run `30870290833`, were
