@@ -169,7 +169,7 @@ def fetch_pages(repo: str, sha: str, token: str = "") -> list:
 
 
 def poll(want, fetch, deadline_s, empty_grace_s, clock=time.monotonic,
-         sleep=time.sleep, interval=20, out=print) -> int:
+         sleep=time.sleep, interval=20, out=print, read_retries=3) -> int:
     """Poll `fetch` until every check in `want` concludes. Returns an exit code.
 
     `fetch`, `clock` and `sleep` are injected so the selftest can drive the timing
@@ -178,12 +178,33 @@ def poll(want, fetch, deadline_s, empty_grace_s, clock=time.monotonic,
     ones a live run would exercise least often.
     """
     start = clock()
+    misses = 0
     while True:
         try:
             runs, total = flatten(fetch())
         except Unreadable as exc:
-            out(f"::error::{exc}")
-            return 2
+            # ⚠️ A TRANSIENT READ IS NOT A VERDICT. This loop already runs for minutes
+            # against a remote API, so a single 502 or DNS blip is an ordinary event,
+            # and the first version treated one as terminal. It failed CLOSED, which is
+            # the right direction — nothing unsafe ships — but by then the tag is
+            # already pushed (docs/releasing.md), so the cost of a blip was a re-run of
+            # the release rather than a wrong publish.
+            #
+            # Consecutive, and reset on any good read: the signal worth stopping on is
+            # "the API is down", not "three blips over half an hour".
+            misses += 1
+            elapsed = clock() - start
+            if misses > read_retries or elapsed >= deadline_s:
+                out(f"::error::{exc}")
+                out(f"::error title=Could not determine whether CI passed::"
+                    f"{misses} consecutive unreadable response(s). This is not a "
+                    f"verdict on the commit — it is the absence of one, so the exit "
+                    f"code is 2 rather than 1, and nothing is published either way.")
+                return 2
+            out(f"  unreadable ({misses}/{read_retries}), retrying in {interval}s: {exc}")
+            sleep(interval)
+            continue
+        misses = 0
         v = classify(want, runs)
         elapsed = clock() - start
 
@@ -344,6 +365,62 @@ def selftest() -> int:
     # 9. A conclusion that is neither pass nor fail must not be read as a pass.
     rc, log = run("neutral")
     check(rc == 1, "a `neutral` conclusion is NOT treated as satisfied")
+
+    def run_fetch(fetch, deadline=600, grace=180, ticks=None, read_retries=3):
+        """As `run`, but over an arbitrary fetch, so a read can FAIL rather than return."""
+        log, t = [], {"now": 0.0}
+        seq = list(ticks or [0, 1])
+
+        def clock():
+            return t["now"]
+
+        def sleep(_):
+            t["now"] += seq.pop(0) if seq else 10_000
+
+        return poll(want, fetch, deadline, grace, clock=clock, sleep=sleep,
+                    out=log.append, read_retries=read_retries), "\n".join(log)
+
+    # 11. ⚠️ ONE TRANSIENT READ MUST NOT DECIDE A RELEASE. This loop runs for minutes
+    #     against a remote API, so a 502 is an ordinary event; the first version
+    #     returned 2 on the first one and ended there. Two blips then a good read has
+    #     to publish.
+    blips = {"n": 0}
+
+    def flaky():
+        blips["n"] += 1
+        if blips["n"] <= 2:
+            raise Unreadable("simulated 502 from the check-runs API")
+        return cases["all-green"]["pages"]
+
+    rc, log = run_fetch(flaky, ticks=[0, 1, 2, 3])
+    check(rc == 0, "two transient read failures, then a green read, still publishes")
+    check("retrying" in log, "...and the retries are announced, not silent")
+
+    # 12. ...but an API that is genuinely down still refuses, and with exit 2 rather
+    #     than 1: the absence of a verdict is not a verdict of red.
+    def dead():
+        raise Unreadable("simulated outage")
+
+    rc, log = run_fetch(dead, ticks=[0, 1, 2, 3])
+    check(rc == 2, "a persistently unreadable API gives up with exit 2, not 0")
+
+    # 13. ⚠️ THE COUNTER RESETS, and this is the half that is easy to get wrong. The
+    #     signal worth stopping on is "the API is down", not "four blips over half an
+    #     hour". Without the reset, a long wait on a flaky network exhausts the budget
+    #     and refuses a release that was fine.
+    seq = {"n": 0}
+
+    def intermittent():
+        seq["n"] += 1
+        # blip, pending, blip, blip, blip, pending, green — never 4 in a row.
+        script = {1: "x", 2: "pending", 3: "x", 4: "x", 5: "x", 6: "pending"}
+        step = script.get(seq["n"], "all-green")
+        if step == "x":
+            raise Unreadable("simulated blip")
+        return cases[step]["pages"]
+
+    rc, log = run_fetch(intermittent, ticks=[0, 1, 2, 3, 4, 5, 6, 7])
+    check(rc == 0, "blips spread across a long poll do not accumulate into a refusal")
 
     # 10. The real file is read, de-duplicated, and non-empty — so a passing selftest
     #     cannot coexist with a gate that requires nothing.
