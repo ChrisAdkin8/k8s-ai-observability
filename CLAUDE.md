@@ -20,6 +20,7 @@ rig knows the right answer.
 | `scripts/check-sigpipe.py` | finds pipes whose consumer exits before the producer — see rule 17 |
 | `scripts/check-action-shell.py` | shellchecks the bash inside composite actions; `actionlint` (which covers `.github/workflows/`) structurally cannot read them |
 | `scripts/check-required-checks.py` | the live `main` ruleset vs `required-checks.txt`, including whether it is still **enforcing**; `--selftest` over `tests/fixtures/rulesets.json` |
+| `scripts/check-green-ci.py` | the publish gate: polls the check runs on the commit being tagged and refuses a release unless every required check passed. stdlib only, so the release path pulls in no `gh`; `--selftest` over `tests/fixtures/check-runs.json` |
 | `scripts/registry-cache.sh` | opt-in pull-through image caches for `local`; `kind-up.sh` mirrors only the ones actually running, so the default path is unchanged |
 | `docs/ci.md` + `docs/releasing.md` | what CI proves; how to cut a release without breaking it |
 | `.github/actions/verify-chart/` | the chart's cluster verification, called by CI **and** the publish workflow |
@@ -115,7 +116,12 @@ rig knows the right answer.
 - **Releases:** `docs/releasing.md`. **Tag locally, run
   `chart-build.py --strict-version`, then push** — the check resolves the tag with `git
   describe`, so it means nothing until the tag exists, and three of four releases on
-  2026-08-04 hit a bug this step catches while everything is still private.
+  2026-08-04 hit a bug this step catches while everything is still private. **Both publish
+  workflows then wait for CI to go green on the tagged commit before they build anything**,
+  so a CI run's worth of silence after the push is the gate working, not a hang. The ruleset
+  gates pull requests and says nothing about a tag, which is how a registry version — which
+  is immutable — got published from an unchecked commit. `allow_red_ci` is the dispatch
+  escape hatch; reaching for it twice means the tag is on the wrong commit.
 - **Cluster loop:** phase 1 `terraform apply` / `kind-up.sh`, phase 2
   `./scripts/install.sh <eks|gke|local> [--skip-monitoring]`, then `./scripts/verify.sh`.
   `LITE=1` fits a 4 GiB runtime. `KPS_RELEASE=<name>` for BYO Prometheus.

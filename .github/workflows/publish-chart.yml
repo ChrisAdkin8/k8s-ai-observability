@@ -37,6 +37,11 @@ on:
         required: true
         default: false
         type: boolean
+      allow_red_ci:
+        description: 'Publish even if CI is not green on this commit. The documented escape hatch for a dispatch that rebuilds a fixed workflow from a different ref — record why in the CHANGELOG.'
+        required: false
+        default: false
+        type: boolean
 
 permissions:
   contents: read
@@ -77,6 +82,8 @@ jobs:
     permissions:
       contents: read
       packages: write
+      # Reading the check runs on the commit being published needs its own scope.
+      checks: read
 
     outputs:
       chart_version: ${{ steps.v.outputs.chart_version }}
@@ -92,13 +99,23 @@ jobs:
           # the quiet half of the bug they exist to prevent.
           fetch-depth: 0
 
+      # ⚠️ BEFORE ANYTHING IS BUILT, LET ALONE PUSHED — see the identical step in
+      # publish-image.yml. The ruleset on `main` gates pull requests and says nothing
+      # about a tag, and "registry versions are immutable, so it is still there" is a
+      # sentence this repository has had to write about a real release.
+      - name: CI is green on the commit being published
+        uses: ./.github/actions/require-green-ci
+        with:
+          allow-red: ${{ inputs.allow_red_ci }}
+
       - name: Install pinned Helm
         run: |
           set -euo pipefail
           mkdir -p "$HOME/.local/bin"
           echo "$HOME/.local/bin" >> "$GITHUB_PATH"
-          curl -fsSL "https://get.helm.sh/helm-${HELM_VERSION}-linux-amd64.tar.gz" \
-            | tar -xz -C /tmp linux-amd64/helm
+          curl -fsSLo /tmp/helm.tgz "https://get.helm.sh/helm-${HELM_VERSION}-linux-amd64.tar.gz"
+          echo "${HELM_SHA256}  /tmp/helm.tgz" | sha256sum -c -
+          tar -xz -C /tmp -f /tmp/helm.tgz linux-amd64/helm
           mv /tmp/linux-amd64/helm "$HOME/.local/bin/helm"
           chmod +x "$HOME/.local/bin/helm"
           helm version --short

@@ -24,6 +24,11 @@ on:
         description: 'Tag to publish as (e.g. v0.5.0). Required — there is no default, because a wrong default would publish over a real release.'
         required: true
         type: string
+      allow_red_ci:
+        description: 'Publish even if CI is not green on this commit. The documented escape hatch for a dispatch that rebuilds a fixed workflow from a different ref — record why in the CHANGELOG.'
+        required: false
+        default: false
+        type: boolean
 
 # Least privilege at the workflow level; the publish job widens it for itself.
 permissions:
@@ -53,6 +58,9 @@ jobs:
     permissions:
       contents: read
       packages: write
+      # Reading the check runs on the commit being published needs its own scope.
+      # Job-level permissions REPLACE the workflow default, so all three are listed.
+      checks: read
 
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -62,6 +70,17 @@ jobs:
           # would then SKIP the check rather than fail it, which is the quiet
           # half of the bug this step exists to prevent.
           fetch-depth: 0
+
+      # ⚠️ BEFORE ANYTHING IS BUILT, LET ALONE PUSHED. The ruleset on `main` gates
+      # pull requests and says nothing about a tag, so until now `git push origin
+      # vX.Y.Z` published from whatever that commit contained. A registry version is
+      # immutable, which makes this the last point where the answer can still be no.
+      # It POLLS, because docs/releasing.md step 4 pushes the commit and the tag in
+      # one line and CI cannot have finished.
+      - name: CI is green on the commit being published
+        uses: ./.github/actions/require-green-ci
+        with:
+          allow-red: ${{ inputs.allow_red_ci }}
 
       # The tag being published, from whichever trigger fired. Resolved in one
       # place so the image tag and the OCI version label cannot disagree.

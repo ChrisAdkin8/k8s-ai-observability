@@ -1,0 +1,85 @@
+# ⚠️ THE COMMIT BEING PUBLISHED MUST HAVE PASSED CI, AND NOTHING CHECKED THAT.
+#
+# Both publish workflows fire on `push: tags: ['v*']`. The ruleset on `main` gates
+# PULL REQUESTS; it has nothing to say about a tag. So `git tag` on any commit and
+# `git push origin vX.Y.Z` published an image and a chart from whatever that commit
+# happened to contain — and a registry version is immutable, which this repo states
+# in three separate files precisely because it has been bitten by it.
+#
+# The gap was not theoretical. docs/releasing.md's procedure is "tag locally, verify,
+# then push", and step 4 pushes main and the tag in one line:
+#
+#     git push origin main && git push origin vX.Y.Z
+#
+# which means the tag arrives seconds after the commit and CI has not finished. That
+# is also why this POLLS rather than reading once — iron rule 5, and the race here is
+# guaranteed rather than occasional.
+#
+# ⚠️ IT READS .github/required-checks.txt, NOT A LIST OF ITS OWN. A second copy of
+# the required-check names would be a fourth place they are written down, free to
+# disagree with the ruleset, with ci.yml and with the file that records both.
+name: Require a green CI run on this commit
+description: >
+  Poll the check runs on a commit until every check .github/required-checks.txt
+  records has concluded, and fail unless each one passed.
+
+inputs:
+  sha:
+    description: 'Commit to check. Defaults to the one being built.'
+    required: false
+    default: ''
+  allow-red:
+    description: >
+      Publish anyway. The documented escape hatch for the case docs/releasing.md
+      describes, where a dispatch rebuilds a fixed workflow from a different ref.
+      Anything other than the string "true" is treated as false.
+    required: false
+    default: 'false'
+  timeout-seconds:
+    description: >
+      How long to wait for the run to finish. The default is generous against a
+      measured whole-workflow time of 5m27s (docs/ci.md), because the cost of
+      waiting is minutes and the cost of not waiting is an immutable bad release.
+    required: false
+    default: '1800'
+
+# Every input reaches the shell through `env:`, never as `${{ }}` inside a `run:`
+# body — the reasoning is in .github/actions/verify-chart/action.yml, and it applies
+# with more force here because `sha` and `allow-red` can come from a
+# workflow_dispatch input.
+runs:
+  using: composite
+  steps:
+    # ⚠️ THE VERDICT LOGIC IS scripts/check-green-ci.py, NOT A HEREDOC HERE, and that
+    # is the whole shape of this step. It was eighty lines of shell and inline python:
+    # pagination, newest-attempt-per-name, the pass/pending/fail classification and two
+    # timing branches, none of it lintable, none of it testable, and all of it deciding
+    # whether an immutable artefact ships. Extracting it is what made a fixture
+    # possible; the fixture is what makes any of it more than an assertion of intent.
+    #
+    # It also dropped `gh`. That is an unpinned binary from the runner image, and this
+    # file pinning nothing while ci.yml pins six tools by version AND checksum was a
+    # contradiction sitting in the release path. check-green-ci.py is stdlib urllib.
+    #
+    # What stays in YAML is the one thing that belongs here: the deliberate bypass.
+    - name: Every required check passed on this commit
+      shell: bash
+      env:
+        SHA: ${{ inputs.sha }}
+        ALLOW_RED: ${{ inputs.allow-red }}
+        DEADLINE: ${{ inputs.timeout-seconds }}
+        REPO: ${{ github.repository }}
+        FALLBACK_SHA: ${{ github.sha }}
+        # Sent as a bearer token by the script. The endpoint is readable anonymously on
+        # a public repo, but anonymous is 60 requests/hour against a shared runner IP
+        # and this polls up to ninety times — so the token is the plan and anonymous is
+        # the fallback, not the other way round.
+        GITHUB_TOKEN: ${{ github.token }}
+      run: |
+        set -euo pipefail
+        sha="${SHA:-$FALLBACK_SHA}"
+        if [ "$ALLOW_RED" = "true" ]; then
+          echo "::warning title=CI gate bypassed::allow-red was set, so this publish was NOT checked against a green CI run on ${sha}. Record why in the CHANGELOG."
+          exit 0
+        fi
+        python3 scripts/check-green-ci.py --sha "$sha" --repo "$REPO" --timeout "$DEADLINE"

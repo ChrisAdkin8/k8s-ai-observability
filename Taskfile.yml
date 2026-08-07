@@ -220,6 +220,15 @@ tasks:
     cmds:
       - python3 scripts/check-required-checks.py --selftest
 
+  # The release gate's rules, offline. The gate itself only ever runs on a tag, so
+  # every branch that REFUSES a release — a re-run whose newest attempt failed, a
+  # truncated page read, a commit with no run at all, a deadline — is a branch a live
+  # run exercises rarely or never. That is the argument for the fixtures.
+  green-ci-test:
+    desc: Unit-test the publish gate's rules (no network)
+    cmds:
+      - python3 scripts/check-green-ci.py --selftest
+
   preflight:
     desc: Run every no-cluster gate (selftests, rules, doc claims, chart) before pushing
     cmds:
@@ -227,6 +236,7 @@ tasks:
       - task: compose-selftest
       - task: drift-test
       - task: required-checks-test
+      - task: green-ci-test
       - task: doc-claims
       - task: sigpipe
       - task: shellcheck

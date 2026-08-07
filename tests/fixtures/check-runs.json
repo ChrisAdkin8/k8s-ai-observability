@@ -1,0 +1,1383 @@
+{
+  "all-green": {
+    "pages": [
+      {
+        "total_count": 2,
+        "check_runs": [
+          {
+            "name": "alpha",
+            "status": "completed",
+            "conclusion": "success",
+            "started_at": "2026-08-06T10:00:00Z"
+          },
+          {
+            "name": "beta",
+            "status": "completed",
+            "conclusion": "success",
+            "started_at": "2026-08-06T10:00:00Z"
+          }
+        ]
+      }
+    ]
+  },
+  "two-pages": {
+    "pages": [
+      {
+        "total_count": 102,
+        "check_runs": [
+          {
+            "name": "noise-0",
+            "status": "completed",
+            "conclusion": "success",
+            "started_at": "2026-08-06T09:00:00Z"
+          },
+          {
+            "name": "noise-1",
+            "status": "completed",
+            "conclusion": "success",
+            "started_at": "2026-08-06T09:00:00Z"
+          },
+          {
+            "name": "noise-2",
+            "status": "completed",
+            "conclusion": "success",
+            "started_at": "2026-08-06T09:00:00Z"
+          },
+          {
+            "name": "noise-3",
+            "status": "completed",
+            "conclusion": "success",
+            "started_at": "2026-08-06T09:00:00Z"
+          },
+          {
+            "name": "noise-4",
+            "status": "completed",
+            "conclusion": "success",
+            "started_at": "2026-08-06T09:00:00Z"
+          },
+          {
+            "name": "noise-5",
+            "status": "completed",
+            "conclusion": "success",
+            "started_at": "2026-08-06T09:00:00Z"
+          },
+          {
+            "name": "noise-6",
+            "status": "completed",
+            "conclusion": "success",
+            "started_at": "2026-08-06T09:00:00Z"
+          },
+          {
+            "name": "noise-7",
+            "status": "completed",
+            "conclusion": "success",
+            "started_at": "2026-08-06T09:00:00Z"
+          },
+          {
+            "name": "noise-8",
+            "status": "completed",
+            "conclusion": "success",
+            "started_at": "2026-08-06T09:00:00Z"
+          },
+          {
+            "name": "noise-9",
+            "status": "completed",
+            "conclusion": "success",
+            "started_at": "2026-08-06T09:00:00Z"
+          },
+          {
+            "name": "noise-10",
+            "status": "completed",
+            "conclusion": "success",
+            "started_at": "2026-08-06T09:00:00Z"
+          },
+          {
+            "name": "noise-11",
+            "status": "completed",
+            "conclusion": "success",
+            "started_at": "2026-08-06T09:00:00Z"
+          },
+          {
+            "name": "noise-12",
+            "status": "completed",
+            "conclusion": "success",
+            "started_at": "2026-08-06T09:00:00Z"
+          },
+          {
+            "name": "noise-13",
+            "status": "completed",
+            "conclusion": "success",
+            "started_at": "2026-08-06T09:00:00Z"
+          },
+          {
+            "name": "noise-14",
+            "status": "completed",
+            "conclusion": "success",
+            "started_at": "2026-08-06T09:00:00Z"
+          },
+          {
+            "name": "noise-15",
+            "status": "completed",
+            "conclusion": "success",
+            "started_at": "2026-08-06T09:00:00Z"
+          },
+          {
+            "name": "noise-16",
+            "status": "completed",
+            "conclusion": "success",
+            "started_at": "2026-08-06T09:00:00Z"
+          },
+          {
+            "name": "noise-17",
+            "status": "completed",
+            "conclusion": "success",
+            "started_at": "2026-08-06T09:00:00Z"
+          },
+          {
+            "name": "noise-18",
+            "status": "completed",
+            "conclusion": "success",
+            "started_at": "2026-08-06T09:00:00Z"
+          },
+          {
+            "name": "noise-19",
+            "status": "completed",
+            "conclusion": "success",
+            "started_at": "2026-08-06T09:00:00Z"
+          },
+          {
+            "name": "noise-20",
+            "status": "completed",
+            "conclusion": "success",
+            "started_at": "2026-08-06T09:00:00Z"
+          },
+          {
+            "name": "noise-21",
+            "status": "completed",
+            "conclusion": "success",
+            "started_at": "2026-08-06T09:00:00Z"
+          },
+          {
+            "name": "noise-22",
+            "status": "completed",
+            "conclusion": "success",
+            "started_at": "2026-08-06T09:00:00Z"
+          },
+          {
+            "name": "noise-23",
+            "status": "completed",
+            "conclusion": "success",
+            "started_at": "2026-08-06T09:00:00Z"
+          },
+          {
+            "name": "noise-24",
+            "status": "completed",
+            "conclusion": "success",
+            "started_at": "2026-08-06T09:00:00Z"
+          },
+          {
+            "name": "noise-25",
+            "status": "completed",
+            "conclusion": "success",
+            "started_at": "2026-08-06T09:00:00Z"
+          },
+          {
+            "name": "noise-26",
+            "status": "completed",
+            "conclusion": "success",
+            "started_at": "2026-08-06T09:00:00Z"
+          },
+          {
+            "name": "noise-27",
+            "status": "completed",
+            "conclusion": "success",
+            "started_at": "2026-08-06T09:00:00Z"
+          },
+          {
+            "name": "noise-28",
+            "status": "completed",
+            "conclusion": "success",
+            "started_at": "2026-08-06T09:00:00Z"
+          },
+          {
+            "name": "noise-29",
+            "status": "completed",
+            "conclusion": "success",
+            "started_at": "2026-08-06T09:00:00Z"
+          },
+          {
+            "name": "noise-30",
+            "status": "completed",
+            "conclusion": "success",
+            "started_at": "2026-08-06T09:00:00Z"
+          },
+          {
+            "name": "noise-31",
+            "status": "completed",
+            "conclusion": "success",
+            "started_at": "2026-08-06T09:00:00Z"
+          },
+          {
+            "name": "noise-32",
+            "status": "completed",
+            "conclusion": "success",
+            "started_at": "2026-08-06T09:00:00Z"
+          },
+          {
+            "name": "noise-33",
+            "status": "completed",
+            "conclusion": "success",
+            "started_at": "2026-08-06T09:00:00Z"
+          },
+          {
+            "name": "noise-34",
+            "status": "completed",
+            "conclusion": "success",
+            "started_at": "2026-08-06T09:00:00Z"
+          },
+          {
+            "name": "noise-35",
+            "status": "completed",
+            "conclusion": "success",
+            "started_at": "2026-08-06T09:00:00Z"
+          },
+          {
+            "name": "noise-36",
+            "status": "completed",
+            "conclusion": "success",
+            "started_at": "2026-08-06T09:00:00Z"
+          },
+          {
+            "name": "noise-37",
+            "status": "completed",
+            "conclusion": "success",
+            "started_at": "2026-08-06T09:00:00Z"
+          },
+          {
+            "name": "noise-38",
+            "status": "completed",
+            "conclusion": "success",
+            "started_at": "2026-08-06T09:00:00Z"
+          },
+          {
+            "name": "noise-39",
+            "status": "completed",
+            "conclusion": "success",
+            "started_at": "2026-08-06T09:00:00Z"
+          },
+          {
+            "name": "noise-40",
+            "status": "completed",
+            "conclusion": "success",
+            "started_at": "2026-08-06T09:00:00Z"
+          },
+          {
+            "name": "noise-41",
+            "status": "completed",
+            "conclusion": "success",
+            "started_at": "2026-08-06T09:00:00Z"
+          },
+          {
+            "name": "noise-42",
+            "status": "completed",
+            "conclusion": "success",
+            "started_at": "2026-08-06T09:00:00Z"
+          },
+          {
+            "name": "noise-43",
+            "status": "completed",
+            "conclusion": "success",
+            "started_at": "2026-08-06T09:00:00Z"
+          },
+          {
+            "name": "noise-44",
+            "status": "completed",
+            "conclusion": "success",
+            "started_at": "2026-08-06T09:00:00Z"
+          },
+          {
+            "name": "noise-45",
+            "status": "completed",
+            "conclusion": "success",
+            "started_at": "2026-08-06T09:00:00Z"
+          },
+          {
+            "name": "noise-46",
+            "status": "completed",
+            "conclusion": "success",
+            "started_at": "2026-08-06T09:00:00Z"
+          },
+          {
+            "name": "noise-47",
+            "status": "completed",
+            "conclusion": "success",
+            "started_at": "2026-08-06T09:00:00Z"
+          },
+          {
+            "name": "noise-48",
+            "status": "completed",
+            "conclusion": "success",
+            "started_at": "2026-08-06T09:00:00Z"
+          },
+          {
+            "name": "noise-49",
+            "status": "completed",
+            "conclusion": "success",
+            "started_at": "2026-08-06T09:00:00Z"
+          },
+          {
+            "name": "noise-50",
+            "status": "completed",
+            "conclusion": "success",
+            "started_at": "2026-08-06T09:00:00Z"
+          },
+          {
+            "name": "noise-51",
+            "status": "completed",
+            "conclusion": "success",
+            "started_at": "2026-08-06T09:00:00Z"
+          },
+          {
+            "name": "noise-52",
+            "status": "completed",
+            "conclusion": "success",
+            "started_at": "2026-08-06T09:00:00Z"
+          },
+          {
+            "name": "noise-53",
+            "status": "completed",
+            "conclusion": "success",
+            "started_at": "2026-08-06T09:00:00Z"
+          },
+          {
+            "name": "noise-54",
+            "status": "completed",
+            "conclusion": "success",
+            "started_at": "2026-08-06T09:00:00Z"
+          },
+          {
+            "name": "noise-55",
+            "status": "completed",
+            "conclusion": "success",
+            "started_at": "2026-08-06T09:00:00Z"
+          },
+          {
+            "name": "noise-56",
+            "status": "completed",
+            "conclusion": "success",
+            "started_at": "2026-08-06T09:00:00Z"
+          },
+          {
+            "name": "noise-57",
+            "status": "completed",
+            "conclusion": "success",
+            "started_at": "2026-08-06T09:00:00Z"
+          },
+          {
+            "name": "noise-58",
+            "status": "completed",
+            "conclusion": "success",
+            "started_at": "2026-08-06T09:00:00Z"
+          },
+          {
+            "name": "noise-59",
+            "status": "completed",
+            "conclusion": "success",
+            "started_at": "2026-08-06T09:00:00Z"
+          },
+          {
+            "name": "noise-60",
+            "status": "completed",
+            "conclusion": "success",
+            "started_at": "2026-08-06T09:00:00Z"
+          },
+          {
+            "name": "noise-61",
+            "status": "completed",
+            "conclusion": "success",
+            "started_at": "2026-08-06T09:00:00Z"
+          },
+          {
+            "name": "noise-62",
+            "status": "completed",
+            "conclusion": "success",
+            "started_at": "2026-08-06T09:00:00Z"
+          },
+          {
+            "name": "noise-63",
+            "status": "completed",
+            "conclusion": "success",
+            "started_at": "2026-08-06T09:00:00Z"
+          },
+          {
+            "name": "noise-64",
+            "status": "completed",
+            "conclusion": "success",
+            "started_at": "2026-08-06T09:00:00Z"
+          },
+          {
+            "name": "noise-65",
+            "status": "completed",
+            "conclusion": "success",
+            "started_at": "2026-08-06T09:00:00Z"
+          },
+          {
+            "name": "noise-66",
+            "status": "completed",
+            "conclusion": "success",
+            "started_at": "2026-08-06T09:00:00Z"
+          },
+          {
+            "name": "noise-67",
+            "status": "completed",
+            "conclusion": "success",
+            "started_at": "2026-08-06T09:00:00Z"
+          },
+          {
+            "name": "noise-68",
+            "status": "completed",
+            "conclusion": "success",
+            "started_at": "2026-08-06T09:00:00Z"
+          },
+          {
+            "name": "noise-69",
+            "status": "completed",
+            "conclusion": "success",
+            "started_at": "2026-08-06T09:00:00Z"
+          },
+          {
+            "name": "noise-70",
+            "status": "completed",
+            "conclusion": "success",
+            "started_at": "2026-08-06T09:00:00Z"
+          },
+          {
+            "name": "noise-71",
+            "status": "completed",
+            "conclusion": "success",
+            "started_at": "2026-08-06T09:00:00Z"
+          },
+          {
+            "name": "noise-72",
+            "status": "completed",
+            "conclusion": "success",
+            "started_at": "2026-08-06T09:00:00Z"
+          },
+          {
+            "name": "noise-73",
+            "status": "completed",
+            "conclusion": "success",
+            "started_at": "2026-08-06T09:00:00Z"
+          },
+          {
+            "name": "noise-74",
+            "status": "completed",
+            "conclusion": "success",
+            "started_at": "2026-08-06T09:00:00Z"
+          },
+          {
+            "name": "noise-75",
+            "status": "completed",
+            "conclusion": "success",
+            "started_at": "2026-08-06T09:00:00Z"
+          },
+          {
+            "name": "noise-76",
+            "status": "completed",
+            "conclusion": "success",
+            "started_at": "2026-08-06T09:00:00Z"
+          },
+          {
+            "name": "noise-77",
+            "status": "completed",
+            "conclusion": "success",
+            "started_at": "2026-08-06T09:00:00Z"
+          },
+          {
+            "name": "noise-78",
+            "status": "completed",
+            "conclusion": "success",
+            "started_at": "2026-08-06T09:00:00Z"
+          },
+          {
+            "name": "noise-79",
+            "status": "completed",
+            "conclusion": "success",
+            "started_at": "2026-08-06T09:00:00Z"
+          },
+          {
+            "name": "noise-80",
+            "status": "completed",
+            "conclusion": "success",
+            "started_at": "2026-08-06T09:00:00Z"
+          },
+          {
+            "name": "noise-81",
+            "status": "completed",
+            "conclusion": "success",
+            "started_at": "2026-08-06T09:00:00Z"
+          },
+          {
+            "name": "noise-82",
+            "status": "completed",
+            "conclusion": "success",
+            "started_at": "2026-08-06T09:00:00Z"
+          },
+          {
+            "name": "noise-83",
+            "status": "completed",
+            "conclusion": "success",
+            "started_at": "2026-08-06T09:00:00Z"
+          },
+          {
+            "name": "noise-84",
+            "status": "completed",
+            "conclusion": "success",
+            "started_at": "2026-08-06T09:00:00Z"
+          },
+          {
+            "name": "noise-85",
+            "status": "completed",
+            "conclusion": "success",
+            "started_at": "2026-08-06T09:00:00Z"
+          },
+          {
+            "name": "noise-86",
+            "status": "completed",
+            "conclusion": "success",
+            "started_at": "2026-08-06T09:00:00Z"
+          },
+          {
+            "name": "noise-87",
+            "status": "completed",
+            "conclusion": "success",
+            "started_at": "2026-08-06T09:00:00Z"
+          },
+          {
+            "name": "noise-88",
+            "status": "completed",
+            "conclusion": "success",
+            "started_at": "2026-08-06T09:00:00Z"
+          },
+          {
+            "name": "noise-89",
+            "status": "completed",
+            "conclusion": "success",
+            "started_at": "2026-08-06T09:00:00Z"
+          },
+          {
+            "name": "noise-90",
+            "status": "completed",
+            "conclusion": "success",
+            "started_at": "2026-08-06T09:00:00Z"
+          },
+          {
+            "name": "noise-91",
+            "status": "completed",
+            "conclusion": "success",
+            "started_at": "2026-08-06T09:00:00Z"
+          },
+          {
+            "name": "noise-92",
+            "status": "completed",
+            "conclusion": "success",
+            "started_at": "2026-08-06T09:00:00Z"
+          },
+          {
+            "name": "noise-93",
+            "status": "completed",
+            "conclusion": "success",
+            "started_at": "2026-08-06T09:00:00Z"
+          },
+          {
+            "name": "noise-94",
+            "status": "completed",
+            "conclusion": "success",
+            "started_at": "2026-08-06T09:00:00Z"
+          },
+          {
+            "name": "noise-95",
+            "status": "completed",
+            "conclusion": "success",
+            "started_at": "2026-08-06T09:00:00Z"
+          },
+          {
+            "name": "noise-96",
+            "status": "completed",
+            "conclusion": "success",
+            "started_at": "2026-08-06T09:00:00Z"
+          },
+          {
+            "name": "noise-97",
+            "status": "completed",
+            "conclusion": "success",
+            "started_at": "2026-08-06T09:00:00Z"
+          },
+          {
+            "name": "noise-98",
+            "status": "completed",
+            "conclusion": "success",
+            "started_at": "2026-08-06T09:00:00Z"
+          },
+          {
+            "name": "noise-99",
+            "status": "completed",
+            "conclusion": "success",
+            "started_at": "2026-08-06T09:00:00Z"
+          }
+        ]
+      },
+      {
+        "total_count": 102,
+        "check_runs": [
+          {
+            "name": "alpha",
+            "status": "completed",
+            "conclusion": "success",
+            "started_at": "2026-08-06T10:00:00Z"
+          },
+          {
+            "name": "beta",
+            "status": "completed",
+            "conclusion": "success",
+            "started_at": "2026-08-06T10:00:00Z"
+          }
+        ]
+      }
+    ]
+  },
+  "truncated": {
+    "pages": [
+      {
+        "total_count": 102,
+        "check_runs": [
+          {
+            "name": "noise-0",
+            "status": "completed",
+            "conclusion": "success",
+            "started_at": "2026-08-06T09:00:00Z"
+          },
+          {
+            "name": "noise-1",
+            "status": "completed",
+            "conclusion": "success",
+            "started_at": "2026-08-06T09:00:00Z"
+          },
+          {
+            "name": "noise-2",
+            "status": "completed",
+            "conclusion": "success",
+            "started_at": "2026-08-06T09:00:00Z"
+          },
+          {
+            "name": "noise-3",
+            "status": "completed",
+            "conclusion": "success",
+            "started_at": "2026-08-06T09:00:00Z"
+          },
+          {
+            "name": "noise-4",
+            "status": "completed",
+            "conclusion": "success",
+            "started_at": "2026-08-06T09:00:00Z"
+          },
+          {
+            "name": "noise-5",
+            "status": "completed",
+            "conclusion": "success",
+            "started_at": "2026-08-06T09:00:00Z"
+          },
+          {
+            "name": "noise-6",
+            "status": "completed",
+            "conclusion": "success",
+            "started_at": "2026-08-06T09:00:00Z"
+          },
+          {
+            "name": "noise-7",
+            "status": "completed",
+            "conclusion": "success",
+            "started_at": "2026-08-06T09:00:00Z"
+          },
+          {
+            "name": "noise-8",
+            "status": "completed",
+            "conclusion": "success",
+            "started_at": "2026-08-06T09:00:00Z"
+          },
+          {
+            "name": "noise-9",
+            "status": "completed",
+            "conclusion": "success",
+            "started_at": "2026-08-06T09:00:00Z"
+          },
+          {
+            "name": "noise-10",
+            "status": "completed",
+            "conclusion": "success",
+            "started_at": "2026-08-06T09:00:00Z"
+          },
+          {
+            "name": "noise-11",
+            "status": "completed",
+            "conclusion": "success",
+            "started_at": "2026-08-06T09:00:00Z"
+          },
+          {
+            "name": "noise-12",
+            "status": "completed",
+            "conclusion": "success",
+            "started_at": "2026-08-06T09:00:00Z"
+          },
+          {
+            "name": "noise-13",
+            "status": "completed",
+            "conclusion": "success",
+            "started_at": "2026-08-06T09:00:00Z"
+          },
+          {
+            "name": "noise-14",
+            "status": "completed",
+            "conclusion": "success",
+            "started_at": "2026-08-06T09:00:00Z"
+          },
+          {
+            "name": "noise-15",
+            "status": "completed",
+            "conclusion": "success",
+            "started_at": "2026-08-06T09:00:00Z"
+          },
+          {
+            "name": "noise-16",
+            "status": "completed",
+            "conclusion": "success",
+            "started_at": "2026-08-06T09:00:00Z"
+          },
+          {
+            "name": "noise-17",
+            "status": "completed",
+            "conclusion": "success",
+            "started_at": "2026-08-06T09:00:00Z"
+          },
+          {
+            "name": "noise-18",
+            "status": "completed",
+            "conclusion": "success",
+            "started_at": "2026-08-06T09:00:00Z"
+          },
+          {
+            "name": "noise-19",
+            "status": "completed",
+            "conclusion": "success",
+            "started_at": "2026-08-06T09:00:00Z"
+          },
+          {
+            "name": "noise-20",
+            "status": "completed",
+            "conclusion": "success",
+            "started_at": "2026-08-06T09:00:00Z"
+          },
+          {
+            "name": "noise-21",
+            "status": "completed",
+            "conclusion": "success",
+            "started_at": "2026-08-06T09:00:00Z"
+          },
+          {
+            "name": "noise-22",
+            "status": "completed",
+            "conclusion": "success",
+            "started_at": "2026-08-06T09:00:00Z"
+          },
+          {
+            "name": "noise-23",
+            "status": "completed",
+            "conclusion": "success",
+            "started_at": "2026-08-06T09:00:00Z"
+          },
+          {
+            "name": "noise-24",
+            "status": "completed",
+            "conclusion": "success",
+            "started_at": "2026-08-06T09:00:00Z"
+          },
+          {
+            "name": "noise-25",
+            "status": "completed",
+            "conclusion": "success",
+            "started_at": "2026-08-06T09:00:00Z"
+          },
+          {
+            "name": "noise-26",
+            "status": "completed",
+            "conclusion": "success",
+            "started_at": "2026-08-06T09:00:00Z"
+          },
+          {
+            "name": "noise-27",
+            "status": "completed",
+            "conclusion": "success",
+            "started_at": "2026-08-06T09:00:00Z"
+          },
+          {
+            "name": "noise-28",
+            "status": "completed",
+            "conclusion": "success",
+            "started_at": "2026-08-06T09:00:00Z"
+          },
+          {
+            "name": "noise-29",
+            "status": "completed",
+            "conclusion": "success",
+            "started_at": "2026-08-06T09:00:00Z"
+          },
+          {
+            "name": "noise-30",
+            "status": "completed",
+            "conclusion": "success",
+            "started_at": "2026-08-06T09:00:00Z"
+          },
+          {
+            "name": "noise-31",
+            "status": "completed",
+            "conclusion": "success",
+            "started_at": "2026-08-06T09:00:00Z"
+          },
+          {
+            "name": "noise-32",
+            "status": "completed",
+            "conclusion": "success",
+            "started_at": "2026-08-06T09:00:00Z"
+          },
+          {
+            "name": "noise-33",
+            "status": "completed",
+            "conclusion": "success",
+            "started_at": "2026-08-06T09:00:00Z"
+          },
+          {
+            "name": "noise-34",
+            "status": "completed",
+            "conclusion": "success",
+            "started_at": "2026-08-06T09:00:00Z"
+          },
+          {
+            "name": "noise-35",
+            "status": "completed",
+            "conclusion": "success",
+            "started_at": "2026-08-06T09:00:00Z"
+          },
+          {
+            "name": "noise-36",
+            "status": "completed",
+            "conclusion": "success",
+            "started_at": "2026-08-06T09:00:00Z"
+          },
+          {
+            "name": "noise-37",
+            "status": "completed",
+            "conclusion": "success",
+            "started_at": "2026-08-06T09:00:00Z"
+          },
+          {
+            "name": "noise-38",
+            "status": "completed",
+            "conclusion": "success",
+            "started_at": "2026-08-06T09:00:00Z"
+          },
+          {
+            "name": "noise-39",
+            "status": "completed",
+            "conclusion": "success",
+            "started_at": "2026-08-06T09:00:00Z"
+          },
+          {
+            "name": "noise-40",
+            "status": "completed",
+            "conclusion": "success",
+            "started_at": "2026-08-06T09:00:00Z"
+          },
+          {
+            "name": "noise-41",
+            "status": "completed",
+            "conclusion": "success",
+            "started_at": "2026-08-06T09:00:00Z"
+          },
+          {
+            "name": "noise-42",
+            "status": "completed",
+            "conclusion": "success",
+            "started_at": "2026-08-06T09:00:00Z"
+          },
+          {
+            "name": "noise-43",
+            "status": "completed",
+            "conclusion": "success",
+            "started_at": "2026-08-06T09:00:00Z"
+          },
+          {
+            "name": "noise-44",
+            "status": "completed",
+            "conclusion": "success",
+            "started_at": "2026-08-06T09:00:00Z"
+          },
+          {
+            "name": "noise-45",
+            "status": "completed",
+            "conclusion": "success",
+            "started_at": "2026-08-06T09:00:00Z"
+          },
+          {
+            "name": "noise-46",
+            "status": "completed",
+            "conclusion": "success",
+            "started_at": "2026-08-06T09:00:00Z"
+          },
+          {
+            "name": "noise-47",
+            "status": "completed",
+            "conclusion": "success",
+            "started_at": "2026-08-06T09:00:00Z"
+          },
+          {
+            "name": "noise-48",
+            "status": "completed",
+            "conclusion": "success",
+            "started_at": "2026-08-06T09:00:00Z"
+          },
+          {
+            "name": "noise-49",
+            "status": "completed",
+            "conclusion": "success",
+            "started_at": "2026-08-06T09:00:00Z"
+          },
+          {
+            "name": "noise-50",
+            "status": "completed",
+            "conclusion": "success",
+            "started_at": "2026-08-06T09:00:00Z"
+          },
+          {
+            "name": "noise-51",
+            "status": "completed",
+            "conclusion": "success",
+            "started_at": "2026-08-06T09:00:00Z"
+          },
+          {
+            "name": "noise-52",
+            "status": "completed",
+            "conclusion": "success",
+            "started_at": "2026-08-06T09:00:00Z"
+          },
+          {
+            "name": "noise-53",
+            "status": "completed",
+            "conclusion": "success",
+            "started_at": "2026-08-06T09:00:00Z"
+          },
+          {
+            "name": "noise-54",
+            "status": "completed",
+            "conclusion": "success",
+            "started_at": "2026-08-06T09:00:00Z"
+          },
+          {
+            "name": "noise-55",
+            "status": "completed",
+            "conclusion": "success",
+            "started_at": "2026-08-06T09:00:00Z"
+          },
+          {
+            "name": "noise-56",
+            "status": "completed",
+            "conclusion": "success",
+            "started_at": "2026-08-06T09:00:00Z"
+          },
+          {
+            "name": "noise-57",
+            "status": "completed",
+            "conclusion": "success",
+            "started_at": "2026-08-06T09:00:00Z"
+          },
+          {
+            "name": "noise-58",
+            "status": "completed",
+            "conclusion": "success",
+            "started_at": "2026-08-06T09:00:00Z"
+          },
+          {
+            "name": "noise-59",
+            "status": "completed",
+            "conclusion": "success",
+            "started_at": "2026-08-06T09:00:00Z"
+          },
+          {
+            "name": "noise-60",
+            "status": "completed",
+            "conclusion": "success",
+            "started_at": "2026-08-06T09:00:00Z"
+          },
+          {
+            "name": "noise-61",
+            "status": "completed",
+            "conclusion": "success",
+            "started_at": "2026-08-06T09:00:00Z"
+          },
+          {
+            "name": "noise-62",
+            "status": "completed",
+            "conclusion": "success",
+            "started_at": "2026-08-06T09:00:00Z"
+          },
+          {
+            "name": "noise-63",
+            "status": "completed",
+            "conclusion": "success",
+            "started_at": "2026-08-06T09:00:00Z"
+          },
+          {
+            "name": "noise-64",
+            "status": "completed",
+            "conclusion": "success",
+            "started_at": "2026-08-06T09:00:00Z"
+          },
+          {
+            "name": "noise-65",
+            "status": "completed",
+            "conclusion": "success",
+            "started_at": "2026-08-06T09:00:00Z"
+          },
+          {
+            "name": "noise-66",
+            "status": "completed",
+            "conclusion": "success",
+            "started_at": "2026-08-06T09:00:00Z"
+          },
+          {
+            "name": "noise-67",
+            "status": "completed",
+            "conclusion": "success",
+            "started_at": "2026-08-06T09:00:00Z"
+          },
+          {
+            "name": "noise-68",
+            "status": "completed",
+            "conclusion": "success",
+            "started_at": "2026-08-06T09:00:00Z"
+          },
+          {
+            "name": "noise-69",
+            "status": "completed",
+            "conclusion": "success",
+            "started_at": "2026-08-06T09:00:00Z"
+          },
+          {
+            "name": "noise-70",
+            "status": "completed",
+            "conclusion": "success",
+            "started_at": "2026-08-06T09:00:00Z"
+          },
+          {
+            "name": "noise-71",
+            "status": "completed",
+            "conclusion": "success",
+            "started_at": "2026-08-06T09:00:00Z"
+          },
+          {
+            "name": "noise-72",
+            "status": "completed",
+            "conclusion": "success",
+            "started_at": "2026-08-06T09:00:00Z"
+          },
+          {
+            "name": "noise-73",
+            "status": "completed",
+            "conclusion": "success",
+            "started_at": "2026-08-06T09:00:00Z"
+          },
+          {
+            "name": "noise-74",
+            "status": "completed",
+            "conclusion": "success",
+            "started_at": "2026-08-06T09:00:00Z"
+          },
+          {
+            "name": "noise-75",
+            "status": "completed",
+            "conclusion": "success",
+            "started_at": "2026-08-06T09:00:00Z"
+          },
+          {
+            "name": "noise-76",
+            "status": "completed",
+            "conclusion": "success",
+            "started_at": "2026-08-06T09:00:00Z"
+          },
+          {
+            "name": "noise-77",
+            "status": "completed",
+            "conclusion": "success",
+            "started_at": "2026-08-06T09:00:00Z"
+          },
+          {
+            "name": "noise-78",
+            "status": "completed",
+            "conclusion": "success",
+            "started_at": "2026-08-06T09:00:00Z"
+          },
+          {
+            "name": "noise-79",
+            "status": "completed",
+            "conclusion": "success",
+            "started_at": "2026-08-06T09:00:00Z"
+          },
+          {
+            "name": "noise-80",
+            "status": "completed",
+            "conclusion": "success",
+            "started_at": "2026-08-06T09:00:00Z"
+          },
+          {
+            "name": "noise-81",
+            "status": "completed",
+            "conclusion": "success",
+            "started_at": "2026-08-06T09:00:00Z"
+          },
+          {
+            "name": "noise-82",
+            "status": "completed",
+            "conclusion": "success",
+            "started_at": "2026-08-06T09:00:00Z"
+          },
+          {
+            "name": "noise-83",
+            "status": "completed",
+            "conclusion": "success",
+            "started_at": "2026-08-06T09:00:00Z"
+          },
+          {
+            "name": "noise-84",
+            "status": "completed",
+            "conclusion": "success",
+            "started_at": "2026-08-06T09:00:00Z"
+          },
+          {
+            "name": "noise-85",
+            "status": "completed",
+            "conclusion": "success",
+            "started_at": "2026-08-06T09:00:00Z"
+          },
+          {
+            "name": "noise-86",
+            "status": "completed",
+            "conclusion": "success",
+            "started_at": "2026-08-06T09:00:00Z"
+          },
+          {
+            "name": "noise-87",
+            "status": "completed",
+            "conclusion": "success",
+            "started_at": "2026-08-06T09:00:00Z"
+          },
+          {
+            "name": "noise-88",
+            "status": "completed",
+            "conclusion": "success",
+            "started_at": "2026-08-06T09:00:00Z"
+          },
+          {
+            "name": "noise-89",
+            "status": "completed",
+            "conclusion": "success",
+            "started_at": "2026-08-06T09:00:00Z"
+          },
+          {
+            "name": "noise-90",
+            "status": "completed",
+            "conclusion": "success",
+            "started_at": "2026-08-06T09:00:00Z"
+          },
+          {
+            "name": "noise-91",
+            "status": "completed",
+            "conclusion": "success",
+            "started_at": "2026-08-06T09:00:00Z"
+          },
+          {
+            "name": "noise-92",
+            "status": "completed",
+            "conclusion": "success",
+            "started_at": "2026-08-06T09:00:00Z"
+          },
+          {
+            "name": "noise-93",
+            "status": "completed",
+            "conclusion": "success",
+            "started_at": "2026-08-06T09:00:00Z"
+          },
+          {
+            "name": "noise-94",
+            "status": "completed",
+            "conclusion": "success",
+            "started_at": "2026-08-06T09:00:00Z"
+          },
+          {
+            "name": "noise-95",
+            "status": "completed",
+            "conclusion": "success",
+            "started_at": "2026-08-06T09:00:00Z"
+          },
+          {
+            "name": "noise-96",
+            "status": "completed",
+            "conclusion": "success",
+            "started_at": "2026-08-06T09:00:00Z"
+          },
+          {
+            "name": "noise-97",
+            "status": "completed",
+            "conclusion": "success",
+            "started_at": "2026-08-06T09:00:00Z"
+          },
+          {
+            "name": "noise-98",
+            "status": "completed",
+            "conclusion": "success",
+            "started_at": "2026-08-06T09:00:00Z"
+          },
+          {
+            "name": "noise-99",
+            "status": "completed",
+            "conclusion": "success",
+            "started_at": "2026-08-06T09:00:00Z"
+          }
+        ]
+      }
+    ]
+  },
+  "rerun-newest-passed": {
+    "pages": [
+      {
+        "total_count": 3,
+        "check_runs": [
+          {
+            "name": "alpha",
+            "status": "completed",
+            "conclusion": "failure",
+            "started_at": "2026-08-06T09:00:00Z"
+          },
+          {
+            "name": "alpha",
+            "status": "completed",
+            "conclusion": "success",
+            "started_at": "2026-08-06T10:00:00Z"
+          },
+          {
+            "name": "beta",
+            "status": "completed",
+            "conclusion": "success",
+            "started_at": "2026-08-06T10:00:00Z"
+          }
+        ]
+      }
+    ]
+  },
+  "rerun-newest-failed": {
+    "pages": [
+      {
+        "total_count": 3,
+        "check_runs": [
+          {
+            "name": "alpha",
+            "status": "completed",
+            "conclusion": "success",
+            "started_at": "2026-08-06T09:00:00Z"
+          },
+          {
+            "name": "alpha",
+            "status": "completed",
+            "conclusion": "failure",
+            "started_at": "2026-08-06T10:00:00Z"
+          },
+          {
+            "name": "beta",
+            "status": "completed",
+            "conclusion": "success",
+            "started_at": "2026-08-06T10:00:00Z"
+          }
+        ]
+      }
+    ]
+  },
+  "empty": {
+    "pages": [
+      {
+        "total_count": 0,
+        "check_runs": []
+      }
+    ]
+  },
+  "pending": {
+    "pages": [
+      {
+        "total_count": 2,
+        "check_runs": [
+          {
+            "name": "alpha",
+            "status": "completed",
+            "conclusion": "success",
+            "started_at": "2026-08-06T10:00:00Z"
+          },
+          {
+            "name": "beta",
+            "status": "in_progress",
+            "conclusion": null,
+            "started_at": "2026-08-06T10:00:00Z"
+          }
+        ]
+      }
+    ]
+  },
+  "skipped": {
+    "pages": [
+      {
+        "total_count": 2,
+        "check_runs": [
+          {
+            "name": "alpha",
+            "status": "completed",
+            "conclusion": "success",
+            "started_at": "2026-08-06T10:00:00Z"
+          },
+          {
+            "name": "beta",
+            "status": "completed",
+            "conclusion": "skipped",
+            "started_at": "2026-08-06T10:00:00Z"
+          }
+        ]
+      }
+    ]
+  },
+  "neutral": {
+    "pages": [
+      {
+        "total_count": 2,
+        "check_runs": [
+          {
+            "name": "alpha",
+            "status": "completed",
+            "conclusion": "success",
+            "started_at": "2026-08-06T10:00:00Z"
+          },
+          {
+            "name": "beta",
+            "status": "completed",
+            "conclusion": "neutral",
+            "started_at": "2026-08-06T10:00:00Z"
+          }
+        ]
+      }
+    ]
+  }
+}
