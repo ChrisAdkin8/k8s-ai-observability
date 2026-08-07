@@ -34,3 +34,23 @@ updates:
     # One PR per action. Grouping them would make a single red run ambiguous about
     # which bump caused it, and there are only three.
     open-pull-requests-limit: 5
+
+  # ⚠️ A SECOND ENTRY, BECAUSE `directory: /` DOES NOT MEAN "THE REPOSITORY". For the
+  # github-actions ecosystem it means `.github/workflows/` and nothing else. A composite
+  # action is a separate directory and needs its own entry, or its pinned actions are
+  # never offered a bump.
+  #
+  # That is not hypothetical here: .github/actions/verify-chart/action.yml pins
+  # actions/upload-artifact by SHA, and that pin was invisible to the entry above from
+  # the moment it was added. Silent rot is the exact failure this file exists to
+  # prevent, so an unwatched pin is worse than an unpinned one — it looks maintained.
+  - package-ecosystem: github-actions
+    directory: /.github/actions/verify-chart
+    schedule:
+      interval: weekly
+      day: monday
+    commit-message:
+      prefix: ci
+    labels:
+      - dependencies
+    open-pull-requests-limit: 5
