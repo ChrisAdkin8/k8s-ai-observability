@@ -32,9 +32,13 @@ rule 18 aimed at the alert set rather than at the checks: an alert that has only
 against a synthetic series is a guess about the world.
 
 **The deliverable is a graded alert set** — for each failure mode, what fired, what stayed
-silent, and whether the silence was correct. Two modes trip nothing today. "There is no
-alert for this" is a legitimate result to hand out, and this rig can hand it out with
-evidence.
+silent, and whether the silence was correct. ⚠️ **ROADMAP.md says two of its seven modes
+trip nothing. On the ten below the ratio inverts: only two are expected to fire anything at
+all** against the tree as it stands — target loss on the GPU side (W2.2) and KV exhaustion
+(W6) — and W3 earns a third by building the detector it needs. Everywhere else "there is no
+alert for this" is the result, which is a legitimate one to hand out and which this rig can
+hand out with evidence. Size the harness for that: silence is the common path here, not the
+exception.
 
 ---
 
@@ -114,7 +118,7 @@ simulator change**, priced accordingly below.
 
 ### 5. A new alert is not one file's worth of work.
 
-Adding one touches five places, and the last one fails `task preflight`:
+Adding one touches seven places, and the last one fails `task preflight`:
 
 | Place | Why |
 |--|--|
@@ -122,7 +126,9 @@ Adding one touches five places, and the last one fails `task preflight`:
 | `tests/rules/llm-rules_test.yaml` | promtool cases, both sides (rule 18) |
 | `docs/llm-simulation.md:404-411` | the alert table has a row per alert |
 | `docs/architecture.md:128` | enumerates the alert names |
-| **`docs/llm-simulation.md:43`** | **"Recording rules + six alerts" is derived and checked** |
+| `manifests/dashboards/llm-sim-overview.grafana-com.md:241-244` | a **second** alert table, on the page that ships to grafana.com. It is in `EM_DASH_FREE` (rule 13) and republished as a revision of id 25620 (rule 9), which makes it the most expensive row here |
+| `CHANGELOG.md` | its own table names a new **alert** as MINOR-worthy (`:12`) |
+| **`docs/llm-simulation.md:43`** | **the alert count, derived and checked** |
 
 `derive_llm_alerts()` (`scripts/check-doc-claims.py:140-143`, registered at `:423-425`)
 counts `- alert:` entries in the LLM rule file and compares against the prose number.
@@ -135,6 +141,14 @@ check-doc-claims: FAIL [alerts]: prose drifted from code
 
 That is the check working, and it names the file and line for you. Budget for it rather
 than being surprised by it.
+
+⚠️ **A tracked prompt is inside that same scan, and this file was in it.** `check-doc-claims.py`
+walks `git ls-files '*.md'` (`:506`), so `prompts/` has been in scope since the briefs were
+tracked. This file restated the alert count twice and was **two of the three claims** the
+check was comparing — so the seventh alert would have turned `doc-claims` red here as well
+as in the doc that owns the number. The phrase is gone from it now, on the rule the working
+loop already states: reference the file that owns a number, never restate it. **Do not put
+it back**, in this file or in the next prompt.
 
 The chart ships the rules too (`charts/k8s-ai-observability/templates/prometheusrules.yaml`
 templates only the wrapper and `Files.Get`s the extracted groups), so a new alert is
@@ -345,7 +359,9 @@ were invisible under zsh.
 ### What `verify.sh` already asserts, which your drills must not break — VERIFIED
 
 L1 `up{job="llm-sim"} == 1` (`:522`), L3 steady p95 under 2s scoped to
-`LLM_STEADY_MODEL` (`:544`), L6 `LLMHighTTFT` firing (`:640`). A drill that leaves the
+`LLM_STEADY_MODEL` (`:544`), L6 `LLMHighTTFT` firing (`:640`), and — the two easiest to miss,
+because their labels say LLM while their inputs are DCGM — **L4 cross-domain tokens-per-watt
+(`:578`) and L4b the GPU binding joined on pod (`:615`)**. A drill that leaves the
 driven profile in a broken state, or leaves the GPU exporter scaled to zero, breaks the
 next `verify.sh` run — **which is why W1's restore is a trap and not a closing line.**
 
@@ -422,6 +438,15 @@ extend `extract.sh`'s `profiles` case — which today hardcodes `manifests/llm/1
 `<x>.json`, so `llm-profile-driven` becomes `driven.json` with no new logic. **Do not
 hand-write a second copy of the driven profile into `compose/`**; that is the drift the whole
 extraction exists to prevent.
+
+⚠️ **`.generated/` is regenerated on every `up`, so compose restores itself and Kubernetes
+does not.** Both tenants gate on the `generate` service
+(`depends_on: { generate: { condition: service_completed_successfully } }`), which reruns
+`extract.sh`, so a fault written into `.generated/profiles/` survives exactly until the next
+`docker compose up`. That is a free restore on one backend and no restore at all on the
+other. **Say which in the mode's banner** rather than letting W1.6's trap imply the two
+behave alike — and do not lean on it: a drill that only restores because something else
+happened to overwrite its file is not restoring.
 
 **W0.8 What cannot live in the file, and must not be forced into it.** Target loss, replica
 count, adoption labels, exporter scaling. These are faults in Kubernetes objects, and
@@ -502,8 +527,10 @@ board afterwards. A fault drill is the opposite case: leaving `kv_cache_tokens_c
 4096 poisons every later run, silently.
 
 **W1.7 The output is a table, and it is the deliverable.** Mode, each expectation, observed,
-and PASS/FAIL/SILENT. `SILENT` is a real outcome and must not be spelled `FAIL`: two modes
-are expected to trip nothing, and a drill that reports its correct result as a failure is a
+and PASS/FAIL/SILENT. `SILENT` is a real outcome and must not be spelled `FAIL`: **most of
+these ten modes are expected to trip nothing** (see the header — only W2's GPU half and W6
+fire against the tree as it stands), so `SILENT` is the ordinary path through this table
+rather than an edge case, and a drill that reports its correct result as a failure is a
 drill nobody runs twice.
 
 **W1.8 Preconditions checked up front**: the driven tenant exists (`drive-llm-load.sh:43-47`
@@ -540,9 +567,14 @@ fake DCGM exporter to zero, per `gpu-prometheusrule.yaml:92-93`. Expect
 `_POWER_USAGE` series to disappear with it (`gpu-prometheusrule.yaml:37-49` computes them
 from `DCGM_FI_DEV_GPU_UTIL`).
 
-⚠️ **This is the one drill that touches a shared component**, and it breaks `verify.sh`
-checks 3, 4 and 5 while it runs. Restore is mandatory, the mode must say so in its banner,
-and it must never run concurrently with `verify.sh`.
+⚠️ **This is the one drill that touches a shared component, and its blast radius reaches
+past the GPU checks into the LLM ones.** Every GPU-side check goes red, and so do **L4**
+(`verify.sh:578` — `llm:tokens_per_watt:5m` divides by `DCGM_FI_DEV_POWER_USAGE`, which the
+recording rules synthesise from `DCGM_FI_DEV_GPU_UTIL`) and **L4b** (`:615`, the GPU binding
+joined on pod). Note also that the GPU-side checks are numbered only in `verify.sh`'s
+comments while the LLM ones print their labels, so what you watch fail and what you read in
+the script do not line up. Restore is mandatory, the mode must say so in its banner, and it
+must never run concurrently with `verify.sh`.
 
 **W2.3 The decision this mode forces.** A per-tenant absence detector needs to know which
 tenants are supposed to exist, and PromQL cannot know that from the metric alone. Enumerate
@@ -664,8 +696,9 @@ deliberately.
 rule by dropping the `running > 0` conjunct and watch the idle case go red (rule 18). That
 is the experiment that shows the conjunction is doing the work.
 
-**W3.7 Pay finding 5's bill**: rule file, promtool cases both sides, the alert table row,
-`docs/architecture.md:128`, and the "six alerts" line at `docs/llm-simulation.md:43`. Run
+**W3.7 Pay finding 5's bill**, all seven places: rule file, promtool cases both sides, the
+alert table row, `docs/architecture.md:128`, the catalog page's own alert table, a
+`CHANGELOG.md` entry, and the derived count at `docs/llm-simulation.md:43`. Run
 `task doc-claims` and expect it to go red before you fix the prose; that is the check
 earning its keep.
 
@@ -768,6 +801,12 @@ that the other two stayed quiet, which is the state ROADMAP.md says no fixture p
 alert that watches that gauge fired. The engine's behaviour is unchanged. See the
 `num_preemptions_total` note in Background; do not let the write-up imply modelled KV
 pressure.
+
+⚠️ **And it falsifies a sentence already in the tree.** `tests/README.md:27` gives "nothing
+on the rig reaches 90% KV cache" as the reason `LLMKVCacheSaturated` can only ever be
+unit-tested. After this mode lands, something does — deliberately, on the driven tenant, and
+only while a drill is running. Correct it in the commit that lands the drill (rule 12). It
+is not in finding 5's table because it is a consequence of W6 rather than of a new alert.
 
 **W6.6 Expect a clamped 1.0** at any robust setting (`llm-sim.py:693`), and note the
 consequence in the write-up: with a `for: 5m` over a fluctuating population, the settings
@@ -952,9 +991,14 @@ Estimates from reading the code, not from doing the work. **Treat the ordering a
 than the numbers, and re-derive the largest line before planning around it.** Instruments
 are priced as code plus 25-35% verification, because the selftest is where these overrun.
 
-⚠️ **This totals more than ROADMAP.md's 3 to 4 days for the same item, and the gap is
-concentrated in two places**: W3's simulator change (which the roadmap assumed away, finding
-4) and the five-file cost of every new alert (finding 5). Correct the roadmap's estimate when
+⚠️ **The table sums to 34 hours, about 4.25 days — and the honest comparison with
+ROADMAP.md's 3 to 4 days for the same item is narrower than that looks.** Three of these
+lines (W9, W10 and W11, 3 hours together) are work the roadmap's mode table does not contain
+at all, so like for like this item is ~31 hours against a 24 to 32 hour estimate: inside the
+range rather than over it. What the roadmap genuinely assumed away is still real and named
+twice — W3's simulator change (finding 4) and the seven-place cost of every new alert
+(finding 5) — it is simply offset by modes that came in cheaper than the page expected,
+mostly because the spike did the expensive part first. Correct the roadmap's estimate when
 you know the real number, with the actual beside it, as the page already does for item 3's
 surface question.
 
@@ -1003,8 +1047,10 @@ evaluation interval.
   driven or retuned, and the two documented instructions that say otherwise get corrected
   rather than followed.
 - **Any `verify.sh` check asserting a fault.** Rule 7: a finding with a shelf life belongs in
-  a scenario script. The only thing CI gains from this work is `llm-sim.py --selftest`
-  coverage of the freeze knob, and the promtool cases for any new alert.
+  a scenario script. What CI gains is `llm-sim.py --selftest` coverage — the freeze knob and
+  its thaw-burst assertion (W3.3), the byte-identical default render (W0.5) and the label
+  bomb's off-by-default assertion (W8.1) — plus the promtool cases for any new alert.
+  Nothing beyond that, and nothing that waits on a `for:`.
 - **Modelling KV pressure, or emitting `num_preemptions_total`.** See W6.5.
 - **A configuration language, a CRD, a fault API or a sidecar.** W0 is a JSON block in a file
   the simulator already reads. Anything that needs a controller, a schema compiler or a second
@@ -1058,27 +1104,40 @@ Written before the work (house convention), and mapped to ROADMAP.md item 1's "D
    promtool and driven red once.
 10. The freeze knob is off by default, covered by `--selftest` including the thaw-burst
    assertion, and each new selftest assertion has been driven red deliberately (rule 18).
-11. KV exhaustion fires `LLMKVCacheSaturated` for the driven tenant while `LLMQueueBacklog`
+11. W4 produces the panel table — panel, expression, whether a dead tenant is visible — for
+    every panel on `llm-sim-overview.json` that aggregates across `model_name`, and each
+    finding gets either a repo change or a written decision. `llm:tokens_per_watt:5m` is
+    excluded with its reason, not silently.
+12. W5's prediction table is written and committed **before** the restart is run, and the
+    write-up records every row the prediction got wrong. A drill run without one does not
+    count as run.
+13. KV exhaustion fires `LLMKVCacheSaturated` for the driven tenant while `LLMQueueBacklog`
    and `LLMHighTTFT` stay silent **for that tenant**, with the capacity derived offline from
    a measured minimum rather than a mean.
-12. The modes that trip nothing produce either a new alert or a written decision not to
+14. The modes that trip nothing produce either a new alert or a written decision not to
     have one. Both are answers; recording neither is not. **W9's decision may legitimately be
     "no runtime alert"**, provided the reason — a detector cannot survive inside the object it
     watches — is written down.
-13. Any new alert is complete across all five places in finding 5, and `task preflight` is
+15. Any new alert is complete across all seven places in finding 5, and `task preflight` is
     green.
-14. W9 demonstrates non-adoption **both ways** with a canary object and zero blast radius, and
+16. W9 demonstrates non-adoption **both ways** with a canary object and zero blast radius, and
     records that an unadopted alert *ceases to exist* rather than resolving.
-15. W10 runs restart-with-`v1` as a control beside restart-with-`v0`, so the rename is
+17. W10 runs restart-with-`v1` as a control beside restart-with-`v0`, so the rename is
     separated from the counter reset it arrives with, and the `both` surface is exercised.
-16. W11 states its four predictions before scaling, and either produces a number for the
+18. W11 states its four predictions before scaling, and either produces a number for the
     catalog page's "might not hold" or records that the deviation is unmeasurable at this
     scale. Manufacturing a number is the failure mode here.
-17. `task preflight` is green. Anything left open carries a `⚠️` **and a phrase `task
+19. **W8 cannot run by accident.** The label bomb is off by default and `--selftest` asserts
+    the default render carries no such label; the script states its series ceiling, refuses a
+    cardinality above it, and refuses to run at all without an explicit confirmation flag;
+    the banner carries the blast-radius warning; and `LITE=1` is rejected rather than
+    documented as unwise. This is the one mode that can take the monitoring stack down, so
+    its guards are acceptance criteria and not prose.
+20. `task preflight` is green. Anything left open carries a `⚠️` **and a phrase `task
     outstanding` actually matches** — the curated list is in `Taskfile.yml` and is not
     reproduced here; match an existing phrasing or extend the list (rule 16). An item
     phrased in new words is silently missed, which is how rule 17's own gap sat unseen.
-18. ROADMAP.md item 1 is corrected where this work proved it wrong — **including its mode
+21. ROADMAP.md item 1 is corrected where this work proved it wrong — **including its mode
     table, which gains W9, W10 and W11** (finding 6) — and its effort table carries the
     actuals, with no em dashes introduced (rule 13).
 
