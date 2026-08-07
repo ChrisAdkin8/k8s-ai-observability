@@ -54,8 +54,6 @@ Run everything from the repo root.
 | `./scripts/extract.sh rules spike/ && (cd spike && promtool test rules spike_test.yaml)` | can single-tenant loss fire `LLMMetricsAbsent`? does the stale detector's `and` match, and does its idle-tenant negative hold? |
 | `python3 spike/kv_profile.py` | what KV profile fires `LLMKVCacheSaturated` for 5m while leaving `LLMQueueBacklog` and `LLMHighTTFT` silent? |
 | `python3 spike/thaw_burst.py` | is the freeze/thaw replay burst real, and does the clock-offset fix remove it? |
-| `python3 spike/worker_freeze.py` | does the clock-offset design survive inside the real `worker()`, or does the wiring around it break the freeze? |
-| `bash spike/stale_e2e.sh` | does `LLMMetricsStale` fire against a REAL frozen simulator scraped by a REAL Prometheus — the one question promtool cannot answer? ⚠️ `bash`, not your shell (rule 17); needs Docker. Its own deadlines bound it at **720s** (`:148`, `:204`, `:224`, `:254`); a healthy run is shorter and has not been timed |
 | `python3 spike/worker_freeze.py` ⚠️ | does the clock-offset design survive inside the **real** `worker()`, with the lock held and the profile poll running beside it? |
 | `bash spike/stale_e2e.sh` ⚠️ | does `LLMMetricsStale` fire against a **real frozen simulator scraped by a real Prometheus**, rather than a hand-written series? and how long does it take? |
 
