@@ -22,6 +22,13 @@ are judgement and this session has the author's framing. Finish with the cold pa
    roughly how many citations you are about to check, so the cost is visible
    before it is paid.
 
+   ⚠️ **If anything appears before the first `##`, that is a section too.** Call it
+   `Preamble` and fan it out with the rest. Briefs put their most load-bearing
+   claims up there — the date and commit they were written against, status
+   records, superseded non-goals — and a fanout keyed on headings walks straight
+   past all of it. Unheaded text is where a stale claim survives longest,
+   precisely because nothing looks at it.
+
 3. Spawn **one `prompt-fact-checker` subagent per section, all in a single
    message** so they run concurrently. Give each one the prompt file path and its
    section name, and nothing else. Do not tell it what you believe is correct, do
