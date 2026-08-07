@@ -22,6 +22,7 @@ rig knows the right answer.
 | `scripts/check-required-checks.py` | the live `main` ruleset vs `required-checks.txt`, including whether it is still **enforcing**; `--selftest` over `tests/fixtures/rulesets.json` |
 | `scripts/check-green-ci.py` | the publish gate: polls the check runs on the commit being tagged and refuses a release unless every required check passed. stdlib only, so the release path pulls in no `gh`; `--selftest` over `tests/fixtures/check-runs.json` |
 | `tests/` | what the no-cluster gates consume: `rules/` promtool cases, `contracts/` the DCGM surface, `fixtures/` the inputs the `--selftest`s run on — including the deliberately-wrong ones that make rule 18 mechanical |
+| `scripts/check-word-splitting.py` | the other half of rule 17 — code relying on unquoted word-splitting, which zsh and bash do differently. shellcheck knows it as SC2086, suppressed by `-S warning` on purpose; `--selftest` carries the 2026-08-04 bug |
 | `scripts/check-second-copy.py` | refuses a second committed copy of a dashboard, rule file or the simulator — the rule `chart-build.py`'s whole build step exists to keep; `--selftest`. Ran only in CI until 2026-08-07, which is how it sat red on `main` for a day |
 | `scripts/registry-cache.sh` | opt-in pull-through image caches for `local`; `kind-up.sh` mirrors only the ones actually running, so the default path is unchanged |
 | `docs/ci.md` + `docs/releasing.md` | what CI proves; how to cut a release without breaking it |
@@ -33,7 +34,7 @@ rig knows the right answer.
 | `kind/gpu-sim.yaml` | local cluster — **single node** |
 | `compose/` | the Kubernetes-free path, and the **second** simulator: `gpu-metrics-sim.py` produces the DCGM surface that `compose-selftest` grades against `tests/contracts/` |
 | `.claude/agents/` + `.claude/skills/` | the stage-2 review harness: `prompt-fact-checker`, fanned out one per section by the `/review-prompt` skill. Only `settings.local.json` is ignored, so this ships |
-| `Taskfile.yml` | **`task preflight`** is the gate before landing; also `selftest`, `compose-selftest`, `doc-claims`, `sigpipe`, `second-copy`, `shellcheck`, `action-shell`, `required-checks-test`, `green-ci-test`, `rule-tests`, `drift-test`, `chart`, `dashboards`, `compose`, `cache:*`, `outstanding`, `prompt-review` |
+| `Taskfile.yml` | **`task preflight`** is the gate before landing. ⚠️ The rest are deliberately NOT listed here — `task --list` is authoritative and this row was hand-synced three times on 2026-08-07 alone, which is a fork disagreeing on a schedule |
 | `taskfiles/target.yml` | every `local:` / `eks:` / `gke:` task — one file included three times with `CLOUD` set, so editing `Taskfile.yml` does not touch them |
 | `Makefile` | a second entry point over the same `scripts/`, for anyone without Task. ⚠️ **Unverified:** whether to keep both — its own header says to standardise on one and delete the other, and that has only ever been inherited |
 
@@ -109,8 +110,13 @@ rig knows the right answer.
     could have skipped the cluster jobs on a code change. Separately, zsh does not
     word-split unquoted parameters, so a test harness passed `"local --skip-monitoring"` as
     ONE argument and a passing script looked broken. **Test shell with `bash -c`**, never
-    interactively. `check-sigpipe.py` covers the first class. ⚠️ **Unverified:** the second
-    has no check at all, so a word-splitting bug still reaches CI unaided.
+    interactively. `check-sigpipe.py` covers the first class.
+    ⚠️ ~~the second has no check at all.~~ **DONE — `check-word-splitting.py`, 2026-08-07**,
+    in `preflight`. It asks the narrow question (a literal multi-word assignment later used
+    unquoted) rather than shellcheck's SC2086, which is `info`-level and suppressed by
+    `-S warning` deliberately. **The repair is an array, not quoting** — quoting changes
+    the argument count, an array means the same thing in both shells. Verified by running
+    the construct under each: `bash` 2 arguments, `zsh` 1, identical `$*`.
 
 18. **An assertion that only ever passes is not an assertion.** This is the general rule
     that **5** (poll, never single-shot) and **6** (expected values written first) are the
@@ -119,6 +125,16 @@ rig knows the right answer.
     here pins bugs that were reintroduced deliberately to prove it fails on them, and CI
     drives the chart's render-time assertions and `helm test`'s negative case to failure on
     purpose. A check that has never failed is a guess.
+    ⚠️ **A SELFTEST OVER FIXTURES YOU WROTE PROVES THE RULE YOU INTENDED, NOT THE RULE YOU
+    SHIPPED** — so run a new check against the **real tree** as well, and treat its first
+    live finding as evidence about the check before evidence about the code.
+    `check-word-splitting.py` on 2026-08-07 is the case: its selftest was green through
+    three defects, because every fixture confirmed a behaviour the author already believed
+    (one assignment per line, and `$name` never written `${name}`). The tree found the one
+    the fixtures could not, and only because fixing a different bug widened the scan.
+    Two checks that same day did the same thing: a first draft reported **29 findings on 12
+    correct scripts**, and `check-required-checks.py`'s fixtures carried a response shape
+    GitHub does not return, so its `release/*` filter had never once filtered live data.
 
 ## Working loop
 

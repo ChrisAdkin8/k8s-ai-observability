@@ -260,6 +260,16 @@ tasks:
       - python3 scripts/check-sigpipe.py --selftest
       - python3 scripts/check-sigpipe.py
 
+  # The other half of rule 17, which had no check from 2026-08-04 until 2026-08-07.
+  # `sigpipe` above covers the first bug of that day; this covers the second, where zsh
+  # does not word-split unquoted parameters and bash does. shellcheck knows it as SC2086,
+  # which is `info`-level and therefore suppressed by the `-S warning` above, on purpose.
+  word-splitting:
+    desc: Find code relying on word-splitting, which zsh and bash do differently
+    cmds:
+      - python3 scripts/check-word-splitting.py --selftest
+      - python3 scripts/check-word-splitting.py
+
   # ⚠️ THIS RAN ONLY IN CI UNTIL 2026-08-07, WHICH IS HOW IT SAT RED ON `main` FOR A
   # DAY. It was inline bash in the chart job, needing no cluster, no cloud and no
   # Docker — everything preflight covers — so a local gate could not see it and the
@@ -305,6 +315,7 @@ tasks:
       - task: green-ci-test
       - task: doc-claims
       - task: sigpipe
+      - task: word-splitting
       - task: second-copy
       - task: shellcheck
       - task: action-shell

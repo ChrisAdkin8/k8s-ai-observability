@@ -355,7 +355,7 @@ Measured on run [`30998470446`](https://github.com/ChrisAdkin8/k8s-ai-observabil
 |--|--|
 | `what changed` | 5s |
 | `helm chart (lint, render, assertions fire)` | 12s |
-| `selftest + rule tests + shell syntax` (`fast`) | 16s ⚠️ **not yet re-measured** |
+| `selftest + rule tests + shell syntax` (`fast`) | 17s ⚠️ **run `31177224542`, not the run above** |
 | `simulator image (build both arches, smoke-test amd64)` | 19s |
 | `compose stack (no Kubernetes)` | 60s |
 | `chart on kind (helm test, foreign Prometheus)` | 4m09s |
@@ -365,14 +365,35 @@ Measured on run [`30998470446`](https://github.com/ChrisAdkin8/k8s-ai-observabil
 
 `verify.sh` itself accounts for 160s of `full` and 150s of `lite`.
 
-⚠️ **The `fast` row is a true measurement of a job that no longer exists, and is
-therefore not yet verified against the job as it stands.** Four steps were added to it
-on 2026-08-06 — installing and running `actionlint`, `check-action-shell.py`, and
-`check-required-checks.py --selftest` — so the 16s above predates roughly a 5 MB
-download and nine extra shellcheck invocations. Left in place rather than guessed at,
-because a figure with a run id behind it can be checked and an invented one cannot; it
-needs one run on `main` to replace. That is the habit this section already argues for,
-applied to its own table.
+⚠️ ~~The `fast` row is a true measurement of a job that no longer exists.~~ **DONE —
+re-measured 2026-08-07 on run `31177224542`, and the prediction it carried was wrong.**
+Four steps had been added on 2026-08-06 — installing and running `actionlint`,
+`check-action-shell.py` and `check-required-checks.py --selftest` — and the note expected
+roughly a 5 MB download and nine extra shellcheck invocations to show. They did not.
+
+Three runs on `main` that day, all after those steps landed, and `fast` has no conditional
+steps or job-level `if:`, so it does identical work on every one of them:
+
+| Run | `fast` |
+|--|--|
+| `31171716804` | 21s |
+| `31176137834` | 15s |
+| `31177224542` | 17s |
+
+The old 16s sits inside that spread. What the table was recording as staleness was runner
+variance, and the added work is not visible above it — which is the answer only a
+measurement could give, and the reason the row was left standing rather than adjusted by
+guess.
+
+⚠️ **The `fast` row therefore comes from a different run to every other row in that
+table**, which is why it is annotated. The table's own preamble says a single run, and
+this one is not from it.
+
+⚠️ **Three samples is not an error bar.** Against the 17s recorded, the observed span is
+**-2s to +4s** — not symmetric, and stating it as "±3s" would be an invented number
+dressed as a measured one, which is the failure this repo exists to prevent. Treat every
+row here as one sample of a variable quantity, and re-measure rather than reason if a
+change to `fast` ever needs defending.
 
 ⚠️ ~~These predate the early ServiceMonitor apply.~~ **DONE — re-measured 2026-08-05 on run
 `30998470446`, the first run after it.** The pre-change figures, on run `30870290833`, were
