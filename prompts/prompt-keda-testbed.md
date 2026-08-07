@@ -52,6 +52,12 @@ disruption drill's second finding. **W2 without W3 is not worth shipping** — a
 ScaledObject that scales is not evidence that it scales *correctly*, and this repo does
 not ship unverified claims.
 
+⚠️ **The table still needs verification priced as its own line.** House rule is code **plus
+25–35% verification**, on the grounds that the selftest is where estimates overrun. W3 is a
+verification item and is costed, but the instrument lines above it are not split, so the
+allocation cannot be read off the table or checked against it. Re-derive with implementation
+and verification separated before planning around the total. Raised by CodeRabbit on PR #39.
+
 ## Background / Facts
 
 Every fact below was read directly in the file cited, on 2026-08-03. Where one turns out to
@@ -201,6 +207,16 @@ spawns an unbounded thread per connection.** The two real limits are elsewhere:
   **assert it in the selftest**.
 - **Reject beyond `max_in_flight` at accept**, with a 503 and a counter, so the gauge's cap
   matches the model's cap and nothing queues invisibly.
+
+  ⚠️ **Unverified: "at accept" is ambiguous here, and the two readings differ.** The
+  simulator runs `ThreadingHTTPServer` (`scripts/llm-sim.py:70`), which accepts the socket
+  before the handler runs — so a 503 returned from `do_POST` is admission control *after*
+  TCP accept, not at it. `request_queue_size` is the kernel listen backlog and caps
+  something else entirely. If the only rejection is a handler-side 503, connections can sit
+  in the backlog while `vllm:num_requests_waiting` under-reports them, and the gauge KEDA
+  scales on is exactly the one that goes quiet. Settle it in the spike before W2 tuning: an
+  application-level semaphore taken before enqueue, or a stated and asserted guarantee that
+  accepted requests cannot exceed `max_in_flight`. Raised by CodeRabbit on PR #39.
 - At saturation every queued request holds its connection — and its thread — open for up to
   **~64s** (58s queue wait + 5.8s generation), so the process carries in-flight + queued ≈
   176 blocked threads. Python holds that, but **~200 GIL-sharing threads add wakeup jitter
@@ -328,6 +344,13 @@ observed afterwards.
 ./scripts/install.sh gke --with-keda      # + KEDA + ScaledObject
 ./scripts/install.sh local --with-keda --skip-monitoring
 ```
+
+⚠️ **The third line still needs its prerequisite stated.** KEDA's Prometheus scaler reads a
+Prometheus API, and `--skip-monitoring` is precisely the flag that does not install one — so
+on a fresh local cluster that command produces a ScaledObject with nothing to scale on. The
+combination is valid only against a BYO stack (`KPS_RELEASE=<name>`, CLAUDE.md). Either say
+so beside the example or drop the flag from it; as written it reads as a supported path.
+Raised by CodeRabbit on PR #39.
 
 Convert the `case "${2:-}"` to a loop over `"$@"` so flags compose, keeping the strict
 unknown-argument rejection. `--with-keda` installs the chart and applies the ScaledObject;
