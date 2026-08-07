@@ -437,5 +437,5 @@ version exists. This page has been wrong about that once already.
 - **Retuning the fixtures to suit new work.** Rule 1. New behaviour gets a new tenant.
 - **A TODO file.** Rule 16, and the second paragraph of this page.
 
-Work specifications live as gitignored `prompt-*.md` in the root, written one item ahead.
+Work specifications live in `prompts/`, tracked since 2026-08-06, written one item ahead.
 Implementing an item is what makes the next one's spec honest.

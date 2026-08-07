@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """SPIKE — derive the W6 KV-exhaustion profile, and check it stays isolated.
 
-Every number quoted in prompt-fault-injection.md's W6 comes from this file. Run it
+Every number quoted in prompts/prompt-fault-injection.md's W6 comes from this file. Run it
 from the repo root:  python3 spike/kv_profile.py
 
 It advances the real Simulator from scripts/llm-sim.py with no cluster and no

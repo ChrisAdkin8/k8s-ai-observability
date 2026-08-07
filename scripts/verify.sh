@@ -673,7 +673,7 @@ llm_pc="$(promql_count 'count(vllm:prefix_cache_queries_total) > 0 and count(vll
 #     mistake lives.
 #
 #     ⚠️ L8 is the next free label in THIS script and that is what decides it.
-#     prompt-llm-sim.md also uses L7/L8, but says at :861 that neither is a
+#     prompts/prompt-llm-sim.md also uses L7/L8, but says at :861 that neither is a
 #     verify.sh check — its L7 is "every pre-existing check still passes" and
 #     its L8 is "teardown.sh removes the namespace". verify.sh has since taken
 #     L7 for the queue-time and prefix-cache assertion above, so that label

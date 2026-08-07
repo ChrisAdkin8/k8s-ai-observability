@@ -1,6 +1,6 @@
 # Spike evidence — NOT for main
 
-Written on 2026-08-06 to settle the empirical questions in `prompt-fault-injection.md`
+Written on 2026-08-06 to settle the empirical questions in `prompts/prompt-fault-injection.md`
 (ROADMAP.md item 1, fault injection) before any of it was implemented. Every measured
 number quoted in that prompt comes from this directory.
 

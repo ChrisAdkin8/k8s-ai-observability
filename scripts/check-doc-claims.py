@@ -75,6 +75,28 @@ ROOT = Path(__file__).resolve().parent.parent
 DASHBOARDS_README = "manifests/dashboards/README.md"
 EXCLUDED = {"CHANGELOG.md"}  # append-only history; stale numbers there are the record
 
+# EXCLUDED's reasoning, applied to a file that declares itself frozen rather than to a
+# name. A shipped prompt is a RECORD of what was specified, and its counts were true on
+# the day it was written: prompts/prompt-fidelity.md says the simulator "emits 10 of
+# upstream's ~37 V1 metrics", and d91b0e1 — the work that prompt specifies — is what made
+# it 15. Editing that number to satisfy this script would falsify the record, and the file
+# says in its own banner that it is kept unedited for exactly that reason.
+#
+# Records are dropped from the NUMERIC claims only. They stay in the dashboard-id scan,
+# which found three briefs citing an id this repo has never had on its first run over
+# them: a wrong id was wrong when it was written, where a stale count was not.
+#
+# ⚠️ Keyed on the banner text, so a reworded banner puts records back into the numeric
+# scan — and that fails LOUDLY, an old count against current code, rather than going
+# quiet. Loud is the safe direction for a phrase matcher; CLAUDE.md rule 16 is the case
+# where it went the other way.
+RECORD_BANNER = "SHIPPED — this is a RECORD"
+
+
+def is_record(text: str) -> bool:
+    """True for a shipped prompt: a statement of what WAS, not a claim about the tree."""
+    return RECORD_BANNER in text
+
 # Prose spells small numbers as words ("six alerts", "nine PromQL queries") and larger
 # ones as digits ("33 of them"). Both forms have to be readable or the matchers miss
 # exactly the claims that bit.
@@ -546,8 +568,18 @@ def main() -> None:
     print(f"  ok  ci-jobs     all {len(ci_names)} check name(s) appear in {CI_DOC}")
 
     # ---- the numeric claims
+    #
+    # Excluded here and nowhere else in this script — see RECORD_BANNER for why, and for
+    # why the id scan above still reads them.
+    live = {p: t for p, t in texts.items() if not is_record(t)}
+    if len(live) == len(texts) and any(p.startswith("prompts/") for p in texts):
+        die("records", f"no tracked markdown carries {RECORD_BANNER!r} — either every "
+                       "prompt is live, or the banner was reworded and this exclusion is "
+                       "dead. If it was reworded, teach RECORD_BANNER the new text.")
+    skipped = len(texts) - len(live)
+    print(f"  ok  records    {skipped} shipped record(s) held out of the numeric claims")
     for c in CLAIM_CHECKS:
-        scan = dict(texts)
+        scan = dict(live)
         for rel in c.get("extra", []):
             scan[rel] = read(rel)
         cast = c.get("cast", to_int)
@@ -681,6 +713,13 @@ def selftest() -> None:
                       c.get("cast", to_int)) == []
     assert blessed_ids("no ids at all") == set()
     print("  ok  empty      no-match is representable — main() treats it as fatal")
+
+    # ⚠️ Both directions. Detecting the banner is half of it; the half that matters is
+    # that a LIVE brief is not mistaken for a record, because that would silently retire
+    # every numeric claim in the file the check most needs to read.
+    assert is_record("> ## ⚠️ SHIPPED — this is a RECORD, not a specification")
+    assert not is_record("W1 — emit `prefix_cache_*`, the families the claim needed")
+    print("  ok  records    the shipped banner is detected, a live brief is not")
 
 
 if __name__ == "__main__":

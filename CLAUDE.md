@@ -134,8 +134,12 @@ rig knows the right answer.
 
 ## Prompt files
 
-`prompt-*.md` in the root are task specifications. ⚠️ **Unverified:** whether they should
-stay **gitignored** has never been decided, only inherited.
+`prompts/prompt-*.md` are task specifications. ⚠️ ~~Whether they should stay **gitignored**
+has never been decided, only inherited.~~ **DONE — tracked in `prompts/` on 2026-08-06.**
+The inherited answer contradicted the practice the rest of this file rests on: context worth
+having is context you commit. Tracking them also puts them inside `check-doc-claims.py`'s
+scan of tracked markdown, which found three briefs citing a dashboard id this repo has never
+had, in its first run.
 
 House conventions: numbered W-items; a Background of
 **verified facts** with `file:line` citations and the date they were read; an effort table

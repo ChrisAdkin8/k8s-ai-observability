@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""SPIKE — is the freeze/thaw burst in prompt-fault-injection.md W3.2 real?
+"""SPIKE — is the freeze/thaw burst in prompts/prompt-fault-injection.md W3.2 real?
 
 Run from the repo root:  python3 spike/thaw_burst.py
 
