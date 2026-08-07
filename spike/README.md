@@ -35,6 +35,17 @@ What survives the spike is:
 - `kv_profile.py` -> the derivation W6 must re-run; its output belongs in the drill's
   comment, not in a committed file.
 - `thaw_burst.py` -> becomes a `--selftest` assertion in `scripts/llm-sim.py` (W3.3).
+- `worker_freeze.py` -> the freeze belongs in `worker()` itself (W3.2). Three fixes have
+  to travel with it or it is worse than not shipping: the clock **offset** rather than a
+  skipped `advance_to()`, the profile poll on the **wall** clock, and the event sleep
+  against the **simulated** one. The second makes a freeze permanent; the third
+  busy-spins a core for the life of the pod while serving correct output.
+- `stale_e2e.sh` -> ⚠️ **this one has no obvious heir, and that is the decision.** It is
+  the only thing here that answers the question the whole item exists to ask — does the
+  alert fire against a real frozen simulator scraped by a real Prometheus, rather than
+  against a series we hand-wrote to look the way we assumed. promtool cannot answer it.
+  Retire it into `verify.sh` only if the drill ends up covering the same ground; until
+  then it is the item's acceptance evidence and deleting it loses the finding.
 
 Run everything from the repo root.
 
@@ -43,6 +54,8 @@ Run everything from the repo root.
 | `./scripts/extract.sh rules spike/ && (cd spike && promtool test rules spike_test.yaml)` | can single-tenant loss fire `LLMMetricsAbsent`? does the stale detector's `and` match, and does its idle-tenant negative hold? |
 | `python3 spike/kv_profile.py` | what KV profile fires `LLMKVCacheSaturated` for 5m while leaving `LLMQueueBacklog` and `LLMHighTTFT` silent? |
 | `python3 spike/thaw_burst.py` | is the freeze/thaw replay burst real, and does the clock-offset fix remove it? |
+| `python3 spike/worker_freeze.py` | does the clock-offset design survive inside the real `worker()`, or does the wiring around it break the freeze? |
+| `bash spike/stale_e2e.sh` | does `LLMMetricsStale` fire against a REAL frozen simulator scraped by a REAL Prometheus — the one question promtool cannot answer? ⚠️ `bash`, not your shell (rule 17); needs Docker. Its own deadlines bound it at **720s** (`:148`, `:204`, `:224`, `:254`); a healthy run is shorter and has not been timed |
 | `python3 spike/worker_freeze.py` ⚠️ | does the clock-offset design survive inside the **real** `worker()`, with the lock held and the profile poll running beside it? |
 | `bash spike/stale_e2e.sh` ⚠️ | does `LLMMetricsStale` fire against a **real frozen simulator scraped by a real Prometheus**, rather than a hand-written series? and how long does it take? |
 
