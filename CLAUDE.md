@@ -35,7 +35,7 @@ rig knows the right answer.
 | `terraform/{eks,gke}` + `terraform/modules/contract` | clusters; `contract` holds **cross-cloud identity constants only** — sizing stays in the roots |
 | `kind/gpu-sim.yaml` | local cluster — **single node** |
 | `compose/` | the Kubernetes-free path, and the **second** simulator: `gpu-metrics-sim.py` produces the DCGM surface that `compose-selftest` grades against `tests/contracts/` |
-| `.claude/agents/` + `.claude/skills/` | the stage-2 review harness: `prompt-fact-checker`, fanned out one per section by the `/review-prompt` skill. Only `settings.local.json` is ignored, so this ships |
+| `.claude/agents/` + `.claude/skills/` | the loop's harness. `/spike-loop <prompt-file>` drives one brief through `docs/development-method.md` and is **phase-aware** — it reads the tree and does the next step only. `/review-prompt` fans `prompt-fact-checker` out one per section for the facts; the judgement half runs cold, via `task prompt-review`, once per lens. Only `settings.local.json` is ignored, so this ships |
 | `Taskfile.yml` | **`task preflight`** is the gate before landing. ⚠️ The rest are deliberately NOT listed here — `task --list` is authoritative and this row was hand-synced three times on 2026-08-07 alone, which is a fork disagreeing on a schedule |
 | `taskfiles/target.yml` | every `local:` / `eks:` / `gke:` task — one file included three times with `CLOUD` set, so editing `Taskfile.yml` does not touch them |
 | `Makefile` | a second entry point over the same `scripts/`, for anyone without Task. ⚠️ **Unverified:** whether to keep both — its own header says to standardise on one and delete the other, and that has only ever been inherited |
