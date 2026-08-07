@@ -125,31 +125,90 @@ def targets_protected_branch(ruleset: dict) -> bool:
     return any(x in ours for x in include)
 
 
+# The refs an include list may name and still mean "main, and only main". Anything
+# else in an enforcing, repository-level ruleset widens it to branches this file does
+# not describe.
+#
+# ⚠️ SCOPE IS PART OF THE CONTRACT, AND NOTHING ASSERTED IT UNTIL 2026-08-07. The
+# ruleset is named `main`, this file's header calls it "the `main` branch ruleset", and
+# its include list read ["~DEFAULT_BRANCH", "~ALL"] — so it governed EVERY branch. A
+# contributor without admin could not push a feature branch at all: the first push has
+# no check runs, GitHub reports "7 of 7 required status checks are expected", and there
+# is no bypass for them. Only the admin bypass hid it, by making every push work for
+# the one person who could not notice.
+#
+# `targets_protected_branch` was right to accept `~ALL` — it does include main — and
+# that is exactly why the gap survived. Answering "does it reach main" is not answering
+# "does it reach only main".
+#
+# ⚠️ WIDEN THIS DELIBERATELY, NOT TO SILENCE THE CHECK. Adding `refs/heads/release/*`
+# here is a decision about what this repo protects, and the paragraph beside it in
+# .github/required-checks.txt should say so.
+ALLOWED_SCOPE = {f"refs/heads/{PROTECTED_BRANCH}", PROTECTED_BRANCH, DEFAULT_BRANCH_TOKEN}
+
+
+def overreaching_scope(ruleset: dict) -> list:
+    """Include entries that reach beyond the protected branch, sorted; [] if none.
+
+    ⚠️ REPOSITORY-LEVEL ONLY. An organisation ruleset targeting `~ALL` is the ordinary
+    state while a policy rolls out, it arrives here because /rulesets defaults to
+    includes_parents=true, and it is not this repo's to fix. Reporting it would be the
+    same false-alarm class the selftest's case 4b exists to pin. A missing source_type
+    is treated as ours, because the fixtures omit it and over-reporting on our OWN
+    ruleset is the recoverable direction.
+    """
+    if (ruleset.get("source_type") or "Repository") != "Repository":
+        return []
+    cond = (ruleset.get("conditions") or {}).get("ref_name") or {}
+    include = cond.get("include")
+    if not include:
+        return ["<no ref_name conditions — applies to every branch>"]
+    return sorted(x for x in include if x not in ALLOWED_SCOPE)
+
+
 def live_checks(rulesets: list, fetch) -> tuple:
     """(required check names, [names of enforcing rulesets], [names of inactive ones]).
 
     `fetch` resolves a ruleset's own URL to its full body — the list endpoint does not
     include `rules`. Passed in so the selftest can serve fixtures without a network.
     """
-    names, enforcing, inactive = set(), [], []
+    names, enforcing, inactive, wide = set(), [], [], []
     for stub in rulesets:
-        if not targets_protected_branch(stub):
+        # ⚠️ THE LIST ENDPOINT RETURNS NO `conditions`, AND NO `rules`. Verified against
+        # the live API on 2026-08-07: a stub carries only _links, enforcement, id, name,
+        # node_id, source, source_type, target and the timestamps. Both of the fields
+        # every decision below turns on are in the FULL body, so the body is fetched
+        # first and everything reads from it.
+        #
+        # This was not merely a missing feature. `targets_protected_branch` read
+        # `conditions` off the stub, found none, and — by its own documented rule that
+        # absent conditions mean "everything" — matched EVERY branch ruleset on every
+        # real run. The filter that case 4 exists to prove has never once filtered
+        # against live data. It was invisible because the fixtures put `conditions` on
+        # the stub, which is a shape GitHub does not produce; they now mirror the API.
+        if stub.get("target") != "branch":
             continue
-        label = stub.get("name") or f"id {stub.get('id')}"
-        if stub.get("enforcement") != ENFORCING:
-            inactive.append(f"{label} (enforcement={stub.get('enforcement')!r})")
+        full = {**stub, **fetch(stub["_links"]["self"]["href"])}
+        if not targets_protected_branch(full):
+            continue
+        label = full.get("name") or f"id {full.get('id')}"
+        if full.get("enforcement") != ENFORCING:
+            inactive.append(f"{label} (enforcement={full.get('enforcement')!r})")
             continue
         enforcing.append(label)
-        full = fetch(stub["_links"]["self"]["href"])
+        beyond = overreaching_scope(full)
+        if beyond:
+            wide.append((label, beyond))
         for rule in full.get("rules", []):
             if rule["type"] != "required_status_checks":
                 continue
             params = rule.get("parameters") or {}
             names |= {c["context"] for c in params.get("required_status_checks", [])}
-    return sorted(names), enforcing, inactive
+    return sorted(names), enforcing, inactive, wide
 
 
-def report(want: list, live: list, enforcing: list, inactive: list) -> int:
+def report(want: list, live: list, enforcing: list, inactive: list,
+           wide: list = ()) -> int:
     """Print the comparison. 0 when they agree, 1 otherwise.
 
     ⚠️ A NON-ENFORCING RULESET IS A WARNING, NOT A FAILURE, AND THE FIRST VERSION OF
@@ -186,6 +245,16 @@ def report(want: list, live: list, enforcing: list, inactive: list) -> int:
         print(f"::error::the ruleset(s) on {PROTECTED_BRANCH} ({', '.join(enforcing)}) "
               f"require no status checks at all.")
         return 1
+    # Reported before the name comparison so one run says everything that is wrong,
+    # rather than making the reader fix a scope problem to discover a name problem.
+    for label, beyond in wide:
+        print(f"::error title=Ruleset reaches beyond {PROTECTED_BRANCH}::{label} also "
+              f"targets {beyond}, so the checks below are required on branches this "
+              f"repo does not describe. A contributor without a bypass cannot push a "
+              f"new branch at all — its first push has no check runs, so every "
+              f"required check reads as expected-but-missing. Narrow it to "
+              f"{sorted(ALLOWED_SCOPE)}, or widen ALLOWED_SCOPE deliberately and say "
+              f"why in .github/required-checks.txt.")
     if live != want:
         print(f"  ruleset requires : {live}")
         print(f"  repo records     : {want}")
@@ -199,6 +268,8 @@ def report(want: list, live: list, enforcing: list, inactive: list) -> int:
             print(f"::error::the ruleset requires checks the repo does not record: "
                   f"{extra}. If a job was renamed in settings and not here, pull "
                   f"requests may already be blocked.")
+        return 1
+    if wide:
         return 1
     print(f"  ok  {', '.join(enforcing)} and .github/required-checks.txt agree on "
           f"{len(want)}: {want}")
@@ -226,13 +297,13 @@ def main() -> int:
         print(f"::error::could not read the rulesets for {repo}: {exc}", file=sys.stderr)
         return 2
     try:
-        live, enforcing, inactive = live_checks(stubs, get_json)
+        live, enforcing, inactive, wide = live_checks(stubs, get_json)
     except (KeyError, TypeError) as exc:
         print(f"::error::the rulesets API returned a shape this script does not "
               f"understand ({exc!r}) — it cannot report on protection it cannot "
               f"parse.", file=sys.stderr)
         return 2
-    return report(recorded(), live, enforcing, inactive)
+    return report(recorded(), live, enforcing, inactive, wide)
 
 
 # ---------------------------------------------------------------------------
@@ -268,19 +339,19 @@ def selftest() -> int:
 
     # 1. The happy path, so every FAIL below means something.
     fx = load("active-main")
-    live, enf, inact = live_checks(fx["list"], fetch_from(fx["bodies"]))
+    live, enf, inact, wide = live_checks(fx["list"], fetch_from(fx["bodies"]))
     check(report(want, live, enf, inact) == 0, "an active ruleset on main that agrees")
 
     # 2. THE BUG THAT REPORTED GREEN OVER AN UNPROTECTED BRANCH. Same required checks,
     #    enforcement flipped to `disabled`. The old code read neither field and would
     #    have printed that the two agree.
     fx = load("disabled-main")
-    live, enf, inact = live_checks(fx["list"], fetch_from(fx["bodies"]))
+    live, enf, inact, wide = live_checks(fx["list"], fetch_from(fx["bodies"]))
     check(report(want, live, enf, inact) == 1, "a DISABLED ruleset on main fails")
 
     # 3. `evaluate` is the subtler half of the same bug: it reports and blocks nothing.
     fx = load("evaluate-main")
-    live, enf, inact = live_checks(fx["list"], fetch_from(fx["bodies"]))
+    live, enf, inact, wide = live_checks(fx["list"], fetch_from(fx["bodies"]))
     check(report(want, live, enf, inact) == 1, "an `evaluate` ruleset on main fails")
 
     # 4. THE FALSE ALARM. A second, active ruleset on release/* requiring something
@@ -288,7 +359,7 @@ def selftest() -> int:
     #    defaults to includes_parents=true. The old code unioned it and reported drift
     #    on a correct configuration.
     fx = load("foreign-ruleset")
-    live, enf, inact = live_checks(fx["list"], fetch_from(fx["bodies"]))
+    live, enf, inact, wide = live_checks(fx["list"], fetch_from(fx["bodies"]))
     check(live == want, "a ruleset targeting release/* is ignored, not unioned")
     check(report(want, live, enf, inact) == 0, "and the correct config still passes")
 
@@ -301,7 +372,7 @@ def selftest() -> int:
     #     the exact fault this file's docstring convicts the INLINE version of.
     #     It must PASS, and warn.
     fx = load("active-plus-evaluating-org")
-    live, enf, inact = live_checks(fx["list"], fetch_from(fx["bodies"]))
+    live, enf, inact, wide = live_checks(fx["list"], fetch_from(fx["bodies"]))
     check(live == want, "an evaluating ORG ruleset is not unioned into the live set")
     check(len(inact) == 1, "...it is still reported, because a lapsed one is how "
                            "protection disappears")
@@ -310,22 +381,60 @@ def selftest() -> int:
 
     # 5. Real drift must still be caught, or 2-4 could be passing by being blind.
     fx = load("drifted-main")
-    live, enf, inact = live_checks(fx["list"], fetch_from(fx["bodies"]))
+    live, enf, inact, wide = live_checks(fx["list"], fetch_from(fx["bodies"]))
     check(report(want, live, enf, inact) == 1, "a ruleset missing a recorded check fails")
 
     # 6. No ruleset on main at all — the deletion case.
-    live, enf, inact = live_checks([], fetch_from({}))
+    live, enf, inact, wide = live_checks([], fetch_from({}))
     check(report(want, live, enf, inact) == 1, "no ruleset on main fails")
 
     # 7. ~DEFAULT_BRANCH is GitHub's other spelling for the same branch, and reading it
     #    as a literal ref name would silently drop the only ruleset that matters.
     fx = load("default-branch-token")
-    live, enf, inact = live_checks(fx["list"], fetch_from(fx["bodies"]))
+    live, enf, inact, wide = live_checks(fx["list"], fetch_from(fx["bodies"]))
     check(live == want, "~DEFAULT_BRANCH counts as targeting main")
 
     # 8. The de-duplication, on the recorded side. Both sides must be the same shape or
     #    a repeated line reports as drift between two lists that print identically.
     check(recorded() == sorted(set(recorded())), "recorded() returns a de-duplicated set")
+
+    # 9. ⚠️ THE REAL CONFIGURATION OF 2026-08-07, and the one case here that is a
+    #    transcript rather than a hypothesis. A ruleset named `main`, active, requiring
+    #    exactly what the repo records — and targeting ["~DEFAULT_BRANCH", "~ALL"], so
+    #    it governed every branch. Everything cases 1-8 ask returns green on it, which
+    #    is precisely why it survived: it IS correctly protecting main, and also three
+    #    hundred branches nobody described.
+    fx = load("over-broad-main")
+    live, enf, inact, wide = live_checks(fx["list"], fetch_from(fx["bodies"]))
+    check(live == want, "the over-broad ruleset still reads as protecting main")
+    check(report(want, live, enf, inact) == 0,
+          "...so every pre-existing assertion passes it — this is why it was missed")
+    check(report(want, live, enf, inact, wide) == 1,
+          "an enforcing ruleset that also targets ~ALL fails on scope")
+
+    # 10. The same reach by omission. Absent conditions mean "every branch", which
+    #     targets_protected_branch deliberately treats as a match — so the scope check
+    #     has to catch what the targeting check waves through.
+    fx = load("no-conditions-main")
+    live, enf, inact, wide = live_checks(fx["list"], fetch_from(fx["bodies"]))
+    check(report(want, live, enf, inact, wide) == 1,
+          "a ruleset with NO ref_name conditions fails on scope too")
+
+    # 11. ⚠️ AND THE FALSE ALARM THIS COULD HAVE BECOME. An ACTIVE organisation-level
+    #     ruleset targeting ~ALL, beside a correct repository one. Case 4b pinned the
+    #     `evaluate` version of this; scope is where the active version would bite.
+    #     An org policy is not this repo's to narrow, and failing on it would make the
+    #     job unbelievable in exactly the way its docstring convicts the inline version.
+    fx = load("org-wide-active")
+    live, enf, inact, wide = live_checks(fx["list"], fetch_from(fx["bodies"]))
+    check(report(want, live, enf, inact, wide) == 0,
+          "an ORG-level ruleset targeting ~ALL is not reported as our scope problem")
+
+    # 12. The live tree. ~ALL was removed on 2026-08-07; if it comes back, this is the
+    #     assertion that says so before a contributor discovers it.
+    check(overreaching_scope({"source_type": "Repository", "conditions": {
+              "ref_name": {"include": [DEFAULT_BRANCH_TOKEN]}}}) == [],
+          "the scope this repo settled on reads as clean")
 
     print(f"\n{'FAIL' if failures else 'PASS'}  check-required-checks selftest "
           f"({len(failures)} failure(s))")

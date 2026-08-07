@@ -6,14 +6,6 @@
         "name": "main protection",
         "target": "branch",
         "enforcement": "active",
-        "conditions": {
-          "ref_name": {
-            "include": [
-              "refs/heads/main"
-            ],
-            "exclude": []
-          }
-        },
         "_links": {
           "self": {
             "href": "https://api.github.com/repos/o/r/rulesets/1"
@@ -40,7 +32,15 @@
               ]
             }
           }
-        ]
+        ],
+        "conditions": {
+          "ref_name": {
+            "include": [
+              "refs/heads/main"
+            ],
+            "exclude": []
+          }
+        }
       }
     }
   },
@@ -51,14 +51,6 @@
         "name": "main protection",
         "target": "branch",
         "enforcement": "disabled",
-        "conditions": {
-          "ref_name": {
-            "include": [
-              "refs/heads/main"
-            ],
-            "exclude": []
-          }
-        },
         "_links": {
           "self": {
             "href": "https://api.github.com/repos/o/r/rulesets/1"
@@ -85,7 +77,15 @@
               ]
             }
           }
-        ]
+        ],
+        "conditions": {
+          "ref_name": {
+            "include": [
+              "refs/heads/main"
+            ],
+            "exclude": []
+          }
+        }
       }
     }
   },
@@ -96,14 +96,6 @@
         "name": "main protection",
         "target": "branch",
         "enforcement": "evaluate",
-        "conditions": {
-          "ref_name": {
-            "include": [
-              "refs/heads/main"
-            ],
-            "exclude": []
-          }
-        },
         "_links": {
           "self": {
             "href": "https://api.github.com/repos/o/r/rulesets/1"
@@ -130,7 +122,15 @@
               ]
             }
           }
-        ]
+        ],
+        "conditions": {
+          "ref_name": {
+            "include": [
+              "refs/heads/main"
+            ],
+            "exclude": []
+          }
+        }
       }
     }
   },
@@ -141,14 +141,6 @@
         "name": "main protection",
         "target": "branch",
         "enforcement": "active",
-        "conditions": {
-          "ref_name": {
-            "include": [
-              "refs/heads/main"
-            ],
-            "exclude": []
-          }
-        },
         "_links": {
           "self": {
             "href": "https://api.github.com/repos/o/r/rulesets/1"
@@ -160,14 +152,6 @@
         "name": "org-wide release policy",
         "target": "branch",
         "enforcement": "active",
-        "conditions": {
-          "ref_name": {
-            "include": [
-              "refs/heads/release/*"
-            ],
-            "exclude": []
-          }
-        },
         "_links": {
           "self": {
             "href": "https://api.github.com/repos/o/r/rulesets/2"
@@ -194,7 +178,15 @@
               ]
             }
           }
-        ]
+        ],
+        "conditions": {
+          "ref_name": {
+            "include": [
+              "refs/heads/main"
+            ],
+            "exclude": []
+          }
+        }
       },
       "https://api.github.com/repos/o/r/rulesets/2": {
         "rules": [
@@ -214,7 +206,15 @@
               ]
             }
           }
-        ]
+        ],
+        "conditions": {
+          "ref_name": {
+            "include": [
+              "refs/heads/release/*"
+            ],
+            "exclude": []
+          }
+        }
       }
     }
   },
@@ -225,14 +225,6 @@
         "name": "main protection",
         "target": "branch",
         "enforcement": "active",
-        "conditions": {
-          "ref_name": {
-            "include": [
-              "refs/heads/main"
-            ],
-            "exclude": []
-          }
-        },
         "_links": {
           "self": {
             "href": "https://api.github.com/repos/o/r/rulesets/1"
@@ -256,7 +248,15 @@
               ]
             }
           }
-        ]
+        ],
+        "conditions": {
+          "ref_name": {
+            "include": [
+              "refs/heads/main"
+            ],
+            "exclude": []
+          }
+        }
       }
     }
   },
@@ -267,14 +267,6 @@
         "name": "main protection",
         "target": "branch",
         "enforcement": "active",
-        "conditions": {
-          "ref_name": {
-            "include": [
-              "~DEFAULT_BRANCH"
-            ],
-            "exclude": []
-          }
-        },
         "_links": {
           "self": {
             "href": "https://api.github.com/repos/o/r/rulesets/1"
@@ -301,7 +293,15 @@
               ]
             }
           }
-        ]
+        ],
+        "conditions": {
+          "ref_name": {
+            "include": [
+              "~DEFAULT_BRANCH"
+            ],
+            "exclude": []
+          }
+        }
       }
     }
   },
@@ -312,14 +312,6 @@
         "name": "main protection",
         "target": "branch",
         "enforcement": "active",
-        "conditions": {
-          "ref_name": {
-            "include": [
-              "refs/heads/main"
-            ],
-            "exclude": []
-          }
-        },
         "_links": {
           "self": {
             "href": "https://api.github.com/repos/o/r/rulesets/1"
@@ -331,14 +323,6 @@
         "name": "org: evaluating a new policy",
         "target": "branch",
         "enforcement": "evaluate",
-        "conditions": {
-          "ref_name": {
-            "include": [
-              "~ALL"
-            ],
-            "exclude": []
-          }
-        },
         "_links": {
           "self": {
             "href": "https://api.github.com/repos/o/r/rulesets/2"
@@ -365,7 +349,15 @@
               ]
             }
           }
-        ]
+        ],
+        "conditions": {
+          "ref_name": {
+            "include": [
+              "refs/heads/main"
+            ],
+            "exclude": []
+          }
+        }
       },
       "https://api.github.com/repos/o/r/rulesets/2": {
         "rules": [
@@ -382,7 +374,186 @@
               ]
             }
           }
+        ],
+        "conditions": {
+          "ref_name": {
+            "include": [
+              "~ALL"
+            ],
+            "exclude": []
+          }
+        }
+      }
+    }
+  },
+  "over-broad-main": {
+    "list": [
+      {
+        "id": 1,
+        "name": "main",
+        "target": "branch",
+        "enforcement": "active",
+        "_links": {
+          "self": {
+            "href": "https://api.github.com/repos/o/r/rulesets/1"
+          }
+        },
+        "source_type": "Repository"
+      }
+    ],
+    "bodies": {
+      "https://api.github.com/repos/o/r/rulesets/1": {
+        "rules": [
+          {
+            "type": "deletion"
+          },
+          {
+            "type": "required_status_checks",
+            "parameters": {
+              "required_status_checks": [
+                {
+                  "context": "a"
+                },
+                {
+                  "context": "b"
+                }
+              ]
+            }
+          }
+        ],
+        "conditions": {
+          "ref_name": {
+            "include": [
+              "~DEFAULT_BRANCH",
+              "~ALL"
+            ],
+            "exclude": []
+          }
+        }
+      }
+    }
+  },
+  "no-conditions-main": {
+    "list": [
+      {
+        "id": 1,
+        "name": "main",
+        "target": "branch",
+        "enforcement": "active",
+        "_links": {
+          "self": {
+            "href": "https://api.github.com/repos/o/r/rulesets/1"
+          }
+        },
+        "source_type": "Repository"
+      }
+    ],
+    "bodies": {
+      "https://api.github.com/repos/o/r/rulesets/1": {
+        "rules": [
+          {
+            "type": "deletion"
+          },
+          {
+            "type": "required_status_checks",
+            "parameters": {
+              "required_status_checks": [
+                {
+                  "context": "a"
+                },
+                {
+                  "context": "b"
+                }
+              ]
+            }
+          }
         ]
+      }
+    }
+  },
+  "org-wide-active": {
+    "list": [
+      {
+        "id": 1,
+        "name": "main protection",
+        "target": "branch",
+        "enforcement": "active",
+        "_links": {
+          "self": {
+            "href": "https://api.github.com/repos/o/r/rulesets/1"
+          }
+        },
+        "source_type": "Repository"
+      },
+      {
+        "id": 99,
+        "name": "org-wide policy",
+        "target": "branch",
+        "enforcement": "active",
+        "_links": {
+          "self": {
+            "href": "https://api.github.com/repos/o/r/rulesets/99"
+          }
+        },
+        "source_type": "Organization"
+      }
+    ],
+    "bodies": {
+      "https://api.github.com/repos/o/r/rulesets/1": {
+        "rules": [
+          {
+            "type": "deletion"
+          },
+          {
+            "type": "required_status_checks",
+            "parameters": {
+              "required_status_checks": [
+                {
+                  "context": "a"
+                },
+                {
+                  "context": "b"
+                }
+              ]
+            }
+          }
+        ],
+        "conditions": {
+          "ref_name": {
+            "include": [
+              "refs/heads/main"
+            ],
+            "exclude": []
+          }
+        }
+      },
+      "https://api.github.com/repos/o/r/rulesets/99": {
+        "rules": [
+          {
+            "type": "deletion"
+          },
+          {
+            "type": "required_status_checks",
+            "parameters": {
+              "required_status_checks": [
+                {
+                  "context": "a"
+                },
+                {
+                  "context": "b"
+                }
+              ]
+            }
+          }
+        ],
+        "conditions": {
+          "ref_name": {
+            "include": [
+              "~ALL"
+            ],
+            "exclude": []
+          }
+        }
       }
     }
   }
