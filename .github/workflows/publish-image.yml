@@ -199,7 +199,7 @@ jobs:
           docker pull --platform linux/amd64 "$ref"
           cid=$(docker run -d -p 9401:9401 "$ref")
           trap 'docker logs "$cid" || true; docker rm -f "$cid" >/dev/null 2>&1 || true' EXIT
-          for i in $(seq 1 30); do
+          for _ in $(seq 1 30); do
             curl -sf http://localhost:9401/metrics -o /tmp/scrape.txt && break
             sleep 1
           done

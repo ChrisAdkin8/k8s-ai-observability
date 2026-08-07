@@ -18,6 +18,7 @@ rig knows the right answer.
 | `scripts/verify.sh` | numbered acceptance checks (L1…) — invariants only |
 | `scripts/check-vllm-buckets.py` | CI canary for upstream vLLM bucket/metric-set drift |
 | `scripts/check-sigpipe.py` | finds pipes whose consumer exits before the producer — see rule 17 |
+| `scripts/check-action-shell.py` | shellchecks the bash inside composite actions; `actionlint` (which covers `.github/workflows/`) structurally cannot read them |
 | `scripts/registry-cache.sh` | opt-in pull-through image caches for `local`; `kind-up.sh` mirrors only the ones actually running, so the default path is unchanged |
 | `docs/ci.md` + `docs/releasing.md` | what CI proves; how to cut a release without breaking it |
 | `.github/actions/verify-chart/` | the chart's cluster verification, called by CI **and** the publish workflow |

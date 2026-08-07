@@ -204,6 +204,15 @@ tasks:
       - python3 scripts/check-sigpipe.py --selftest
       - python3 scripts/check-sigpipe.py
 
+  # The third layer of shell linting. `shellcheck` above covers scripts/*.sh and CI's
+  # actionlint covers .github/workflows/ — neither reaches a composite action, because
+  # actionlint only models workflow files and refuses to parse one.
+  action-shell:
+    desc: shellcheck the bash inside composite actions (actionlint cannot read them)
+    cmds:
+      - python3 scripts/check-action-shell.py --selftest
+      - python3 scripts/check-action-shell.py
+
   preflight:
     desc: Run every no-cluster gate (selftests, rules, doc claims, chart) before pushing
     cmds:
@@ -213,6 +222,7 @@ tasks:
       - task: doc-claims
       - task: sigpipe
       - task: shellcheck
+      - task: action-shell
       - task: rule-tests
       - task: chart
 
