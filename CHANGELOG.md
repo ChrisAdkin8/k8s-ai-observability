@@ -26,102 +26,55 @@ Comparison links are at the foot of this file, one per released version.
 ### Added
 
 - **`demo.gif` — a 29s walkthrough of `task local:up && task local:grafana`**, embedded in
-  the README's "Try it". It is that section's six-minute claim shown rather than asserted:
-  the kind cluster coming up, the stack installing, `verify.sh` reporting PASS, then both
-  boards live in the browser. 74 MB of screen capture down to 6.7 MB.
+  the README's "Try it": the six-minute claim shown rather than asserted. 74 MB of capture
+  down to 6.7 MB, which GitHub does render — tested off a branch, not assumed.
 
-  **A GIF rather than an MP4, and not by preference.** GitHub's blob viewer refuses to
-  display a committed video at this size — *"Sorry about that, but we can't show files that
-  are this big right now"* at 4.51 MB — so a linked `.mp4` in the repo plays nowhere. The
-  alternative, an externally hosted attachment URL, renders only on github.com and dies on
-  a mirror. A GIF embeds as an ordinary image, which is a different code path from the blob
-  viewer and works wherever the README does.
+  **A GIF rather than an MP4, and not by preference.** GitHub's blob viewer refuses a
+  committed video at this size, so a linked `.mp4` plays nowhere, and an externally hosted
+  attachment renders only on github.com. A GIF embeds as an ordinary image and works
+  wherever the README does. The recipe, the measured crops, the encoder findings and the
+  size ceiling are in [`docs/record-demo.md`](docs/record-demo.md).
 
-  The install is fast-forwarded 6x and the `verify.sh` cascade left at the recording's own
-  pace, which is what makes the length work: a GIF costs bytes per *changing* frame, so the
-  scrolling Helm output was most of the file and the least of the argument. Cutting that
-  section outright would have hit the same size and lost the narrative.
+  `*.mov` and `*.mp4` are now gitignored by container rather than by filename: the master a
+  capture is encoded from is tens of megabytes, and git keeps it forever, including after a
+  later commit deletes it.
 
-  **What makes the text legible is the crop, not the encoder.** The first cut of this file
-  scaled the full 1728px-wide screen down to 900px, so every glyph rendered at 52% and the
-  strokes collapsed — readable only if you already knew what it said. But the terminal text
-  never leaves the left 1184px, and the top 60 rows are the macOS menu bar, so most of what
-  was being paid for and scaled down was empty. Cropping to the measured content ships the
-  terminal at 1:1 with the recording, with no scaling step at all, in an image only 32%
-  wider on the page. The last two seconds get their own crop, to the Safari window rather
-  than the desktop it sat on, which is the difference between the boards being visible and
-  being present. `docs/record-demo.md` holds the recipe and how each constant was measured.
-
-  Two encoder findings are worth the space. `hqdn3d=0:0:2:2` took the `verify.sh` segment
-  from 4.98 MB to 2.58 MB with nothing visibly changed: that cascade is near-static, but
-  h264 noise makes every frame differ pixel-for-pixel, and GIF frame differencing needs
-  exact equality to skip a pixel, so the file was paying full price for 90 frames of noise.
-  And the palette has to be weighted toward the Grafana frames, which are 7 of 114 and draw
-  their series as thin lines: left to frequency, the palette spent nothing on them and blue
-  rendered grey while orange rendered pink.
-
-  **6.7 MB renders, and that was tested rather than assumed** — pushed to a branch and
-  loaded from the README GitHub rendered off it. The 5 MB people cite is camo's
-  `CAMO_LENGTH_LIMIT`, which governs externally hosted images; a repo-relative one is
-  rewritten to GitHub's own `/raw/` path and tagged `data-animated-image=""`. The 10 MB
-  figure is the upload cap for issue and comment attachments. Neither reaches this file.
-
-  **The source was 416 seconds holding 722 distinct frames**, because a macOS capture only
-  writes a frame when the screen changes. So the gaps between frame timestamps *are* the
-  inactive stretches, and measuring them found **81 of the 104 seconds left after the 4x
-  speed-up were static** — one of them a 93-second stop while Helm installed. Each hold
-  over 2s is now capped at 1.5s, which is enough to read the screen and not enough to
-  wonder whether it has frozen. No distinct frame was dropped: every cut falls strictly
-  inside a gap, so only duplicate hold frames were removed. The last 7 seconds went too,
-  being the mouse travelling to the Stop Screen Recording button.
-
-  `*.mov` and `*.mp4` are now gitignored, the container rather than a filename. The master a capture is
-  encoded from is tens of megabytes, and git keeps it forever — including after a later
-  commit deletes it.
-
-- **`docs/record-demo.md`**, the recipe `demo.gif` is built by: the ffmpeg invocation, the
-  crop rectangles and speed ramp with the measurements each was derived from, what every
-  lever was worth in bytes, and the levers that did not work. None of it is guessable, and
-  the sources it runs on are gitignored, so a rebuild without this page re-guesses
-  constants that took measurement to find. It carries the size ceiling finding too, since
-  "how big can a README GIF be" has no documented answer and cost a branch to settle.
+- **`docs/record-demo.md`**, the recipe `demo.gif` is built by. The sources it runs on are
+  gitignored and none of its constants are guessable, so a rebuild without this page
+  re-guesses numbers that took measurement to find.
 
 - **A release gate: `scripts/check-green-ci.py` and the `require-green-ci` composite
   action.** `publish-image.yml` and `publish-chart.yml` now refuse to publish from a commit
-  CI has not passed, by polling the check runs on the commit being tagged. A registry
-  version is immutable, so this is the last point at which the answer is still "no".
-  Stdlib-only, so the release path pulls in no `gh`, with a `--selftest` over
-  `tests/fixtures/check-runs.json`.
+  CI has not passed. A registry version is immutable, so this is the last point at which
+  the answer is still "no". Stdlib-only, so the release path pulls in no `gh`, with a
+  `--selftest` over `tests/fixtures/check-runs.json`.
 
 - **`scripts/check-required-checks.py` and `.github/required-checks.txt`.** The `main`
   ruleset is repository settings: editable in a browser, versioned by nothing, and the
   single control deciding whether a pull request can merge. The file records what it
-  requires; the script compares the record to the live ruleset weekly, asserting that an
-  **active** ruleset targets `main`, that its checks match in both directions, and that it
-  targets *only* `main`. `evaluate` and `disabled` are not protection — a ruleset in either
-  state still lists its required checks, so `main` could be protected by nothing while
-  everything looked fine.
+  requires; the script compares that to the live ruleset weekly, including whether the
+  ruleset is still **enforcing** — `evaluate` and `disabled` still list their required
+  checks, so `main` could be protected by nothing while everything looked fine.
 
 - **`scripts/check-action-shell.py`**, which shellchecks the bash inside composite actions.
   `actionlint` covers `.github/workflows/` and structurally cannot parse a composite action,
   so that shell was linted by nothing. It also rejects an `if:` leaning on a context that is
-  inert there, which is a real bug this repo had: `job.status` is not updated inside a
-  composite action.
+  inert there — `job.status` is not updated inside a composite action, which is a bug this
+  repo had.
 
-- **`scripts/check-second-copy.py`**, the rule that `chart-build.py`'s whole build step
-  exists to keep — no second committed copy of a dashboard, rule file or the simulator.
-  It was inline bash in one CI job, needing no cluster, cloud or Docker, so `task preflight`
-  could not run it. One implementation, two callers.
+- **`scripts/check-second-copy.py`**, the rule `chart-build.py`'s whole build step exists to
+  keep: no second committed copy of a dashboard, rule file or the simulator. It was inline
+  bash in one CI job, so `task preflight` could not run it. One implementation, two callers.
 
 - **`ROADMAP.md`**, five capabilities the repo has never had, each stating what it adds,
   what it depends on and how we would know it works. Defects in shipped work stay marked
-  where they live and out of this page.
+  where they live.
 
 - **`docs/development-method.md`**, how work here is specified before it is written: the
   prompt file, the review round, what a spike is, and why its findings rewrite the
   specification.
 
-- **The prompt review harness**: `.claude/agents/prompt-fact-checker.md` fanned out one per
+- **The prompt review harness**: `.claude/agents/prompt-fact-checker.md`, fanned out one per
   section by the `/review-prompt` skill, plus `task prompt-review`, which runs a separate
   cold `claude -p`. The two halves are deliberate — a subagent is briefed by the author,
   which is the exact channel a fresh session exists to close.
@@ -133,20 +86,18 @@ Comparison links are at the foot of this file, one per released version.
 
 ### Changed
 
-- **`main` now requires seven status checks, up from four.** `helm chart (lint, render,
-  assertions fire)`, `compose stack (no Kubernetes)` and `simulator image (build both
-  arches, smoke-test amd64)` were advisory: they encode central claims of this repo and
-  could all be red on a pull request that merged. That was recorded as a known gap, and on
-  2026-08-06 it cost a day of `main` being red with nobody looking. They now block.
+- **`main` now requires seven status checks, up from four.** The chart, compose and image
+  jobs encode central claims of this repo and could all be red on a pull request that
+  merged. That was recorded as a known gap, and on 2026-08-06 it cost a day of `main` being
+  red with nobody looking.
 
   The ruleset was also narrowed from `~ALL` to `~DEFAULT_BRANCH`. It had governed every
-  branch, so a contributor without an admin bypass could not push a feature branch at all —
+  branch, so a contributor without an admin bypass could not push a feature branch at all:
   the first push has no check runs, so every required check reads as expected-but-missing.
 
-- **CI runners are pinned and every tool download is checksum-verified**, and `kind` is
-  pinned inside the composite action with the three copies asserted to agree.
-  `publish-chart.yml` passes step outputs through `env:` rather than interpolating them
-  into a shell body.
+- **CI runners are pinned and every tool download is checksum-verified**, with `kind` pinned
+  inside the composite action and its three copies asserted to agree. `publish-chart.yml`
+  passes step outputs through `env:` rather than interpolating them into a shell body.
 
 - **The em-dash check covers more of the pages a stranger reads first**, now including
   `ROADMAP.md` and `docs/development-method.md` — the second because a page explaining the
@@ -159,28 +110,22 @@ Comparison links are at the foot of this file, one per released version.
 ### Removed
 
 - **`docs/record-demo.md`, and the `docs/llm-demo.gif` it specified**, which was never
-  built. The page described capturing a twelve-second compose clip of the two tenants
-  diverging across the 2s threshold, and its line 8 stated the result was "embedded above
-  the fold in `README.md`". It was not: the image above the fold is `docs/gpu-dashboard.png`.
-  `.github/PULL_REQUEST_TEMPLATE.md` separately listed a stale demo GIF among the things CI
-  cannot catch. Two live files asserting an asset that never existed is the prose-drift
-  class `doc-claims` exists for, and `doc-claims` checks numbers and ids rather than
-  whether a named file is there.
+  built. Its line 8 stated the result was "embedded above the fold in `README.md`"; the
+  image there is `docs/gpu-dashboard.png`. Two live files asserting an asset that never
+  existed is the prose-drift class `doc-claims` exists for, and `doc-claims` checks numbers
+  and ids rather than whether a named file is there.
 
-  The invariant that survived the deletion is now in `CONTRIBUTING.md` under "Editing
-  dashboards", where the rest of the dashboard-editing rules already live: change a board
-  and the **screenshots** go stale, along with the social preview cropped from
-  `docs/llm-dashboard.png`. The PR template points there instead of at a deleted file.
-
-  The path is reused above, for a page describing `demo.gif`, which exists. What made the
-  old one worth deleting was that it specified an asset nobody had built, not its name.
+  The invariant that survived is now in `CONTRIBUTING.md` under "Editing dashboards", where
+  the rest of the dashboard rules live: change a board and the screenshots go stale, along
+  with the social preview cropped from `docs/llm-dashboard.png`. The PR template points
+  there. The path is reused above for a page describing a file that exists.
 
 - **`prompts/prompt-adoption.md`, and `prompts/prompt-launch.md` that briefly replaced it.**
   The first was analysis rather than a specification — it said so itself — and four of its
   five priorities had shipped, leaving six stale claims nothing checks. The second carried
   the live half in house style and was dropped with the work.
 
-  The one fact in either that was true independently of the work now lives where it belongs:
+  The one fact true independently of the work now lives where it belongs:
   `compose/compose.yaml` enables anonymous Grafana `Viewer` access beside a published admin
   password, which is correct on localhost and disqualifying on a routable address. Marked
   beside the settings, and mirrored into `compose/README.md` because `task outstanding`
@@ -190,15 +135,14 @@ Comparison links are at the foot of this file, one per released version.
 
 - **The canonical-copy guard failed on spike scaffolding, and held `main` red for a day.**
   `spike/stale-rules.yaml` ends in `-rules.yaml`, which the guard matches repo-wide, and it
-  is a copy of nothing — a candidate detector written from scratch for a brief. Nobody saw
-  it because the job that runs the guard was not a required check. `spike/` is now
-  excluded, and the failure message no longer tells the reader to delete a file that
-  `chart-build.py` never touches.
+  is a copy of nothing. Nobody saw it because the job that runs the guard was not a required
+  check. `spike/` is now excluded, and the failure message no longer tells the reader to
+  delete a file `chart-build.py` never touches.
 
 - **One transient API read no longer ends a release.** The publish gate raised on the first
-  unreadable response and exited, so a single 502 aborted a release after the tag was
-  already pushed. It now retries three times consecutively, resetting on any good read, and
-  still exits 2 rather than 1 on a real outage — the absence of a verdict is not a verdict.
+  unreadable response, so a single 502 aborted a release after the tag was already pushed.
+  It now retries three times consecutively, resetting on any good read, and still exits 2
+  rather than 1 on a real outage — the absence of a verdict is not a verdict.
 
 - **Chart diagnostics are collected on a timeout, not only on a failure.** The guard tested
   `outcome == 'failure'`, but a `timeout-minutes` expiry cancels the job and a cancelled
@@ -208,8 +152,8 @@ Comparison links are at the foot of this file, one per released version.
 - **`targets_protected_branch` had never filtered anything on live data.** It read
   `conditions` from the rulesets *list* endpoint, which does not return that field, so by
   its own rule that absent conditions mean "everything" it matched every branch ruleset on
-  every real run. It was invisible because the committed fixtures carried a shape GitHub
-  does not produce; they now mirror the API.
+  every real run. The committed fixtures carried a shape GitHub does not produce; they now
+  mirror the API.
 
 ## [0.10.0] — 2026-08-05
 

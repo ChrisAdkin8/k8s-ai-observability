@@ -32,9 +32,13 @@ rule 18 aimed at the alert set rather than at the checks: an alert that has only
 against a synthetic series is a guess about the world.
 
 **The deliverable is a graded alert set** — for each failure mode, what fired, what stayed
-silent, and whether the silence was correct. Two modes trip nothing today. "There is no
-alert for this" is a legitimate result to hand out, and this rig can hand it out with
-evidence.
+silent, and whether the silence was correct. ⚠️ **ROADMAP.md says two of its seven modes
+trip nothing. On the ten below the ratio inverts: only two are expected to fire anything at
+all** against the tree as it stands — target loss on the GPU side (W2.2) and KV exhaustion
+(W6) — and W3 earns a third by building the detector it needs. Everywhere else "there is no
+alert for this" is the result, which is a legitimate one to hand out and which this rig can
+hand out with evidence. Size the harness for that: silence is the common path here, not the
+exception.
 
 ---
 
@@ -43,8 +47,9 @@ evidence.
 A half-day spike ran the cheap empirical version of every question in this file that did not
 need a cluster (`ROADMAP.md`'s own warning: ask whether the cheap empirical version exists
 before planning around an estimate). **The numbers below are measured, not modelled**, and
-two of them changed the work. The scripts are on the `spike/fault-injection` branch under
-`spike/`; rerun them rather than trusting the transcription.
+two of them changed the work. The scripts are **tracked at `spike/`** (`0d426e5`, and
+`spike/README.md` records why they are on `main` rather than on a branch); rerun them rather
+than trusting the transcription.
 
 | Question | Answer | Where it lands |
 |--|--|--|
@@ -55,6 +60,30 @@ two of them changed the work. The scripts are on the `spike/fault-injection` bra
 | Can KV exhaustion be isolated at 2.4 rps? | **No.** p95 TTFT reads 4.29s there, over the 2s threshold | W6 |
 | Does a new alert turn `task doc-claims` red? | **Yes**, at `docs/llm-simulation.md:43`, by name and line | finding 5 |
 | Does a sourced EXIT trap really clobber the caller's? | **Yes, silently** — the caller's restore never runs at all | W1.6 |
+
+## What a SECOND spike settled, on 2026-08-07
+
+The first spike proved the freeze **design** on a scratch harness. This one built it inside
+the shipped `worker()` and ran the whole mode end to end — four simulators and a real
+Prometheus, no Kubernetes — because the design was the only part reading could reach.
+Evidence: `spike/worker_freeze.py` and `spike/stale_e2e.sh`. ⚠️ **Both need W0 and W3 to
+exist**; they ran green against a spike implementation that was deliberately not kept
+(`docs/development-method.md` stage 3).
+
+**It changed W3 substantially, and none of it was visible from the design.**
+
+| Question | Answer | Where it lands |
+|--|--|--|
+| Does the clock-offset fix work inside the real `worker()`? | **Only after two more fixes.** The design is right and the wiring around it is not | W3.2 |
+| What does the profile poll key off? | ⚠️ **The SIMULATED clock — so the freeze is permanent.** The poll is the only way a thaw arrives, and freezing the clock freezes the poll with it | W3.2 |
+| What does the event sleep compare? | ⚠️ **A simulated `due` against `time.monotonic()`** — after a freeze that is permanently negative and the loop busy-spins. **70 passes/s against 2/s** | W3.2 |
+| Is the thaw burst real inside `worker()`? | **Yes: 9.0x a normal scrape gap** naive, **0.9x** with the offset. Confirms the scratch harness at a different rate | W3.2 |
+| Does `validate_profile` reject an unknown key? | ⚠️ **No.** `p.update(raw)` carries anything through, so `{"freze": true}` validates, applies, bumps the generation counter and injects **nothing** | W0.1 |
+| How long from freeze to `LLMMetricsStale` firing? | ⚠️ **The rate() window AND the `for:`, in series.** Measured 56s + 30s = **87s** on a `[1m]`/`30s` twin. Shipped `[10m]`/`5m` means **~15 minutes** | W3.5, Background |
+| Can the drill freeze `llm-driven` as it ships? | ⚠️ **Not reliably.** At 0.4 rps the population hits zero, `running > 0` excludes it, and the drill reports "no alert" about a state it never created. **One run held 6 requests, the next held 0** | W3.4 |
+| Does the alert fire against a real frozen simulator? | **Yes** — driven tenant only, fixtures untouched, and the idle-tenant negative shown against **live data** (guardless 2 series, guarded 1) | W3.5, W3.6 |
+| Does `extract.sh` need new logic for the driven profile? | **No** — one extra filename, exactly as W0.7 predicted | W0.7 |
+| Is there a third `zsh` vs `bash` class? | ⚠️ **Yes, and nothing in the repo catches it.** See the Background item below | W1, rule 17 |
 
 ---
 
@@ -113,18 +142,21 @@ simulator change**, priced accordingly below.
 
 ### 5. A new alert is not one file's worth of work.
 
-Adding one touches five places, and the last one fails `task preflight`:
+Adding one touches seven places, and the last one fails `task preflight`:
 
 | Place | Why |
 |--|--|
 | `manifests/alerts/llm-prometheusrule.yaml` | the rule |
 | `tests/rules/llm-rules_test.yaml` | promtool cases, both sides (rule 18) |
-| `docs/llm-simulation.md:405-412` | the alert table has a row per alert |
+| `docs/llm-simulation.md:404-411` | the alert table has a row per alert |
 | `docs/architecture.md:128` | enumerates the alert names |
-| **`docs/llm-simulation.md:43`** | **"Recording rules + six alerts" is derived and checked** |
+| `manifests/dashboards/llm-sim-overview.grafana-com.md:241-244` | a **second** alert table, on the page that ships to grafana.com. It is in `EM_DASH_FREE` (rule 13) and republished as a revision of id 25620 (rule 9), which makes it the most expensive row here |
+| `CHANGELOG.md` | its own table names a new **alert** as MINOR-worthy (`:12`) |
+| **`docs/llm-simulation.md:43`** | **the alert count, derived and checked** |
 
-`scripts/check-doc-claims.py:118` counts `- alert:` entries in the LLM rule file and
-compares against the prose number. **Measured in the spike** by appending a seventh alert:
+`derive_llm_alerts()` (`scripts/check-doc-claims.py:140-143`, registered at `:423-425`)
+counts `- alert:` entries in the LLM rule file and compares against the prose number.
+**Measured in the spike** by appending a seventh alert:
 
 ```
   docs/llm-simulation.md:43: claims 6; derived 7 (alerts in the LLM rule file)
@@ -133,6 +165,14 @@ check-doc-claims: FAIL [alerts]: prose drifted from code
 
 That is the check working, and it names the file and line for you. Budget for it rather
 than being surprised by it.
+
+⚠️ **A tracked prompt is inside that same scan, and this file was in it.** `check-doc-claims.py`
+walks `git ls-files '*.md'` (`:506`), so `prompts/` has been in scope since the briefs were
+tracked. This file restated the alert count twice and was **two of the three claims** the
+check was comparing — so the seventh alert would have turned `doc-claims` red here as well
+as in the doc that owns the number. The phrase is gone from it now, on the rule the working
+loop already states: reference the file that owns a number, never restate it. **Do not put
+it back**, in this file or in the next prompt.
 
 The chart ships the rules too (`charts/k8s-ai-observability/templates/prometheusrules.yaml`
 templates only the wrapper and `Files.Get`s the extracted groups), so a new alert is
@@ -230,7 +270,9 @@ KV cache with, and it is available here without disturbing the queue.
 
 ### Concurrency at a sub-capacity arrival rate — DERIVED, RE-DERIVE IT BEFORE USING IT
 
-Capacity is 2.74 rps (`drive-llm-load.sh:49-53`). Below it, mean concurrency is
+Capacity is 2.74 rps — **read it off `llmsim_capacity_rps` (`llm-sim.py:813`), not off the
+base-latency comment at `drive-llm-load.sh:49-53`**, which is what rule 3 and the incident
+in `10-profiles.yaml:34` are about. Below it, mean concurrency is
 `arrival_rate x service_time`, and service time itself depends on load through
 `CONGESTION_AT_FULL_LOAD` (`llm-sim.py:225`), so it needs one fixed-point iteration. At
 1.8 rps it converges near **9 concurrent requests**, so mean active tokens are about
@@ -284,7 +326,15 @@ Scrapes land every **15s** (`manifests/servicemonitor/llm-sim-servicemonitor.yam
 rules evaluate at the kube-prometheus-stack default — read it off the running Prometheus
 rather than taking a number from here. So a drill that waits for a 5m alert plus scrape and
 evaluation latency is a **seven to eight minute** run at best, and five of the ten modes have
-one. That is not a coffee break; sequence them so a single cluster session covers several,
+one.
+
+⚠️ **A `for:` is the floor, not the wait, whenever the expression carries a range vector.**
+`LLMMetricsStale` is the case: its `rate(...[10m])` has to drain before the `for: 5m` starts,
+so the real figure is about **fifteen minutes** (measured, W3.5). Every alert above whose
+expression reads a window inherits the same arithmetic — `LLMHighTTFT` sits on a `[5m]`
+quantile, so a tenant that becomes slow is a 5m window plus a 2m `for:`, not 2m. **Add the
+window to the `for:` before quoting a duration**, and take the totals in this table as the
+smaller half of the answer. That is not a coffee break; sequence them so a single cluster session covers several,
 and never make CI pay for any of them (rule 7). W9, W10 and W11 are the exception — each
 observes something *ceasing to exist*, which needs one evaluation interval, not five minutes.
 
@@ -326,8 +376,11 @@ nothing. In this harness the caller's EXIT trap is what puts the cluster back. L
 `mktemp` and the `trap` to each caller.
 
 ⚠️ **Price the extraction honestly: it edits the repo's most load-bearing script, and
-proving it still works needs a full cluster `verify.sh` run** (~4 minutes of checks after a
-cluster exists, and it is the gate everything else is measured against). If that run is not
+proving it still works needs a full cluster `verify.sh` run** (160s of checks on `full` and
+150s on `lite` after a cluster exists — `docs/ci.md:366`, run `30998470446`, which owns
+every timing in this repo — and it is the gate everything else is measured against). Note
+that this is the *post* port-forward-fix figure; the 247s a reader may remember is the
+number that fix was measured against. If that run is not
 available in the same sitting, ship the drill with its own copy behind a ⚠️ marked in the
 file that owns it (rule 16) and land the extraction as its own commit afterwards — but do
 not leave the duplication unmarked.
@@ -335,10 +388,41 @@ not leave the duplication unmarked.
 ⚠️ **And test it with `bash -c`, never interactively** (rule 17). Two bugs on 2026-08-04
 were invisible under zsh.
 
+### ⚠️ A THIRD `zsh` vs `bash` class, and nothing in this repo catches it — MEASURED 2026-08-07
+
+Rule 17 records two: a SIGPIPE'd producer under `pipefail`, and unquoted word-splitting.
+Here is a third, found by writing this harness rather than by reasoning about it:
+
+```sh
+[ "$(qn "ALERTS{alertname=\"LLMMetricsStaleFast\",alertstate=\"firing\"}")" != "0" ]
+```
+
+**zsh evaluates it correctly. bash fails with `[: too many arguments`** — the escaped quotes
+inside a command substitution inside a test's quoted argument are parsed as argument
+separators. Confirmed by running the identical line under `bash -c` and `zsh -c`.
+
+**Nothing flags it.** `shellcheck` is silent at **every** severity including `-S style`, and
+neither `check-sigpipe.py` nor `check-word-splitting.py` looks for it.
+
+⚠️ **And it is the shape this harness is made of.** W1.4 requires every expectation to be
+scoped by `model_name`, which means a quoted label matcher, inside a query string, inside a
+command substitution, inside a test — this construct, in every row of every table. The
+failure is worse than a crash: under `set -e` the test neither passes nor fails, it **errors
+past**, so a polling loop reads "not yet" forever. In the spike that meant a measurement loop
+running to its 300s deadline while the alert had been firing for four minutes.
+
+**The repair is `verify.sh`'s existing habit**: assign the query result to a variable, then
+test the variable (`:640` is the pattern). That turns out to be load-bearing rather than
+stylistic, and it is why this has never bitten the repo. **Copy it deliberately**, say why in
+the harness header, and consider whether it earns a check of its own — that decision belongs
+with W1 rather than here.
+
 ### What `verify.sh` already asserts, which your drills must not break — VERIFIED
 
 L1 `up{job="llm-sim"} == 1` (`:522`), L3 steady p95 under 2s scoped to
-`LLM_STEADY_MODEL` (`:544`), L6 `LLMHighTTFT` firing (`:640`). A drill that leaves the
+`LLM_STEADY_MODEL` (`:544`), L6 `LLMHighTTFT` firing (`:640`), and — the two easiest to miss,
+because their labels say LLM while their inputs are DCGM — **L4 cross-domain tokens-per-watt
+(`:578`) and L4b the GPU binding joined on pod (`:615`)**. A drill that leaves the
 driven profile in a broken state, or leaves the GPU exporter scaled to zero, breaks the
 next `verify.sh` run — **which is why W1's restore is a trap and not a closing line.**
 
@@ -359,11 +443,26 @@ flag, no new transport.
               "label_bomb": { "series": 0 } } }
 ```
 
+⚠️ **VALIDATE THE FAULTS BLOCK STRICTLY, WHICH IS NOT HOW THE REST OF THIS PROFILE WORKS.**
+`validate_profile` builds `p = dict(DEFAULT_PROFILE); p.update(raw)` (`llm-sim.py:275-276`),
+so **unknown keys are carried through in silence** — verified 2026-08-07. For load shaping
+that is harmless inheritance. For a fault it is the worst available default: `{"freze": true}`
+validates, applies, increments `llmsim_profile_generation` so the drill's own "did it land"
+check goes green, and injects nothing. The drill then grades an alert that was never given
+anything to see, and reports it as a property of the alert set.
+
+So the `faults` block rejects unknown keys and wrong types by name, listing what it does
+know. It is the one place in this file where a typo must be louder than a default, because
+**a fault surface that ignores a typo is the exact failure this whole item exists to
+catch, arriving through the injection mechanism itself.** Keep `_note` exempt (W0.4).
+
 **W0.2 It is portable because a ConfigMap volume is a file and a bind mount is a file.**
-`llm-sim.py` polls `/etc/llm-sim/profile.json` and neither knows nor cares what wrote it. The
-compose stack already mounts profiles this way (`compose/compose.yaml:60`,
-`--profile /etc/llm-sim/steady.json`) and the cluster already mounts them as a ConfigMap
-directory (`llm-driven.yaml:103-109`). **So the simulator needs no platform code at all** —
+`llm-sim.py` polls the path it was given and neither knows nor cares what wrote it. The
+compose stack already mounts a profiles directory (`compose/compose.yaml:60`) and names the
+file on the command line (`:54`, `--profile /etc/llm-sim/steady.json`); the cluster mounts a
+ConfigMap directory (`llm-driven.yaml:103-109`) and names `/etc/llm-sim/profile.json` (`:85`).
+**The filename differs per platform and the mechanism does not** — which is the part that
+matters here, and the part the helper has to take as an argument rather than assume. **So the simulator needs no platform code at all** —
 which is the whole reason to choose this over a fault API, a sidecar, or a CRD.
 
 Everything the delivery path needs already exists: the 10s poll, `apply_profile` swapping the
@@ -398,7 +497,10 @@ key the validator ignores for anything that must travel with a fault document. O
 
 **W0.5 Default-empty, and prove it.** `validate_profile` (`llm-sim.py:264`) validates the
 block and defaults it to inert. `--selftest` asserts that with no `faults` key the render is
-**byte-identical** to today's. That is what protects rule 1 (fixtures unaffected) and the
+**byte-identical** to today's. ✅ **Verified in the spike**: with the block added and every
+fault off, a rendered scrape matched a no-`faults` render byte for byte, and
+`llmsim_fault_active` was absent from it and present the moment a fault was held. Emitting
+the provenance gauge **only while a fault is active** is what makes both halves true at once. That is what protects rule 1 (fixtures unaffected) and the
 fidelity claim at the same time: real vLLM emits no fault machinery, and the moment any leaks
 into the default surface the repo's central promise is contaminated.
 
@@ -413,6 +515,19 @@ extend `extract.sh`'s `profiles` case — which today hardcodes `manifests/llm/1
 `<x>.json`, so `llm-profile-driven` becomes `driven.json` with no new logic. **Do not
 hand-write a second copy of the driven profile into `compose/`**; that is the drift the whole
 extraction exists to prevent.
+
+✅ **Verified 2026-08-07.** Adding `manifests/llm/extras/llm-driven.yaml` as a second input
+file to the existing `awk` (`extract.sh:55`) produced `driven.json` correctly on the first
+try, with no change to the program. This line is as cheap as it says.
+
+⚠️ **`.generated/` is regenerated on every `up`, so compose restores itself and Kubernetes
+does not.** Both tenants gate on the `generate` service
+(`depends_on: { generate: { condition: service_completed_successfully } }`), which reruns
+`extract.sh`, so a fault written into `.generated/profiles/` survives exactly until the next
+`docker compose up`. That is a free restore on one backend and no restore at all on the
+other. **Say which in the mode's banner** rather than letting W1.6's trap imply the two
+behave alike — and do not lean on it: a drill that only restores because something else
+happened to overwrite its file is not restoring.
 
 **W0.8 What cannot live in the file, and must not be forced into it.** Target loss, replica
 count, adoption labels, exporter scaling. These are faults in Kubernetes objects, and
@@ -453,7 +568,7 @@ resolves `eks|gke|local` positionally through `ensure_context`, so `compose` is 
 in an existing convention rather than a new one. **kind, EKS and GKE are one backend**: same
 manifests, same verbs, differing only in cost and node count. Compose is the second.
 
-A mode with no analogue on a target reports **SKIP with the reason** — `verify.sh:47-49`
+A mode with no analogue on a target reports **SKIP with the reason** — `verify.sh:45-48`
 already has that vocabulary, and its rule that SKIP must never paper over a real mismatch. The
 clearest case is W9: compose has no ServiceMonitor and no `PrometheusRule` CR, so non-adoption
 is not a fault that exists there.
@@ -493,8 +608,10 @@ board afterwards. A fault drill is the opposite case: leaving `kv_cache_tokens_c
 4096 poisons every later run, silently.
 
 **W1.7 The output is a table, and it is the deliverable.** Mode, each expectation, observed,
-and PASS/FAIL/SILENT. `SILENT` is a real outcome and must not be spelled `FAIL`: two modes
-are expected to trip nothing, and a drill that reports its correct result as a failure is a
+and PASS/FAIL/SILENT. `SILENT` is a real outcome and must not be spelled `FAIL`: **most of
+these ten modes are expected to trip nothing** (see the header — only W2's GPU half and W6
+fire against the tree as it stands), so `SILENT` is the ordinary path through this table
+rather than an edge case, and a drill that reports its correct result as a failure is a
 drill nobody runs twice.
 
 **W1.8 Preconditions checked up front**: the driven tenant exists (`drive-llm-load.sh:43-47`
@@ -531,9 +648,14 @@ fake DCGM exporter to zero, per `gpu-prometheusrule.yaml:92-93`. Expect
 `_POWER_USAGE` series to disappear with it (`gpu-prometheusrule.yaml:37-49` computes them
 from `DCGM_FI_DEV_GPU_UTIL`).
 
-⚠️ **This is the one drill that touches a shared component**, and it breaks `verify.sh`
-checks 3, 4 and 5 while it runs. Restore is mandatory, the mode must say so in its banner,
-and it must never run concurrently with `verify.sh`.
+⚠️ **This is the one drill that touches a shared component, and its blast radius reaches
+past the GPU checks into the LLM ones.** Every GPU-side check goes red, and so do **L4**
+(`verify.sh:578` — `llm:tokens_per_watt:5m` divides by `DCGM_FI_DEV_POWER_USAGE`, which the
+recording rules synthesise from `DCGM_FI_DEV_GPU_UTIL`) and **L4b** (`:615`, the GPU binding
+joined on pod). Note also that the GPU-side checks are numbered only in `verify.sh`'s
+comments while the LLM ones print their labels, so what you watch fail and what you read in
+the script do not line up. Restore is mandatory, the mode must say so in its banner, and it
+must never run concurrently with `verify.sh`.
 
 **W2.3 The decision this mode forces.** A per-tenant absence detector needs to know which
 tenants are supposed to exist, and PromQL cannot know that from the metric alone. Enumerate
@@ -574,7 +696,26 @@ while frozen and the first unfrozen call replays the entire frozen interval in o
 minutes of arrivals and completions land in a single scrape gap, every histogram takes a
 step change, and `rate()` reports a spike that never happened.
 
-**MEASURED, not predicted** (`spike/` on the spike branch, a 5 minute freeze at 1.8 rps):
+⚠️ **AND THE FIX IS THREE CHANGES, NOT ONE. The other two are in `worker()`'s two
+comparisons, and both were invisible until the design was wired in** (`spike/worker_freeze.py`,
+2026-08-07). Once the simulated clock can differ from the wall clock, every comparison in
+that loop has to pick one deliberately, and today both pick wrong:
+
+| `worker()` line | Reads | Consequence once frozen |
+|--|--|--|
+| the profile poll cadence, `now - last_poll >= poll_seconds` | the **simulated** clock | ⚠️ **The freeze is permanent.** `now` stops, so the poll stops, and the poll is the only path a thaw can arrive by. Nothing errors, the pod stays Ready, `/metrics` serves the last state forever |
+| the event sleep, `due - time.monotonic()` | `due` is **simulated**, `monotonic()` is **wall** | Permanently negative by `frozen_seconds`, so every pass takes the `0.01` floor. **Measured 70 passes/s against 2/s** — a core burned for the life of the pod, with correct output |
+
+The poll must key off wall clock; the sleep must compare `due` against
+`time.monotonic() - frozen_seconds`. Both are one-line changes and neither is findable by
+reading the design, which is the whole argument for building it before pricing it.
+
+⚠️ **The spin only shows at a realistic arrival rate.** At 100 rps the next event is ~0.01s
+away regardless, so both arms sleep the floor and the bug is invisible — the spike's own
+check reported no difference until it was re-pointed at the shipped 1.8 rps. A performance
+assertion needs the operating point it is meant to protect.
+
+**MEASURED, not predicted** (`spike/thaw_burst.py`, a 5 minute freeze at 1.8 rps):
 
 | | Tokens in the first post-thaw scrape gap |
 |--|--|
@@ -595,6 +736,24 @@ byte-identical across a wall-clock interval except for nothing at all; `num_requ
 holds its pre-freeze value rather than draining to zero; and the thaw test above. Break each
 one deliberately and watch it fail before you trust it.
 
+⚠️ **Three of these have to run the real `worker()` in a thread, not a scratch model of it**,
+because the bugs W3.2 records live in `worker()`'s comparisons and a harness that reimplements
+the loop reimplements them away. `spike/worker_freeze.py` is the shape: a real `State`, a real
+profile file on disk, the freeze delivered through the real poll. Add to the list above:
+
+- **the thaw is deliverable at all** — freeze, thaw through the profile file, and assert the
+  counters resume. This is the one that catches the permanent-freeze bug, and it needs a
+  **control arm** (the fixed loop) beside it or "counters did not move" passes for the wrong
+  reason.
+- **the loop does not busy-spin after a thaw** — pass count per second, against the shipped
+  arrival rate and not a fast one (W3.2).
+- **an unknown fault key is refused** (W0.1).
+
+⚠️ **Watch the counter you assert on actually move.** The spike's first run asserted a frozen
+`generation_tokens_total` over a 2s window against the shipped profile, where one request
+takes ~5s to complete — so it read `0 -> 0` and passed while proving only that nothing had
+finished yet. Either drive a fast profile or make the window longer than a request.
+
 ⚠️ `render()` is a pure read and `--selftest` already asserts that via the `observations`
 counter (`llm-sim.py:506`). Freezing must not disturb that property.
 
@@ -602,6 +761,22 @@ counter (`llm-sim.py:506`). Freezing must not disturb that property.
 readiness probe is an HTTP GET on `/metrics` (`llm-driven.yaml:91-94`), so a frozen pod
 stays **Ready**: Kubernetes cannot see this failure either, which is half of why the mode
 is worth building.
+
+⚠️ **RAISE THE ARRIVAL RATE FIRST, AND WAIT FOR THE POPULATION BEFORE INJECTING.** This is
+the same sentence W6 already carries, for the same reason, and W3 needs it just as much.
+`llm-driven` ships at 0.4 rps, where mean concurrency is under two and **the population hits
+zero regularly** (Background). Freeze on one of those moments and `num_requests_running` is
+0, so the detector's `running > 0` guard excludes the tenant — correctly, since a tenant
+with nothing in flight is idle rather than wedged. The drill then produces no detectable
+state and reports **"the alert did not fire"**, which is a true sentence about a state that
+was never created, and the most dangerous possible output from a rig whose product is
+grading alerts.
+
+**Measured, and it is a coin flip at the shipped rate**: two runs of `spike/stale_e2e.sh`
+minutes apart, one held **6** requests at the freeze and the next held **0**. So the drill
+sets `arrival_rate_rps` to something that holds a population — 1.8 works — and then **polls
+`vllm:num_requests_running > 0` as a precondition** before it writes the freeze. A drill that
+cannot confirm the state it depends on has no business reporting on the alert that watches it.
 
 | Query | Expected | Why |
 |--|--|--|
@@ -640,13 +815,31 @@ FAILED: alertname: LLMMetricsStale, time: 25m
 ```
 
 `got:[]` is what this failure looks like in production too, except nothing prints it. Same
-genre as `llm-prometheusrule.yaml:380-385` for the burn alerts and `:95-104` for the phase
+genre as `llm-prometheusrule.yaml:380-386` for the burn alerts and `:95-104` for the phase
 means.
 
+⚠️ **THE WINDOW IS A DETECTION LATENCY, AND IT IS ADDED TO THE `for:`, NOT OVERLAPPED WITH
+IT.** `rate(v[10m])` reaches zero only once the **whole** window contains a flat counter, so
+after a freeze the window drains first and the `for:` starts counting after that.
+**Measured** (`spike/stale_e2e.sh`, a `[1m]`/`for: 30s` twin of the shipped rule, real
+Prometheus, real frozen simulator):
+
+```
+    rate() reached zero   : 56s after the freeze   (a [1m] window)
+    alert reached firing  : 87s after the freeze   (+ a 30s `for:`)
+```
+
+56 + 30 = 86, against 87 observed. So at the **shipped `[10m]` and `for: 5m` this alert takes
+about fifteen minutes to fire**, not five, and not the "seven to eight minutes" the timings
+table budgets for a 5m alert. Budget the drill accordingly, print the residual while it waits
+(W1.5), and if fifteen minutes is too long to be useful, that is an argument about the window
+— which is the trade-off below, now with a cost attached to one side of it.
+
 ⚠️ **The window is a real trade-off, not a default.** 10m over `generation_tokens_total`
-says "no request has completed in ten minutes". On this rig the saturated tenant's e2e is
-~68s so that is safe, but a real deployment generating long outputs at low concurrency can
-exceed it legitimately. State the assumption in the rule comment and pick the window
+says "no request has completed in ten minutes". On this rig the saturated tenant's queue
+wait plateaus near 58s (`drive-llm-load.sh:49-53`, 160 / 2.74 by Little's Law) and e2e is
+that plus a prefill and a decode, so 10m clears it by an order of magnitude — but a real
+deployment generating long outputs at low concurrency can exceed it legitimately. State the assumption in the rule comment and pick the window
 deliberately.
 
 **W3.6 The negative case is what makes it worth having.** An **idle** tenant reads
@@ -654,8 +847,23 @@ deliberately.
 rule by dropping the `running > 0` conjunct and watch the idle case go red (rule 18). That
 is the experiment that shows the conjunction is doing the work.
 
-**W3.7 Pay finding 5's bill**: rule file, promtool cases both sides, the alert table row,
-`docs/architecture.md:128`, and the "six alerts" line at `docs/llm-simulation.md:43`. Run
+⚠️ **Also run it against LIVE data, which promtool cannot do and which is this item's whole
+premise.** Done in the spike by standing a fourth, genuinely idle tenant beside the frozen
+one and asking both expressions of the same Prometheus:
+
+```
+    with the running > 0 guard : 1 series   (the frozen tenant)
+    without it                 : 2 series   (the frozen tenant AND the idle one)
+```
+
+⚠️ **And the negative case needs something quiet to be a case at all.** The spike's first
+attempt ran three busy tenants and one frozen one, where guarded and guardless both return
+the same single series and the check passes while proving nothing. An idle tenant is not
+scenery here; it is the control.
+
+**W3.7 Pay finding 5's bill**, all seven places: rule file, promtool cases both sides, the
+alert table row, `docs/architecture.md:128`, the catalog page's own alert table, a
+`CHANGELOG.md` entry, and the derived count at `docs/llm-simulation.md:43`. Run
 `task doc-claims` and expect it to go red before you fix the prose; that is the check
 earning its keep.
 
@@ -710,8 +918,8 @@ A drill run without one is not a test.
 **W6.1 ⚠️ The isolation window is narrow, and the spike found its edge.** The obvious move
 — raise the arrival rate so the request population is large and stable — breaks the drill,
 because the queue that fills the KV cache also raises TTFT. Measured across eight seeds
-(`spike/kv_isolation.py`, bucket p95 computed the way the alert computes it, over
-`TTFT_BUCKETS`, not from raw samples):
+(`spike/kv_profile.py` — the same run as the Background table, one script for both; bucket
+p95 computed the way the alert computes it, over `TTFT_BUCKETS`, not from raw samples):
 
 | rps | max queue depth | bucket p95 TTFT | isolated? |
 |--|--|--|--|
@@ -742,7 +950,7 @@ raise `prompt_tokens.mean`. Neither touches latency (verified above). The candid
 both — prompt length for the mechanism, capacity for the trim — because prompt length is
 how a real deployment fills its KV cache.
 
-**W6.3 The isolation is the assertion.** Expected while it holds:
+**W6.4 The isolation is the assertion.** Expected while it holds:
 
 | Query | Expected |
 |--|--|
@@ -754,12 +962,18 @@ how a real deployment fills its KV cache.
 The last three rows are the point: this mode exists to fire **one** alert and demonstrate
 that the other two stayed quiet, which is the state ROADMAP.md says no fixture provides.
 
-**W6.4 Say what the drill did and did not do.** It moved a gauge past a threshold and the
+**W6.5 Say what the drill did and did not do.** It moved a gauge past a threshold and the
 alert that watches that gauge fired. The engine's behaviour is unchanged. See the
 `num_preemptions_total` note in Background; do not let the write-up imply modelled KV
 pressure.
 
-**W6.5 Expect a clamped 1.0** at any robust setting (`llm-sim.py:693`), and note the
+⚠️ **And it falsifies a sentence already in the tree.** `tests/README.md:27` gives "nothing
+on the rig reaches 90% KV cache" as the reason `LLMKVCacheSaturated` can only ever be
+unit-tested. After this mode lands, something does — deliberately, on the driven tenant, and
+only while a drill is running. Correct it in the commit that lands the drill (rule 12). It
+is not in finding 5's table because it is a consequence of W6 rather than of a new alert.
+
+**W6.6 Expect a clamped 1.0** at any robust setting (`llm-sim.py:693`), and note the
 consequence in the write-up: with a `for: 5m` over a fluctuating population, the settings
 that fire reliably are the settings where the crossing is invisible. That is a real property
 of gauge-plus-duration alerting, worth one paragraph.
@@ -942,9 +1156,14 @@ Estimates from reading the code, not from doing the work. **Treat the ordering a
 than the numbers, and re-derive the largest line before planning around it.** Instruments
 are priced as code plus 25-35% verification, because the selftest is where these overrun.
 
-⚠️ **This totals more than ROADMAP.md's 3 to 4 days for the same item, and the gap is
-concentrated in two places**: W3's simulator change (which the roadmap assumed away, finding
-4) and the five-file cost of every new alert (finding 5). Correct the roadmap's estimate when
+⚠️ **The table sums to 34 hours, about 4.25 days — and the honest comparison with
+ROADMAP.md's 3 to 4 days for the same item is narrower than that looks.** Three of these
+lines (W9, W10 and W11, 3 hours together) are work the roadmap's mode table does not contain
+at all, so like for like this item is ~31 hours against a 24 to 32 hour estimate: inside the
+range rather than over it. What the roadmap genuinely assumed away is still real and named
+twice — W3's simulator change (finding 4) and the seven-place cost of every new alert
+(finding 5) — it is simply offset by modes that came in cheaper than the page expected,
+mostly because the spike did the expensive part first. Correct the roadmap's estimate when
 you know the real number, with the actual beside it, as the page already does for item 3's
 surface question.
 
@@ -973,11 +1192,14 @@ transport is free — the poll, the validator, the "last good profile" behaviour
 generation counter all already exist — so what is being written is a schema and a merge. Every
 fault below still costs what it costs; W0 does not make them cheaper, it makes them portable.
 
-⚠️ **W3 is still the softest number and the largest**, even after the spike. It is an
-instrument change to a file whose selftest pins deliberately-reintroduced bugs, and the
-clock-offset fix is proven as a design on a scratch harness, not inside `worker()` with a
-lock held and a profile poll running beside it. Re-derive this line before planning around
-it.
+⚠️ ~~**W3 is still the softest number and the largest** ... the clock-offset fix is proven as
+a design on a scratch harness, not inside `worker()`.~~ **DONE — built inside `worker()` on
+2026-08-07** (`spike/worker_freeze.py`). That was the right call and it did not make the line
+smaller. The design held; the wiring around it did not, and the spike found **two further
+one-line clock bugs plus a validation gap** that reading could not reach. W3's code is now
+designed, measured and driven red — what remains is writing it in its real place with the
+selftest, the five-doc bill and a fifteen-minute cluster drill. **Treat ~1 day as firmer
+than before rather than smaller**, and note that the drill's wall clock roughly doubled.
 
 ⚠️ **Wall-clock is not effort here.** Five of the ten modes wait out a 5m `for:`. The
 cluster time is roughly an hour of waiting spread across the drills, and it does not
@@ -993,9 +1215,11 @@ evaluation interval.
   driven or retuned, and the two documented instructions that say otherwise get corrected
   rather than followed.
 - **Any `verify.sh` check asserting a fault.** Rule 7: a finding with a shelf life belongs in
-  a scenario script. The only thing CI gains from this work is `llm-sim.py --selftest`
-  coverage of the freeze knob, and the promtool cases for any new alert.
-- **Modelling KV pressure, or emitting `num_preemptions_total`.** See W6.4.
+  a scenario script. What CI gains is `llm-sim.py --selftest` coverage — the freeze knob and
+  its thaw-burst assertion (W3.3), the byte-identical default render (W0.5) and the label
+  bomb's off-by-default assertion (W8.1) — plus the promtool cases for any new alert.
+  Nothing beyond that, and nothing that waits on a `for:`.
+- **Modelling KV pressure, or emitting `num_preemptions_total`.** See W6.5.
 - **A configuration language, a CRD, a fault API or a sidecar.** W0 is a JSON block in a file
   the simulator already reads. Anything that needs a controller, a schema compiler or a second
   transport has left the design, and the stdlib-only rule is what it hits first.
@@ -1028,47 +1252,91 @@ Written before the work (house convention), and mapped to ROADMAP.md item 1's "D
 1. Every in-process fault is configured **only** through the `faults` block of the tenant's
    `profile.json`, written by a **merge** and never a whole-object rewrite, and the identical
    document works on Kubernetes and on compose. No second config mechanism exists.
+
 2. With no `faults` key present, `--selftest` shows the render is **byte-identical** to
    today's, and the compose stack runs `llm-driven` from a profile extracted by
    `extract.sh` rather than a second copy.
+
 3. Every mode is invoked deliberately from `scripts/fault-drill.sh <target> <mode>`; nothing
    in `verify.sh`, `install.sh` or CI runs a drill, and a mode with no analogue on a target
    reports SKIP with its reason.
+
 4. Every mode prints its expectation table **before** acting, and `--dry-run` prints it
    without touching the cluster.
+
 5. Every expectation that can be scoped by `model_name` is, and any that is not carries a
    comment saying why.
+
 6. Every wait is polled with a budget in seconds, and prints its residual while waiting.
+
 7. Restore runs from a trap covering EXIT, INT and TERM, is idempotent, and leaves
    `verify.sh` passing. Demonstrated by running `verify.sh` after a Ctrl-C'd drill.
+
 8. `LLMMetricsAbsent` is shown **not** to fire on single-tenant loss, `GPUMetricsAbsent` is
    shown to fire, and the two wrong "to test it" instructions are corrected.
+
 9. Stale-but-up is produced, shown to defeat the absence alerts, and detected by a rule
    written over `vllm:*` series only — with its idle-tenant negative case asserted in
    promtool and driven red once.
+
 10. The freeze knob is off by default, covered by `--selftest` including the thaw-burst
-   assertion, and each new selftest assertion has been driven red deliberately (rule 18).
-11. KV exhaustion fires `LLMKVCacheSaturated` for the driven tenant while `LLMQueueBacklog`
-   and `LLMHighTTFT` stay silent **for that tenant**, with the capacity derived offline from
-   a measured minimum rather than a mean.
-12. The modes that trip nothing produce either a new alert or a written decision not to
+    assertion, and each new selftest assertion has been driven red deliberately (rule 18).
+    The freeze assertions run the **real `worker()`**, cover **both** clock comparisons
+    (W3.2), and each carries a control arm so none can pass for the wrong reason.
+
+11. **An unknown or mistyped key in the `faults` block is refused by name**, with a message
+    naming what is known. Asserted in `--selftest`, and driven red by a profile that a
+    permissive validator would have accepted silently.
+
+12. **The stale drill raises the arrival rate and confirms a non-zero request population
+    before it injects**, and says in its output that it did so. Freezing an idle tenant
+    produces "no alert fired" about a state that never existed, which is the one output this
+    rig must never emit (W3.4).
+
+13. W4 produces the panel table — panel, expression, whether a dead tenant is visible — for
+    every panel on `llm-sim-overview.json` that aggregates across `model_name`, and each
+    finding gets either a repo change or a written decision. `llm:tokens_per_watt:5m` is
+    excluded with its reason, not silently.
+
+14. W5's prediction table is written and committed **before** the restart is run, and the
+    write-up records every row the prediction got wrong. A drill run without one does not
+    count as run.
+
+15. KV exhaustion fires `LLMKVCacheSaturated` for the driven tenant while `LLMQueueBacklog`
+    and `LLMHighTTFT` stay silent **for that tenant**, with the capacity derived offline from
+    a measured minimum rather than a mean.
+
+16. The modes that trip nothing produce either a new alert or a written decision not to
     have one. Both are answers; recording neither is not. **W9's decision may legitimately be
     "no runtime alert"**, provided the reason — a detector cannot survive inside the object it
     watches — is written down.
-13. Any new alert is complete across all five places in finding 5, and `task preflight` is
+
+17. Any new alert is complete across all seven places in finding 5, and `task preflight` is
     green.
-14. W9 demonstrates non-adoption **both ways** with a canary object and zero blast radius, and
+
+18. W9 demonstrates non-adoption **both ways** with a canary object and zero blast radius, and
     records that an unadopted alert *ceases to exist* rather than resolving.
-15. W10 runs restart-with-`v1` as a control beside restart-with-`v0`, so the rename is
+
+19. W10 runs restart-with-`v1` as a control beside restart-with-`v0`, so the rename is
     separated from the counter reset it arrives with, and the `both` surface is exercised.
-16. W11 states its four predictions before scaling, and either produces a number for the
+
+20. W11 states its four predictions before scaling, and either produces a number for the
     catalog page's "might not hold" or records that the deviation is unmeasurable at this
     scale. Manufacturing a number is the failure mode here.
-17. `task preflight` is green. Anything left open carries a `⚠️` **and a phrase `task
+
+21. **W8 cannot run by accident.** The label bomb is off by default and `--selftest` asserts
+    the default render carries no such label; the script states its series ceiling, refuses a
+    cardinality above it, and refuses to run at all without an explicit confirmation flag;
+    the banner carries the blast-radius warning; and `LITE=1` is rejected rather than
+    documented as unwise. This is the one mode that can take the monitoring stack down, so
+    its guards are acceptance criteria and not prose.
+
+22. `task preflight` is green. Anything left open carries a `⚠️` **and a phrase `task
     outstanding` actually matches** — the curated list is in `Taskfile.yml` and is not
     reproduced here; match an existing phrasing or extend the list (rule 16). An item
     phrased in new words is silently missed, which is how rule 17's own gap sat unseen.
-18. ROADMAP.md item 1 is corrected where this work proved it wrong — **including its mode
+
+23. ROADMAP.md item 1 is corrected where this work proved it wrong — **including its mode
     table, which gains W9, W10 and W11** (finding 6) — and its effort table carries the
     actuals, with no em dashes introduced (rule 13).
 
@@ -1085,6 +1353,19 @@ place: **W8 runs last** regardless, alone, on a cluster you are willing to lose.
 developed on compose — seconds to start, no cluster, instant file propagation against the
 cluster's ~60s ConfigMap delay, and the same rules, simulator and dashboards. Build on
 compose, confirm on kind, and the cloud targets then need a cost banner rather than new code.
+
+⚠️ **Two environment facts the spike hit before it got that far, both cheap to design around
+and expensive to debug** (2026-08-07):
+
+- **`docker compose` can be absent while `docker` works.** The plugin is separate, and the
+  `compose` target's own precondition already tests for it (`Taskfile.yml:465`). A drill that
+  assumes compose is reachable because Docker is will fail in a way that reads like a stack
+  problem. The whole stack is reproducible with plain `docker run` on one user-defined
+  network if it comes to it, which is what `spike/stale_e2e.sh` does.
+- **`colima` does not mount macOS's `/var/folders`**, so a bind mount from `mktemp -d` fails
+  at container start with `not a directory` — a message that reads as a file-versus-directory
+  bug and is really a mount-namespace one. Stage working files **under the repo**, which is
+  inside the VM's view on both colima and Docker Desktop.
 
 W2 before W3 because the absence result is what makes staleness interesting: you have to
 show the alert cannot see it before building the thing that can. W4 reuses W2's state, so run
