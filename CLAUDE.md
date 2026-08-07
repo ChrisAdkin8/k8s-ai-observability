@@ -22,6 +22,7 @@ rig knows the right answer.
 | `scripts/check-required-checks.py` | the live `main` ruleset vs `required-checks.txt`, including whether it is still **enforcing**; `--selftest` over `tests/fixtures/rulesets.json` |
 | `scripts/check-green-ci.py` | the publish gate: polls the check runs on the commit being tagged and refuses a release unless every required check passed. stdlib only, so the release path pulls in no `gh`; `--selftest` over `tests/fixtures/check-runs.json` |
 | `tests/` | what the no-cluster gates consume: `rules/` promtool cases, `contracts/` the DCGM surface, `fixtures/` the inputs the `--selftest`s run on — including the deliberately-wrong ones that make rule 18 mechanical |
+| `scripts/check-second-copy.py` | refuses a second committed copy of a dashboard, rule file or the simulator — the rule `chart-build.py`'s whole build step exists to keep; `--selftest`. Ran only in CI until 2026-08-07, which is how it sat red on `main` for a day |
 | `scripts/registry-cache.sh` | opt-in pull-through image caches for `local`; `kind-up.sh` mirrors only the ones actually running, so the default path is unchanged |
 | `docs/ci.md` + `docs/releasing.md` | what CI proves; how to cut a release without breaking it |
 | `docs/development-method.md` | how work is specified before it is written: the prompt file, the review round, the spike. Owns the loop this file's "Review discipline" points at |
@@ -32,7 +33,7 @@ rig knows the right answer.
 | `kind/gpu-sim.yaml` | local cluster — **single node** |
 | `compose/` | the Kubernetes-free path, and the **second** simulator: `gpu-metrics-sim.py` produces the DCGM surface that `compose-selftest` grades against `tests/contracts/` |
 | `.claude/agents/` + `.claude/skills/` | the stage-2 review harness: `prompt-fact-checker`, fanned out one per section by the `/review-prompt` skill. Only `settings.local.json` is ignored, so this ships |
-| `Taskfile.yml` | **`task preflight`** is the gate before landing; also `selftest`, `compose-selftest`, `doc-claims`, `sigpipe`, `shellcheck`, `action-shell`, `required-checks-test`, `green-ci-test`, `rule-tests`, `drift-test`, `chart`, `dashboards`, `compose`, `cache:*`, `outstanding`, `prompt-review` |
+| `Taskfile.yml` | **`task preflight`** is the gate before landing; also `selftest`, `compose-selftest`, `doc-claims`, `sigpipe`, `second-copy`, `shellcheck`, `action-shell`, `required-checks-test`, `green-ci-test`, `rule-tests`, `drift-test`, `chart`, `dashboards`, `compose`, `cache:*`, `outstanding`, `prompt-review` |
 | `taskfiles/target.yml` | every `local:` / `eks:` / `gke:` task — one file included three times with `CLOUD` set, so editing `Taskfile.yml` does not touch them |
 | `Makefile` | a second entry point over the same `scripts/`, for anyone without Task. ⚠️ **Unverified:** whether to keep both — its own header says to standardise on one and delete the other, and that has only ever been inherited |
 

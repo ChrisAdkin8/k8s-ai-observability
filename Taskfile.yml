@@ -260,6 +260,16 @@ tasks:
       - python3 scripts/check-sigpipe.py --selftest
       - python3 scripts/check-sigpipe.py
 
+  # ⚠️ THIS RAN ONLY IN CI UNTIL 2026-08-07, WHICH IS HOW IT SAT RED ON `main` FOR A
+  # DAY. It was inline bash in the chart job, needing no cluster, no cloud and no
+  # Docker — everything preflight covers — so a local gate could not see it and the
+  # job that could is not a required check. One implementation, two callers now.
+  second-copy:
+    desc: Refuse a second committed copy of a dashboard, rule file or the simulator
+    cmds:
+      - python3 scripts/check-second-copy.py --selftest
+      - python3 scripts/check-second-copy.py
+
   # The third layer of shell linting. `shellcheck` above covers scripts/*.sh and CI's
   # actionlint covers .github/workflows/ — neither reaches a composite action, because
   # actionlint only models workflow files and refuses to parse one.
@@ -295,6 +305,7 @@ tasks:
       - task: green-ci-test
       - task: doc-claims
       - task: sigpipe
+      - task: second-copy
       - task: shellcheck
       - task: action-shell
       - task: rule-tests
