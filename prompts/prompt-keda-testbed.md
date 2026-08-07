@@ -342,15 +342,21 @@ observed afterwards.
 ```
 ./scripts/install.sh eks                  # exactly as it behaves today
 ./scripts/install.sh gke --with-keda      # + KEDA + ScaledObject
-./scripts/install.sh local --with-keda --skip-monitoring
+KPS_RELEASE=<name> ./scripts/install.sh local --with-keda --skip-monitoring
 ```
 
-⚠️ **The third line still needs its prerequisite stated.** KEDA's Prometheus scaler reads a
-Prometheus API, and `--skip-monitoring` is precisely the flag that does not install one — so
-on a fresh local cluster that command produces a ScaledObject with nothing to scale on. The
-combination is valid only against a BYO stack (`KPS_RELEASE=<name>`, CLAUDE.md). Either say
-so beside the example or drop the flag from it; as written it reads as a supported path.
-Raised by CodeRabbit on PR #39.
+⚠️ **The third line needs a Prometheus that this command does not install, hence
+`KPS_RELEASE`.** KEDA's Prometheus scaler reads a Prometheus API to get
+`vllm:num_requests_waiting`, and `--skip-monitoring` is precisely the flag that installs no
+monitoring stack. On a fresh cluster the two together produce a ScaledObject with nothing to
+scale on — it does not fail loudly, it just never scales, which is the worst of the three
+outcomes. The combination is only valid against a stack that is already there, which is what
+`KPS_RELEASE=<name>` points at (CLAUDE.md, cluster loop). **W2's acceptance path must not use
+this line on a fresh cluster.**
+
+⚠️ ~~The third line still needs its prerequisite stated.~~ **DONE — 2026-08-07, the example
+now carries `KPS_RELEASE` and the reason.** Raised by CodeRabbit on PR #39, which read the
+flag combination as a supported greenfield path, because as written it was.
 
 Convert the `case "${2:-}"` to a loop over `"$@"` so flags compose, keeping the strict
 unknown-argument rejection. `--with-keda` installs the chart and applies the ScaledObject;
