@@ -121,6 +121,62 @@ tasks:
     cmds:
       - ./scripts/rule-tests.sh
 
+  # THE COLD PASS of a prompt review — the half a subagent cannot do.
+  #
+  # `/review-prompt` fans out prompt-fact-checker subagents to verify citations and
+  # numbers. That half is mechanical and parallelisable, and a subagent is the right
+  # tool for it. This is the other half: assumptions stated as facts, and costs the
+  # prompt has not counted.
+  #
+  # ⚠️ IT RUNS A SEPARATE `claude -p` PROCESS ON PURPOSE, and a forked subagent is
+  # NOT a substitute. A subagent is briefed by the author, who chooses what it is
+  # told and which files it is pointed at, which is the exact channel the fresh
+  # session exists to close. This process starts cold: it gets CLAUDE.md and the
+  # prompt file and nothing else. See docs/development-method.md, stage 2.
+  #
+  # ⚠️ The cost is the point, not a defect. If a cold reader cannot work through the
+  # prompt without redoing the digging that produced it, the prompt is not self
+  # contained — and that is the most valuable finding this target can return.
+  prompt-review:
+    desc: 'Cold-read review of a prompt file (task prompt-review -- prompts/prompt-x.md)'
+    silent: true
+    cmds:
+      - |
+        f='{{.CLI_ARGS}}'
+        if [ -z "$f" ]; then
+          echo "usage: task prompt-review -- prompts/prompt-<subject>.md" >&2
+          echo "  the mechanical half is /review-prompt inside a session; this is the cold pass" >&2
+          exit 2
+        fi
+        if [ ! -f "$f" ]; then
+          echo "ERROR: no such prompt file: $f" >&2
+          echo "  available:" >&2
+          ls prompts/*.md 2>/dev/null | sed 's/^/    /' >&2
+          exit 1
+        fi
+        if ! command -v claude >/dev/null 2>&1; then
+          echo "ERROR: 'claude' not found on PATH — this target IS the separate session." >&2
+          exit 1
+        fi
+        echo "==> cold pass over $f (a new process, no context from this one)"
+        claude -p "Review $f against this repository. You have not seen the work that
+        produced it, and that is deliberate: report only what a cold reader can find.
+
+        Look for exactly two things.
+        1. Assumptions presented as facts. Anything asserted about behaviour that
+           nothing here has observed, and that no cited file settles.
+        2. Costs the prompt has not counted. A change touching files it does not
+           mention, a check that will go red as a consequence, a step whose effort
+           is priced as if the hard part were absent.
+
+        Do NOT verify file:line citations or derived numbers. Subagents already did
+        that, and repeating it wastes the one thing you have that they do not, which
+        is that you were never told what to think.
+
+        If any part of the prompt cannot be followed without information it does not
+        contain, say so first and name what is missing. A prompt that needs its
+        author present is not finished."
+
   # The MATCHING RULES of the weekly upstream drift check, against a committed
   # fixture instead of against upstream — so it needs no network and cannot drift
   # with the very input it exists to pin. It covers the `_total` suffix rule,

@@ -1,209 +1,153 @@
 # How this code is developed
 
-This repository is a GPU free test bench for AI observability. The simulator is the
-instrument, and **verification is the product**. That distinction sets the method: the work
-is not finished when something runs, it is finished when there is a check that would go red
-if it stopped being true.
-
-Everything here is built the same way: a written specification first, an adversarial review
-of that specification, a throwaway spike to settle whatever the review could not, a revision
-of the specification with what the spike found, and only then the implementation that lands
-on `main`.
-
-The specification is called a **prompt file**. It is the unit of work here, and it is the
-artefact that gets the most scrutiny, because a defect in a prompt file becomes a defect in
-everything written from it.
+The simulator here is the instrument, and **verification is the product**. Work is finished
+not when something runs, but when a check exists that would go red if it stopped being true.
+That standard covers how work is specified too, because **an invented number presented as a
+modelled one is the exact failure this repo exists to prevent**. The specification is a
+**prompt file**, and it gets more scrutiny than the code written from it: a defect there
+becomes a defect in everything downstream.
 
 ## The loop
 
-| Stage | What happens | Where it lives |
+| Stage | What happens | Where |
 |---|---|---|
-| 1. Cut the prompt | The work is specified in full before any code is written | `prompt-<subject>.md` in the repo root |
-| 2. Critical review | Every claim, citation and number in the prompt is checked against the tree | same file, revised in place |
-| 3. Spike | A time boxed experiment on a dedicated branch settles the empirical questions | `spike/<subject>` branch |
-| 4. Fold findings back | What the spike learned rewrites the prompt, including anything it proved wrong | same file, revised again |
-| 5. Implement | The revised prompt drives the real change, on its own branch | feature branch, landed by PR |
+| 1. Cut the prompt | The work is specified before any code is written | `prompts/prompt-<subject>.md` |
+| 2. Review | Claims and numbers checked against the tree; assumptions challenged | same file, revised |
+| 3. Spike | A throwaway experiment settles what reading cannot | a branch, not merged |
+| 4. Fold back | What the spike found rewrites the prompt | same file, revised again |
+| 5. Implement | The revised prompt drives the change | feature branch, landed by PR |
 
-A prompt is not considered good enough to build from until stages 2, 3 and 4 have happened.
-The measure of a good prompt is not that it reads well. It is that an implementer following
-it does not discover, three hours in, that a load bearing assumption in it was wrong.
+⚠️ **Scale the loop to the change.** A typo, a log line or a version bump does not get a
+prompt file. If you could describe the diff in one sentence, skip the plan. The full loop
+earns its cost when the approach is uncertain, when several files move together, or when the
+change touches something that fails silently.
 
-## Stage 1: cutting the prompt
+Stages 1 and 2 are long standing. Stage 3 was added on 2026-08-06 with one application so
+far, so it is a convention being set rather than described.
 
-Prompt files are produced with **Claude Opus 5 at the `xhigh` reasoning effort setting**, and
-each one is written in a **fresh session with a clean context window**.
+## Stage 1: cut the prompt
 
-The fresh session is deliberate rather than incidental. A model that has just spent a long
-session implementing something carries that work as context, and reviewing or respecifying
-inside the same window anchors on decisions already made. The repository has seen this
-concretely: `CLAUDE.md`'s review discipline records that same author re-review has
-demonstrated anchoring, which is also why landing through a pull request is preferred, so
-that non-author eyes see the change.
+**Start by being interviewed, not by writing.** Ask the model to interview you about
+implementation, edge cases and tradeoffs first. It raises what you had not considered, which
+is the same defect class stage 2 catches later and more expensively.
 
-Every freshly cut prompt follows the **house style** set out in `CLAUDE.md` under "Prompt
-files", which owns the definitive list. In summary, a prompt carries:
+Prompts are cut with **Claude Opus 5 at `xhigh` effort** (as of 2026-08-06), in a **fresh
+session**, for two independent reasons:
 
-- numbered **W items**, one per piece of work;
-- a **Background of verified facts**, each with a `file:line` citation and the date it was
-  read, so a stale fact can be spotted rather than inherited;
-- an **effort table**, with the standing caveat that the ordering is firmer than the numbers
-  and that the largest line should be re derived before anyone plans around it;
-- **Non goals**, which are as load bearing as the goals;
-- **acceptance criteria written before the work**, not after it;
-- instruments priced as code plus 25 to 35 percent verification, because the selftest is
-  reliably where these estimates overrun.
+- **Anchoring.** A window that just implemented something defends its own decisions.
+  `CLAUDE.md` records that same author re-review has demonstrated this.
+- **Context.** Performance degrades as a context window fills. A session that has been
+  exploring for an hour is a worse author than one that has not.
 
-Prompts are written **one work item ahead**. Implementing the current item is what makes the
-next item's prompt honest, because the current item is where the assumptions get tested.
+`CLAUDE.md` under "Prompt files" owns the house style.
 
-Prompt files are currently gitignored. `CLAUDE.md` carries the open question about whether
-that should remain so, and owns it; it is not restated here.
+Prompts are written **one item ahead**, because implementing the current item is what makes
+the next one's prompt honest.
 
-## Stage 2: the critical review
+They live in `prompts/` and are **tracked**, since context worth having is context you commit.
+That also puts them inside `check-doc-claims.py`, which scans tracked markdown, so a prompt
+is now held to the same prose against code checks as the docs. Its first run on them found
+three citing a dashboard id this repo has never had.
 
-The prompt is then reviewed critically and thoroughly, against the tree rather than against
-itself. In practice this round is looking for four things:
+## Stage 2: review
 
-1. **Citations that do not say what the prompt claims they say.** Every `file:line` is opened
-   and read. Line numbers drift, and a confident citation to the wrong line is worse than no
-   citation.
-2. **Numbers that were inherited rather than derived.** A figure copied from another document
-   is a fork waiting to disagree with its source.
-3. **Assumptions presented as facts.** Anything the prompt asserts about behaviour that has
-   not been observed is marked as an assumption or moved into the spike.
-4. **Costs the prompt has not counted.** A change that touches five files should say so, and
-   a check that will go red as a consequence should be expected rather than discovered.
+Four things to find:
 
-One round is the standard. `CLAUDE.md` states why: after a single adversarial round the
-remaining risk is empirical, such as a timing, a default, or a command's exact syntax, and a
-desk cannot settle those. The first hours of implementation can, which is what the spike is
-for.
+1. **Citations that do not say what the prompt claims.** Line numbers drift, and a confident
+   citation to the wrong line is worse than none.
+2. **Numbers inherited rather than derived.** A figure copied from another document is a fork
+   waiting to disagree with its source.
+3. **Assumptions presented as facts.** Anything asserted about behaviour nobody has observed
+   is marked as an assumption or moved into the spike.
+4. **Costs not counted.** A change touching five files should say so, and a check that will
+   go red as a consequence should be expected rather than discovered.
+
+⚠️ **Grade the findings, and expect some to be noise.** A reviewer asked to find gaps will
+find some whether or not any exist, because that is the instruction. Chasing all of them
+produces defensive over-engineering. A finding counts if it affects correctness or a stated
+requirement; saying which do not is part of the review.
+
+⚠️ And when a new check disagrees with old code, **suspect the instrument before the world.**
+The check is the least tested thing present.
+
+### Who reviews what
+
+The halves want different instruments, and the difference is who supplies the criteria.
+
+| Reviewing | Instrument | Why |
+|---|---|---|
+| Points 1 and 2: citations, numbers | **Subagents**, one per section | Objective and parallel. Supplying criteria cannot bias "does line 332 say this" |
+| Points 3 and 4: assumptions, costs | **A cold session**, outside this one | Here the author's framing is the suspect, and a subagent is briefed by the author |
+
+The rule generalises. **Reviewing a diff against stated criteria is a subagent's job**, since
+the implementing session gets the gaps directly. **Reviewing the specification is not**,
+because nothing checks a plan except judgement, and the author cannot supply that without
+contaminating it.
+
+The cold read is a test rather than a cost. The prompt is meant to be the context: its
+Background carries every fact with a citation and a date, so a reader who never saw the
+original exploration can still check it. **If a cold reader cannot work through the prompt
+without redoing the digging behind it, the prompt is not finished.** A subagent hides that,
+because the parent still holds the context papering over the gap.
+
+**One round, then build.** After a single adversarial round the remaining risk is empirical:
+a timing, a default, a command's exact syntax. A desk cannot settle those. The spike can.
 
 ## Stage 3: the spike
 
-**A spike is a short, time boxed, throwaway experiment whose only purpose is to answer
-questions that reading cannot.** It is named after the woodworking sense: you drive something
-through the material to find out what is on the other side, and you do not expect to keep it.
+**A spike is a short, throwaway experiment whose only purpose is to answer questions that
+reading cannot.**
 
-What defines a spike here:
+- **Its own branch**, not intended to merge.
+- **Throwaway by design.** The output is knowledge. Anything worth keeping is rewritten
+  properly in its real place in the tree, as part of the implementation.
+- **Bounded before it starts.** If it turns into implementation, it has stopped being a spike.
+- **Cheapest empirical version first.** A question settleable offline in seconds is not
+  settled on a cluster in minutes. This repo has been wrong about that: a question priced at
+  a day was answered in twenty minutes by running one container.
+- **Evidence, not opinions**, reproducible by rerunning a script, and driven to failure
+  deliberately before being trusted.
 
-- **It runs on its own branch**, never on `main`, and it is not expected to merge.
-- **It is throwaway by design.** The output is knowledge, not code. Anything from a spike that
-  turns out to be worth keeping is rewritten properly as part of the real implementation, in
-  its proper place in the tree.
-- **It is bounded before it starts.** A spike answers a listed set of questions and stops. If
-  it turns into implementation, it has stopped being a spike.
-- **It prefers the cheapest empirical version of each question.** Where a question can be
-  settled offline in seconds, it is not settled on a cluster in minutes. This repository has
-  been wrong about that at least once: a question priced at a day was answered in twenty
-  minutes by running one container.
-- **It produces evidence, not opinions.** A spike result is a measured number or an observed
-  behaviour, ideally reproducible by rerunning a script.
+## Stage 4: fold the findings back
 
-The spike also gives the prompt's assertions their first real test. A check that has never
-failed is a guess, so spike work drives its own assertions to failure deliberately before
-trusting them, exactly as the rest of the repository does.
+Whatever the spike found rewrites the prompt, including whatever it contradicted: a design
+confirmed with its numbers, a design refuted with the evidence, an estimate moved, or a claim
+elsewhere found wrong, so correcting it joins the work. A prompt that survives its spike
+unchanged is slightly suspicious.
 
-## Stage 4: folding the findings back
+## Stage 5: implement
 
-Whatever the spike found rewrites the prompt, and this includes findings that contradict it.
-A prompt that survives its spike unchanged is unusual and slightly suspicious. Typical
-outcomes:
+`task preflight` is the gate before anything lands. It runs every check needing no cluster,
+no cloud and no Docker, and exists because a meaningful share of this repo's early commits
+were corrections of work already on `main`. Landing by pull request is preferred, which also
+draws a CodeRabbit review, the practical source of non author eyes on a one author repo.
 
-- a design is confirmed, and the prompt gains the measured numbers that confirm it;
-- a design is refuted, and the prompt gains the corrected approach plus the evidence;
-- an estimate moves, and the effort table records the new figure;
-- a claim in another document turns out to be wrong, and correcting it becomes part of the
-  work the prompt specifies.
+⚠️ **The arrow points both ways.** Implementation that contradicts the prompt is information,
+not insubordination: correct the prompt. If the same problem needs correcting twice, the
+context is polluted with failed approaches, and a fresh session with a better prompt beats
+continuing.
 
-Only after this revision is the prompt considered good enough to develop from.
+## The disciplines underneath
 
-## Stage 5: implementation
+Each is a rule in `CLAUDE.md`, which owns the detail.
 
-The implementation runs from the revised prompt on its own branch, in commits of one logical
-change each, with the subject stating the change and the body carrying the reasoning. The
-commit log is part of the documentation here, not an afterthought.
+| | The rule, in one line |
+|---|---|
+| **6** | The expectation is written before the observation. A threshold chosen after seeing the data is not a test, and acceptance criteria written first are the same rule at a larger size |
+| **18** | Break it before you trust it. An assertion that only ever passes is not an assertion, so whatever a check watches gets broken deliberately and confirmed red first |
+| **11** | One logical change per commit. The subject states the change and the body carries the reasoning, because the commit log is documentation here rather than an afterthought |
 
-`task preflight` is the gate before anything lands: it runs every check that needs no
-cluster, no cloud and no Docker, and it exists because a meaningful share of this
-repository's early commits were corrections of work already on `main`, most of which those
-checks would have caught.
+## What the harness does for you
 
-Landing by pull request is preferred, for the non author review reason given above. A pull
-request also draws an automated review from CodeRabbit, which is the practical source of non
-author eyes on a repository with one author.
-
-## Four disciplines that run through every stage
-
-These are not stages. They apply at every scale, from a single assertion to a whole prompt,
-and each one is stated as a numbered rule in `CLAUDE.md`, which owns them.
-
-### The expectation is written before the observation
-
-At the smallest scale this is rule 6: the expected value of a check goes in its comment
-before the check is run, because a threshold chosen after seeing the data is not a test. At
-the largest scale it is the same idea, which is why a prompt's acceptance criteria are
-written before the work rather than after it. A drill's expected result, a check's bound and
-a work item's definition of done are the same discipline at three sizes.
-
-### Break it before you trust it
-
-Rule 18: an assertion that only ever passes is not an assertion. Before a new check is
-trusted, whatever it watches is broken deliberately and the check is confirmed to go red,
-then repaired. This is not a formality here. The simulator's selftests pin bugs that were
-reintroduced on purpose to prove the selftest fails on them, and CI drives the chart's render
-time assertions and the negative case of `helm test` to failure by design.
-
-Rules 5 and 6 are the two specific cases of it: poll rather than single shot, because a check
-that races its producer passes for the wrong reason, and write the expected value first.
-
-### Reference, do not restate
-
-A number or a fact stated in two places is a fork waiting to disagree. It is stated once, in
-the file that owns it, and everything else points there. `check-doc-claims.py` exists because
-prose kept forking from code anyway, and it mechanises the cases that recur, such as counts
-in documentation and identifiers quoted in more than one page.
-
-This page is written to that rule. It names rules by number and points at `CLAUDE.md` rather
-than reproducing them, so that a rule changing does not leave a stale copy here.
-
-### Open items are marked where they live, and struck rather than deleted
-
-There is no TODO file, and adding one would be a mistake. Open work carries a marker in the
-file that owns it, and `task outstanding` lists them by matching a curated set of phrases
-kept in `Taskfile.yml`. The tool matches phrasing rather than the warning glyph, so an item
-worded in new language is silently missed, and matching an existing phrasing or extending the
-list is part of marking one.
-
-When an item is finished it is struck through and annotated with what happened and when. It
-is not deleted, because the reasoning outlives the action, and the record of why something
-was open is usually worth more later than the item itself was.
+| Stage | Mechanism |
+|---|---|
+| The mechanical half of stage 2 | `.claude/agents/prompt-fact-checker.md`, fanned out by `/review-prompt` |
+| The cold half of stage 2 | `task prompt-review -- prompts/prompt-<subject>.md`, a separate `claude -p` |
+| Standing context | `CLAUDE.md`, loaded every session, kept short so its rules are not lost in noise |
 
 ## A note on em dashes
 
-Several checks and conventions in this repository remove em dashes from particular files, and
-`check-doc-claims.py` enforces it so that the rule does not have to be applied by hand.
-
-**This is purely the repository owner's preference for conventional dashes.** It carries no
-other meaning, and nothing should be inferred from it beyond a house style choice about
-punctuation, in the same category as a preference for a particular quote style or line
-length. It is mechanised only because it had to be applied by hand several times before it
-was, which is the same reason any other recurring correction here ends up in a check.
-
-This page follows that preference throughout.
-
-## Why the method is shaped like this
-
-Two mottoes in `CLAUDE.md` explain most of it.
-
-**When a reading is surprising, suspect the instrument before the world.** A new check, a new
-drill or a new script is the least tested thing in the room. When it disagrees with something
-that has been running for months, the new thing is the likely defect, and the first response
-is to doubt it rather than to publish what it said.
-
-**An invented number presented as a modelled one is the exact failure this repository exists
-to prevent.** This is the reason for nearly every convention above: the citations with dates
-in a prompt's Background, the requirement that a spike produce measured values rather than
-estimates, the effort tables that say which figures are derived and which are guesses, and
-the checks that compare prose against the code it describes. A test bench that cannot tell
-its own invented numbers from its modelled ones has no business grading anyone else's.
+One check keeps em dashes out of the pages a stranger reads first, listed in `EM_DASH_FREE`
+in `check-doc-claims.py`. **This is purely the repository owner's preference for conventional
+dashes**, mechanised only because it had to be applied by hand three times first, which is
+how everything here ends up in a check.

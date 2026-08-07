@@ -23,11 +23,13 @@ rig knows the right answer.
 | `scripts/check-green-ci.py` | the publish gate: polls the check runs on the commit being tagged and refuses a release unless every required check passed. stdlib only, so the release path pulls in no `gh`; `--selftest` over `tests/fixtures/check-runs.json` |
 | `scripts/registry-cache.sh` | opt-in pull-through image caches for `local`; `kind-up.sh` mirrors only the ones actually running, so the default path is unchanged |
 | `docs/ci.md` + `docs/releasing.md` | what CI proves; how to cut a release without breaking it |
+| `docs/development-method.md` | how work is specified before it is written: the prompt file, the review round, the spike. Owns the loop this file's "Review discipline" points at |
 | `.github/actions/verify-chart/` | the chart's cluster verification, called by CI **and** the publish workflow |
 | `scripts/config.sh` | single source for version pins, names, labels; asserts cross-file invariants |
 | `charts/` + `scripts/chart-build.py` | Helm chart, assembled into gitignored `dist/`. ⚠️ `charts/k8s-ai-observability/README.md` **ships inside the published artifact** and renders on Artifact Hub, where there is no repo: no relative links out, no `task chart`. Contributor detail lives in `charts/README.md`, a sibling `helm package` never picks up |
 | `terraform/{eks,gke}` + `terraform/modules/contract` | clusters; `contract` holds **cross-cloud identity constants only** — sizing stays in the roots |
 | `kind/gpu-sim.yaml` | local cluster — **single node** |
+| `.claude/agents/` + `.claude/skills/` | the stage-2 review harness: `prompt-fact-checker`, fanned out one per section by the `/review-prompt` skill. Only `settings.local.json` is ignored, so this ships |
 | `Taskfile.yml` | **`task preflight`** is the gate before landing; also `selftest`, `compose-selftest`, `doc-claims`, `sigpipe`, `rule-tests`, `drift-test`, `chart`, `dashboards`, `compose`, `cache:*`, `outstanding` |
 
 ## Iron rules
@@ -132,10 +134,11 @@ rig knows the right answer.
   gates the five expensive jobs. **Timings live in `docs/ci.md`, not here** — with the run
   id they came from, which you quote with any figure you take from them. They sat in this
   file until 2026-08-05 and drifted: a wrong run id and a total no run produced.
-- **Review discipline:** specs and plans get **one adversarial review round, then
-  implementation** — after one round the remaining risk is empirical (a timing, a default,
-  a command's exact syntax) and a desk can't settle it; the first hours of implementation
-  can. Prefer landing via PR: CodeRabbit provides non-author eyes, and same-author
+- **Review discipline:** specs and plans get **one adversarial review round, then build** —
+  after one round the remaining risk is empirical (a timing, a default, a command's exact
+  syntax), a desk can't settle it, and **the spike is what does**.
+  `docs/development-method.md` owns the loop, including when a change is small enough to
+  skip it. Prefer landing via PR: CodeRabbit provides non-author eyes, and same-author
   re-review has demonstrated anchoring. And **reference, don't restate**: a number or fact
   stated in two places is a fork waiting to disagree — state it once in the file that owns
   it and point there (`doc-claims` exists because prose kept forking from code).
