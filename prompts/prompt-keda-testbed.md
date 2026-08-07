@@ -339,6 +339,13 @@ observed afterwards.
 
 **W4.1 Opt-in at two layers, and the default is today's behaviour.**
 
+⚠️ **Every line below except the first describes the contract AFTER W4.1, not one you
+can run today.** `install.sh` parses `${2:-}` only and rejects anything it does not
+recognise (Background, `scripts/install.sh:30-37`), so today it does not know
+`--with-keda` at all, and the third line would exit on the *first* flag without ever
+reaching the second. The loop over `"$@"` further down is the change that makes these
+valid. Do not lift them into an acceptance check before it lands.
+
 ```
 ./scripts/install.sh eks                  # exactly as it behaves today
 ./scripts/install.sh gke --with-keda      # + KEDA + ScaledObject

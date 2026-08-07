@@ -296,12 +296,24 @@ def main() -> int:
     except (urllib.error.URLError, json.JSONDecodeError, OSError) as exc:
         print(f"::error::could not read the rulesets for {repo}: {exc}", file=sys.stderr)
         return 2
+    # ⚠️ live_checks MAKES ITS OWN NETWORK CALLS, so this needs the transport errors
+    # too, not just the shape ones. It fetches the full body of every branch ruleset —
+    # the list endpoint carries neither `conditions` nor `rules` — and any of those
+    # requests can fail exactly as the list request above can. Catching only KeyError
+    # and TypeError let a mid-run 502 print a traceback and exit 1, which reads as
+    # "drift found" against a contract that reserves 1 for a real answer and 2 for
+    # "could not check". A stack trace is not a verdict on the ruleset.
     try:
         live, enforcing, inactive, wide = live_checks(stubs, get_json)
     except (KeyError, TypeError) as exc:
         print(f"::error::the rulesets API returned a shape this script does not "
               f"understand ({exc!r}) — it cannot report on protection it cannot "
               f"parse.", file=sys.stderr)
+        return 2
+    except (urllib.error.URLError, json.JSONDecodeError, OSError) as exc:
+        print(f"::error::could not read a ruleset body for {repo}: {exc}. The list "
+              f"was readable, so this is a partial read — reporting on it would "
+              f"describe protection this run never saw.", file=sys.stderr)
         return 2
     return report(recorded(), live, enforcing, inactive, wide)
 
@@ -429,6 +441,28 @@ def selftest() -> int:
     live, enf, inact, wide = live_checks(fx["list"], fetch_from(fx["bodies"]))
     check(report(want, live, enf, inact, wide) == 0,
           "an ORG-level ruleset targeting ~ALL is not reported as our scope problem")
+
+    # 11b. ⚠️ THE BODY FETCH IS A NETWORK CALL, AND main() HAS TO CATCH WHAT IT THROWS.
+    #      live_checks fetches every branch ruleset's body, so a mid-run 502 raises a
+    #      transport error out of it — not the KeyError/TypeError that main() used to
+    #      catch alone. That printed a traceback and exited 1, which reads as "drift
+    #      found" against a contract reserving 1 for a real answer and 2 for "could not
+    #      check". This pins the error CLASS at the boundary.
+    #      ⚠️ main()'s handler itself is not covered here: it calls get_json directly
+    #      rather than taking it as an argument, so there is no seam to inject through.
+    #      What is asserted is that the exception reaching it is one it now names.
+    fx = load("active-main")
+
+    def exploding_fetch(_url):
+        raise urllib.error.URLError("simulated 502 on the ruleset body")
+
+    try:
+        live_checks(fx["list"], exploding_fetch)
+        raised = None
+    except Exception as exc:                                  # noqa: BLE001 - that IS the test
+        raised = exc
+    check(isinstance(raised, (urllib.error.URLError, json.JSONDecodeError, OSError)),
+          "a failed body fetch raises a transport error main() names, not a bare crash")
 
     # 12. The live tree. ~ALL was removed on 2026-08-07; if it comes back, this is the
     #     assertion that says so before a contributor discovers it.
