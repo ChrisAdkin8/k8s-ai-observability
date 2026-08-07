@@ -125,6 +125,16 @@ rig knows the right answer.
     here pins bugs that were reintroduced deliberately to prove it fails on them, and CI
     drives the chart's render-time assertions and `helm test`'s negative case to failure on
     purpose. A check that has never failed is a guess.
+    ⚠️ **A SELFTEST OVER FIXTURES YOU WROTE PROVES THE RULE YOU INTENDED, NOT THE RULE YOU
+    SHIPPED** — so run a new check against the **real tree** as well, and treat its first
+    live finding as evidence about the check before evidence about the code.
+    `check-word-splitting.py` on 2026-08-07 is the case: its selftest was green through
+    three defects, because every fixture confirmed a behaviour the author already believed
+    (one assignment per line, and `$name` never written `${name}`). The tree found the one
+    the fixtures could not, and only because fixing a different bug widened the scan.
+    Two checks that same day did the same thing: a first draft reported **29 findings on 12
+    correct scripts**, and `check-required-checks.py`'s fixtures carried a response shape
+    GitHub does not return, so its `release/*` filter had never once filtered live data.
 
 ## Working loop
 
