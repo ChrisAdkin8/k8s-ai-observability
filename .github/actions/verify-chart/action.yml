@@ -243,10 +243,27 @@ runs:
     # to say about the expression above it. It does now — a `job.` reference in a
     # composite action is a hard error there, with a selftest.
     #
-    # `steps.<id>.outcome` IS correct in a composite action, hence the six ids. A step
-    # that never ran has no entry and compares unequal, so the OR is safe as well as
-    # explicit. `always()` itself works here — runner#1682's reporter used it, and their
-    # step ran; only the value it read was wrong.
+    # `steps.<id>.outcome` IS correct in a composite action, hence the six ids.
+    # `always()` itself works here — runner#1682's reporter used it, and their step ran;
+    # only the value it read was wrong.
+    #
+    # ⚠️ THE POLARITY IS `!= 'success'`, NOT `== 'failure'`, AND THE DIFFERENCE IS THE
+    # RUN YOU MOST NEED THE BUNDLE FROM. `timeout-minutes` expiry CANCELS the job, and a
+    # cancelled step's outcome is `cancelled` — no `== 'failure'` term is true for it, so
+    # the guard collected nothing from exactly the run that walked all 50 minutes of
+    # bounded waits. This read as correct for the same reason the `job.status` bug did:
+    # the failing path is the one nobody exercises.
+    #
+    # ci.yml states the same rule in prose for the compose job — "not-success covers
+    # failure, cancellation and timeout, which is why this is still not `failure()`" —
+    # and this file disagreed with it until 2026-08-07. `job.status` is unreadable here
+    # (see above), so the polarity is applied per step instead.
+    #
+    # ⚠️ Under `!=`, a step that NEVER RAN also compares unequal, so it fires too. That
+    # is wanted: it means an earlier step already failed. It is only safe because none of
+    # the six carries an `if:` — all are unconditional, so on a green run all six read
+    # `success` and the OR is false. Add a conditional step to that list and this guard
+    # starts firing on healthy runs.
     #
     # Everything below is best-effort — a broken cluster must not break the dump — and
     # the whole thing is skipped on green, because nobody opens the logs of a run that
@@ -254,12 +271,12 @@ runs:
     - name: Diagnostics
       id: diag
       if: >-
-        always() && (steps.cluster.outcome == 'failure'
-        || steps.label.outcome == 'failure'
-        || steps.kps.outcome == 'failure'
-        || steps.neg.outcome == 'failure'
-        || steps.pos.outcome == 'failure'
-        || steps.boards.outcome == 'failure')
+        always() && (steps.cluster.outcome != 'success'
+        || steps.label.outcome != 'success'
+        || steps.kps.outcome != 'success'
+        || steps.neg.outcome != 'success'
+        || steps.pos.outcome != 'success'
+        || steps.boards.outcome != 'success')
       shell: bash
       env:
         NS: ${{ inputs.kps-namespace }}
