@@ -103,6 +103,23 @@ class Rig:
                     "now": s.now, "gencount": s.profile_generation}
 
 
+# ⚠️ POLL FOR THE TRANSITION, NEVER SLEEP THROUGH IT (iron rule 5). Every wait below was
+# `time.sleep(POLL * n)` — single-shot against a racing producer. `profile_generation`
+# is bumped by the worker when it applies a profile, so it is the observable that says
+# the write LANDED rather than merely that time passed. A fixed sleep under scheduler
+# delay or slow file I/O samples before the freeze arrives; the check then fails for a
+# reason that has nothing to do with the mechanism, which is the worst kind of flake
+# because it is blamed on the thing being measured.
+def wait_for_generation(rig, at_least, deadline_s=15.0):
+    """Block until the worker has applied a profile newer than `at_least`."""
+    end = time.monotonic() + deadline_s
+    while time.monotonic() < end:
+        if rig.sample()["gencount"] >= at_least:
+            return True
+        time.sleep(0.05)
+    return False
+
+
 def q1_freeze_holds_and_thaws():
     """The whole mode: counters stop, the engine still claims work, and it lifts."""
     print("\nQ1  freeze holds the counters, and the thaw is deliverable")
@@ -111,7 +128,9 @@ def q1_freeze_holds_and_thaws():
         time.sleep(2.0)
         before = rig.sample()
         rig.write(profile(faults={"freeze": True}))
-        time.sleep(POLL * 4)
+        landed = wait_for_generation(rig, before["gencount"] + 1)
+        check(landed, "the freeze profile was applied (polled, not slept through)",
+              "profile_generation advanced")
         frozen_at = rig.sample()
         time.sleep(FREEZE_FOR)
         still = rig.sample()
@@ -127,7 +146,10 @@ def q1_freeze_holds_and_thaws():
               f"{before['gen']} -> {frozen_at['gen']}")
 
         rig.write(profile(faults={"freeze": False}))
-        time.sleep(POLL * 6)
+        thaw_landed = wait_for_generation(rig, still["gencount"] + 1)
+        check(thaw_landed, "the thaw profile was applied (polled, not slept through)",
+              "profile_generation advanced again")
+        time.sleep(POLL * 2)          # let the resumed clock actually produce tokens
         thawed = rig.sample()
         check(thawed["gen"] > still["gen"],
               "the thaw is delivered through the poll and counters resume",
@@ -163,7 +185,9 @@ def q1b_thaw_burst(gap=0.3):
                 state.stop.wait(max(0.01, min(due - (time.monotonic() - frozen_seconds), 0.5)))
         with Rig(profile(), worker_fn=w) as rig:
             time.sleep(1.0)
-            a = rig.sample()["gen"]; time.sleep(gap); b = rig.sample()["gen"]
+            a = rig.sample()["gen"]
+            time.sleep(gap)
+            b = rig.sample()["gen"]
             normal = b - a                                # a normal scrape gap
             with rig.state.lock:
                 rig.state.sim.apply_profile(
@@ -172,7 +196,9 @@ def q1b_thaw_burst(gap=0.3):
             with rig.state.lock:
                 rig.state.sim.apply_profile(
                     m.validate_profile(profile(faults={"freeze": False})))
-            c = rig.sample()["gen"]; time.sleep(gap); d = rig.sample()["gen"]
+            c = rig.sample()["gen"]
+            time.sleep(gap)
+            d = rig.sample()["gen"]
             return normal, d - c
 
     naive_normal, naive_first = one(True)
@@ -219,29 +245,49 @@ def q2_poll_cadence_on_sim_clock_wedges():
             state.stop.wait(max(0.01, min(due - (time.monotonic() - frozen_seconds), 0.5)))
 
     def freeze_then_thaw(worker_fn):
+        """(frozen gen, gen after the thaw window, did the thaw ever land).
+
+        ⚠️ THE THIRD RETURN IS THE WHOLE POINT IN THE NAIVE ARM. Both waits used to be
+        fixed sleeps, which cannot distinguish "the thaw arrived and did nothing" from
+        "the thaw never arrived" — and in the naive worker it never arrives, because the
+        profile poll keys off the frozen simulated clock. Polling to a deadline and
+        reporting that it expired turns a silence into an observation.
+        """
         with Rig(profile(), worker_fn=worker_fn) as rig:
             time.sleep(1.0)
+            base = rig.sample()["gencount"]
             rig.write(profile(faults={"freeze": True}))
-            time.sleep(POLL * 5)
+            froze = wait_for_generation(rig, base + 1)
             frozen = rig.sample()
             rig.write(profile(faults={"freeze": False}))
-            time.sleep(POLL * 10)      # 10 poll intervals of WALL clock
+            thawed_ok = wait_for_generation(rig, frozen["gencount"] + 1, deadline_s=8.0)
             after = rig.sample()
-            return frozen["gen"], after["gen"]
+            return frozen["gen"], after["gen"], (froze, thawed_ok)
 
     # ⚠️ Both arms, or this proves nothing. The first version of this check ran
     # the naive arm alone and asserted "counters did not move" -- which was true,
     # and would have stayed true if the freeze had never engaged at all. It
     # passed against a counter that was 0 for an unrelated reason.
-    n_before, n_after = freeze_then_thaw(naive_worker)
-    f_before, f_after = freeze_then_thaw(None)
+    n_before, n_after, (n_froze, n_thawed) = freeze_then_thaw(naive_worker)
+    f_before, f_after, (f_froze, f_thawed) = freeze_then_thaw(None)
 
+    check(f_froze and f_thawed,
+          "CONTROL: both profile writes were applied (polled to a deadline)",
+          "freeze landed, thaw landed")
     check(f_after > f_before,
           "CONTROL: the shipped worker() sees the thaw and counters resume",
           f"{f_before} -> {f_after}")
+
+    # ⚠️ THE TWO NAIVE ASSERTIONS SAY DIFFERENT THINGS, AND BOTH ARE NEEDED. That the
+    # counters did not move is consistent with the freeze never engaging at all. That
+    # the freeze DID land and the thaw provably did not — polled to an 8s deadline
+    # rather than slept through — is what identifies the bug as the poll cadence.
+    check(n_froze and not n_thawed,
+          "NAIVE cadence: the freeze landed, and the thaw NEVER did",
+          "polled to the deadline; profile_generation never advanced again")
     check(n_after == n_before,
-          "NAIVE cadence: the thaw is never seen, the freeze is permanent",
-          f"{POLL * 10:.1f}s of wall clock, counters still at {n_after}")
+          "NAIVE cadence: counters are still where the freeze left them",
+          f"still at {n_after}")
     print("        ^ the failure the fix prevents. Nothing errors, the pod stays")
     print("          Ready, and /metrics serves the last state forever.")
 
@@ -354,7 +400,8 @@ def q6_render_is_still_a_pure_read():
     sim = m.Simulator(m.validate_profile(profile(faults={"freeze": True})), start_time=0.0)
     sim.advance_to(120.0)
     before = sim.observations
-    sim.render(); sim.render()
+    sim.render()
+    sim.render()
     check(sim.observations == before,
           "two renders while frozen observe nothing",
           f"observations {before}")

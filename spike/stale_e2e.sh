@@ -8,7 +8,7 @@
 # cannot tell us whether a frozen tenant actually looks like that, which is the
 # whole distinction the item is built on.
 #
-# Three simulators, one Prometheus, one freeze delivered through the profile file
+# Four simulators, one Prometheus, one freeze delivered through the profile file
 # exactly as a drill would deliver it. No Kubernetes and no compose plugin.
 #
 # ⚠️ REQUIRES W3's freeze knob and W0's faults block, which do not exist yet.
@@ -22,24 +22,45 @@
 #     bash spike/stale_e2e.sh
 set -euo pipefail
 
-NET=spike-fi
+# ⚠️ PER-RUN NAMES, AND `cleanup` REMOVES ONLY WHAT THIS RUN MADE. These were fixed
+# strings — `spike-fi`, `prom-spike`, `sim-steady` — and `cleanup` deleted them
+# unconditionally. Two things follow, and both bite the person least able to explain
+# them: a second run of this script destroys the first one's containers mid-measurement,
+# and a `docker run` for a name that already exists fails outright. The names are also
+# DNS inside the network, so the Prometheus targets below carry the same suffix.
+RUN="$$"
+NET="spike-fi-$RUN"
+PROM="prom-spike-$RUN"
+TENANTS=(steady saturated driven idle)
+CREATED=()
 PROM_PORT=19090
 # ⚠️ NOT mktemp. colima mounts $HOME into the VM and does NOT mount macOS's
 # /var/folders temp root, so a bind mount from mktemp -d fails at container
 # start with a "not a directory" error that reads like a file-vs-directory bug
 # and is really a mount-namespace one. Staying under the repo keeps the host path
 # inside the VM's view on both colima and Docker Desktop.
-WORK="$(pwd)/spike/.e2e-work"
+WORK="$(pwd)/spike/.e2e-work/$RUN"   # under .e2e-work/, which is gitignored
 rm -rf "$WORK"
 SIM="$(pwd)/scripts/llm-sim.py"
 FAILURES=0
 
 cleanup() {
-  docker rm -f prom-spike sim-steady sim-saturated sim-driven sim-idle >/dev/null 2>&1 || true
+  # ⚠️ `${CREATED[@]:-}` — an unset array under `set -u` is an ERROR, not an empty
+  # list, so a failure before the first container would crash the cleanup itself.
+  for c in "${CREATED[@]:-}"; do
+    [ -n "$c" ] && docker rm -f "$c" >/dev/null 2>&1 || true
+  done
   docker network rm "$NET" >/dev/null 2>&1 || true
   rm -rf "$WORK"
 }
-trap cleanup EXIT INT TERM
+
+# ⚠️ EXIT ONLY, AND THE SIGNAL HANDLERS JUST EXIT. With `trap cleanup EXIT INT TERM`,
+# a Ctrl-C ran cleanup and then bash CARRIED ON with the next statement — against a
+# network and containers that had just been removed — before EXIT fired cleanup a
+# second time. Exiting from the handler runs the EXIT trap once, in the right order.
+trap cleanup EXIT
+trap 'exit 130' INT
+trap 'exit 143' TERM
 
 # ⚠️ ASSIGN, THEN TEST -- never `[ "$(qn "q with \"quotes\"")" = x ]`.
 # bash parses the escaped quotes inside a command substitution inside a test's
@@ -126,19 +147,21 @@ rule_files:
 scrape_configs:
   - job_name: llm-sim
     static_configs:
-      - targets: ["sim-steady:9401", "sim-saturated:9401", "sim-driven:9401", "sim-idle:9401"]
+      - targets: [$(printf '"sim-%s-'"$RUN"':9401", ' "${TENANTS[@]}" | sed 's/, $//')]
 EOF
 
 echo "== bringing up four simulators and one Prometheus =="
 docker network create "$NET" >/dev/null 2>&1 || true
-for t in steady saturated driven idle; do
-  docker run -d --name "sim-$t" --network "$NET" \
+for t in "${TENANTS[@]}"; do
+  CREATED+=("sim-$t-$RUN")
+  docker run -d --name "sim-$t-$RUN" --network "$NET" \
     -v "$SIM:/opt/llm-sim/llm_sim.py:ro" -v "$WORK/profiles:/etc/llm-sim:ro" \
     -e PYTHONUNBUFFERED=1 -e PYTHONDONTWRITEBYTECODE=1 \
     python:3.12-slim python3 /opt/llm-sim/llm_sim.py \
       --profile "/etc/llm-sim/$t.json" --poll-seconds 5 >/dev/null
 done
-docker run -d --name prom-spike --network "$NET" -p "${PROM_PORT}:9090" \
+CREATED+=("$PROM")
+docker run -d --name "$PROM" --network "$NET" -p "${PROM_PORT}:9090" \
   -v "$WORK/prometheus.yml:/etc/prometheus/prometheus.yml:ro" \
   -v "$WORK/rules:/etc/prometheus/rules:ro" \
   prom/prometheus:v3.7.3 --config.file=/etc/prometheus/prometheus.yml >/dev/null
@@ -186,8 +209,11 @@ check "$([ "$n_stale" = "0" ] && echo 1 || echo 0)" \
 # about a state that was never created. It is a COIN FLIP at the shipped rate:
 # an earlier run of this same script passed with 6 requests held.
 #
-# W6 already says the KV drill must set the arrival rate. W3 needs the same
-# sentence for the same reason, and the prompt does not carry it.
+# W6 already said the KV drill must set the arrival rate; W3 needed the same sentence
+# for the same reason and did not have it. ⚠️ IT DOES NOW — the fold-back added it to
+# prompt-fault-injection.md W3.4, so this harness is demonstrating a stated requirement
+# rather than arguing for an absent one. Left here because the finding is what produced
+# the requirement, and a reader arriving from the prompt should see where it came from.
 echo
 echo "== raising the driven tenant to 1.8 rps BEFORE freezing =="
 python3 - "$WORK/profiles/driven.json" <<'PYRATE'

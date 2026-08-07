@@ -1339,7 +1339,8 @@ Written before the work (house convention), and mapped to ROADMAP.md item 1's "D
 23. ROADMAP.md item 1 is corrected where this work proved it wrong — **including its mode
     table, which gains W9, W10 and W11** (finding 6) — and its effort table carries the
     actuals, with no em dashes introduced (rule 13).
-    ---
+
+---
 
 ## Process
 
