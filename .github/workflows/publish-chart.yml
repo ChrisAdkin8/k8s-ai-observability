@@ -158,10 +158,20 @@ jobs:
       # does not count that tag against itself. Without it a retry — same tag,
       # dispatched from a branch that has moved on — would be refused for
       # re-using a version the failed run never actually pushed.
+      # ⚠️ THROUGH `env:`, NOT INTERPOLATED. This file was the one place in the repo
+      # that broke the rule .github/actions/verify-chart/action.yml spends a paragraph
+      # stating and that codeql.yml's `actions` matrix exists to find: a `${{ }}`
+      # inside a `run:` body is substituted as TEXT before bash sees it, so a value
+      # carrying a quote or a semicolon becomes script rather than data. The value
+      # here traces back to a workflow_dispatch input validated only as starting with
+      # `v`, which `v"; …; "` satisfies. It takes write access to exploit and is
+      # therefore hygiene rather than a live hole — but the rule was already written
+      # down, and the file that writes it is called from here.
       - name: Build into dist/, strictly
+        env:
+          VERSION: ${{ steps.v.outputs.version }}
         run: |
-          python3 scripts/chart-build.py --strict-version \
-            --publishing-as "${{ steps.v.outputs.version }}"
+          python3 scripts/chart-build.py --strict-version --publishing-as "$VERSION"
 
       - name: helm lint the built chart
         run: helm lint "dist/charts/${CHART_NAME}"
@@ -209,13 +219,19 @@ jobs:
       # writing. Reading a file has neither problem, and runs tar once rather
       # than once per dashboard.
       - name: The archive actually contains the dashboards and rules
+        env:
+          TGZ: ${{ steps.pkg.outputs.tgz }}
         run: |
           set -euo pipefail
-          tgz="${{ steps.pkg.outputs.tgz }}"
+          tgz="$TGZ"
           tar tzf "$tgz" > /tmp/contents.txt
           echo "  $(grep -c . /tmp/contents.txt) entries; first 40:"
           head -40 /tmp/contents.txt | sed 's/^/    /'
-          for f in $(ls manifests/dashboards/*.json | xargs -n1 basename); do
+          # A glob, not `ls | xargs basename`: parsing ls output is what shellcheck
+          # reports as SC2011, and until actionlint joined the `fast` job nothing in
+          # this repository ever read the shell in these files to say so.
+          for path in manifests/dashboards/*.json; do
+            f=$(basename "$path")
             grep -q "/files/dashboards/$f\$" /tmp/contents.txt \
               || { echo "::error::$f is not inside the package — it was packaged from charts/ instead of dist/, or chart-build.py did not run." >&2; exit 1; }
             echo "  ok  files/dashboards/$f"
@@ -238,9 +254,12 @@ jobs:
       # side is the supported way to track a release.
       - name: helm push
         if: steps.v.outputs.pushed == 'true'
+        env:
+          TGZ: ${{ steps.pkg.outputs.tgz }}
+          OCI: ${{ steps.v.outputs.oci_repo }}
         run: |
           set -euo pipefail
-          helm push "${{ steps.pkg.outputs.tgz }}" "oci://${{ steps.v.outputs.oci_repo }}"
+          helm push "$TGZ" "oci://$OCI"
 
       # ⚠️ THE OWNERSHIP CLAIM FOR THE ARTIFACT HUB LISTING, and for an OCI
       # repository it is a REGISTRY ARTEFACT rather than a file Artifact Hub
@@ -250,16 +269,20 @@ jobs:
       # exactly like a step that worked.
       - name: Claim the Artifact Hub listing
         if: steps.v.outputs.pushed == 'true'
+        env:
+          OCI: ${{ steps.v.outputs.oci_repo }}
         run: |
           set -euo pipefail
           if grep -q 'REPLACE_ME_WITH_THE_ARTIFACT_HUB_REPOSITORY_ID' artifacthub-repo.yml; then
             echo "::warning title=Artifact Hub listing is UNVERIFIED::artifacthub-repo.yml still holds the placeholder repositoryID, so no ownership artefact was pushed. The chart lists anonymously and anyone can claim the same OCI reference. See the instructions in artifacthub-repo.yml — it needs a one-time browser step."
             exit 0
           fi
-          curl -fsSL "https://github.com/oras-project/oras/releases/download/v1.3.0/oras_1.3.0_linux_amd64.tar.gz" \
-            | tar -xz -C /tmp oras
+          curl -fsSLo /tmp/oras.tgz \
+            "https://github.com/oras-project/oras/releases/download/v${ORAS_VERSION}/oras_${ORAS_VERSION}_linux_amd64.tar.gz"
+          echo "${ORAS_SHA256}  /tmp/oras.tgz" | sha256sum -c -
+          tar -xz -C /tmp -f /tmp/oras.tgz oras
           sudo mv /tmp/oras /usr/local/bin/oras
-          oras push "${{ steps.v.outputs.oci_repo }}/${CHART_NAME}:artifacthub.io" \
+          oras push "${OCI}/${CHART_NAME}:artifacthub.io" \
             --config /dev/null:application/vnd.cncf.artifacthub.config.v1+yaml \
             artifacthub-repo.yml:application/vnd.cncf.artifacthub.repository-metadata.layer.v1.yaml
           echo "  ok  ownership artefact pushed alongside the chart"
@@ -325,17 +348,21 @@ jobs:
       # visibility switch is a repository setting no workflow can flip, so the
       # failure message says which one and where.
       - name: Pull the published chart back ANONYMOUSLY
+        env:
+          OCI: ${{ needs.publish.outputs.oci_repo }}
+          VER: ${{ needs.publish.outputs.chart_version }}
+          OWNER: ${{ github.repository_owner }}
         run: |
           set -euo pipefail
           helm registry logout ghcr.io 2>/dev/null || true
           rm -rf ~/.config/helm/registry ~/.docker/config.json || true
-          repo="${{ needs.publish.outputs.oci_repo }}"
-          ver="${{ needs.publish.outputs.chart_version }}"
+          repo="$OCI"
+          ver="$VER"
           mkdir -p /tmp/pulled
           if ! helm pull "oci://${repo}/${CHART_NAME}" --version "$ver" -d /tmp/pulled 2>/tmp/pull.err; then
             cat /tmp/pull.err
             if grep -qiE 'unauthorized|denied|authentication' /tmp/pull.err; then
-              echo "::error title=Package is not public::An anonymous pull was refused, so the package is PRIVATE. Nobody can install this chart. Fix it once at https://github.com/users/${{ github.repository_owner }}/packages/container/charts%2F${CHART_NAME}/settings -> Change visibility -> Public. This is a repository setting; no workflow can change it." >&2
+              echo "::error title=Package is not public::An anonymous pull was refused, so the package is PRIVATE. Nobody can install this chart. Fix it once at https://github.com/users/${OWNER}/packages/container/charts%2F${CHART_NAME}/settings -> Change visibility -> Public. This is a repository setting; no workflow can change it." >&2
             fi
             exit 1
           fi
