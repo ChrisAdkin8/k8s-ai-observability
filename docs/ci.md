@@ -31,7 +31,7 @@ graph LR
   B --> F
   F --> F1["(full)"]
   F --> F2["(lite)"]
-  G["vLLM upstream drift<br/>schedule + dispatch only"]
+  G["weekly upstream drift<br/>schedule + dispatch only"]
 ```
 
 Two jobs open every run and gate everything else:
@@ -41,9 +41,14 @@ pull request touches nothing but `.md` files, there is no point standing up two 
 a compose stack, so the expensive jobs are skipped.
 
 **`selftest + rule tests + shell syntax`** is the cheap one. It takes seconds, needs no
-cluster and no network, and it runs on *every* run without exception. The reasoning is worth
-knowing: a wall of green skips on a docs-only pull request tells you nothing, so at least one
-check should always have genuinely executed.
+cluster, and it runs on *every* run without exception. The reasoning is worth knowing: a wall
+of green skips on a docs-only pull request tells you nothing, so at least one check should
+always have genuinely executed.
+
+⚠️ It does need the **network**, and this page said otherwise for as long as `promtool` has
+been installed there. It fetches two small release archives, `promtool` and `actionlint`,
+both checksummed. That matters for one reason: "no network" is the property someone would
+lean on when deciding this job cannot be flaky, and it can be, if a release CDN is.
 
 Everything else hangs off those two.
 
@@ -58,10 +63,11 @@ Everything else hangs off those two.
 | `compose stack (no Kubernetes)` | the Docker Compose path works, boards load, targets are up | 10 min |
 | `helm chart (lint, render, assertions fire)` | the chart renders both ways, and every render-time assertion still *fires* | 15 min |
 | `simulator image (build both arches, smoke-test amd64)` | the image builds for amd64 and arm64 and actually serves metrics | 15 min |
-| `chart on kind (helm test, foreign Prometheus)` | the chart installs, and `helm test` both fails and passes for the right reasons | 30 min |
+| `chart on kind (helm test, foreign Prometheus)` | the chart installs, and `helm test` both fails and passes for the right reasons | 60 min |
 | `full stack on kind (full)` / `(lite)` | the real thing, end to end, twice | 90 min |
-| `vLLM upstream drift (buckets + metric set)` | upstream vLLM has not moved under us | 5 min, weekly |
+| `weekly upstream drift (vLLM + tool pins)` | upstream vLLM has not moved under us, and every pinned tool checksum still matches its publisher | 5 min, weekly |
 | `branch ruleset vs required-checks.txt` | the branch protection settings still match what the repo records | 5 min, weekly |
+| `open an issue when a weekly check goes red` | a weekly failure reaches a human, not just the Actions tab | 5 min, weekly |
 
 ### selftest + rule tests + shell syntax
 
@@ -70,6 +76,23 @@ The fast gate, and the one that catches most mistakes. It runs the simulator's s
 GPU producer against the DCGM surface contract, `promtool` tests for the alert and recording
 rules, and `scripts/check-doc-claims.py`, which compares prose in the markdown against the
 code it describes.
+
+It also lints the shell, in three layers, because one glob does not reach all of it:
+
+| What | Covered by |
+|--|--|
+| `scripts/*.sh` | `shellcheck -S warning`, the whole directory in one invocation |
+| `.github/workflows/*.yml` | `actionlint`, which hands every `run:` body to shellcheck |
+| `.github/actions/*/action.yml` | `scripts/check-action-shell.py` |
+
+⚠️ The second and third rows are new, and they closed a real gap: 763 lines of bash lived
+inside `.github/` and nothing read any of it. `codeql.yml`'s header names the first row as
+the gate for the half CodeQL cannot read, which was true of `scripts/` and not of the
+workflows — and the SIGPIPE bug of iron rule 17 lived in exactly that gap, in this
+workflow's own changes filter. The third row exists because `actionlint` structurally
+cannot read a composite action: pointed at one it reports `"on" section is missing in
+workflow` and stops, which would have left this repo's most-shared verification as the
+only unlinted shell in the tree.
 
 It also runs `check-sigpipe.py`, which finds pipes whose consumer stops reading
 before the producer finishes. Under `pipefail` that turns a correct result into exit
@@ -147,7 +170,7 @@ check. This is `task local:up` run exactly as a user would run it.
 
 It runs **twice**, and the difference is covered in its own section below.
 
-### vLLM upstream drift
+### weekly upstream drift
 
 Weekly, on a schedule, plus manual dispatch. The rig transcribes vLLM's histogram bucket
 boundaries verbatim, and if upstream changes them this repo is quietly wrong until someone
@@ -155,6 +178,18 @@ notices. This job is the someone.
 
 It only runs on `schedule` and `workflow_dispatch`, so you will see it as "skipping" on
 ordinary pull requests. That is correct, not broken.
+
+### open an issue when a weekly check goes red
+
+Both weekly jobs run only on `schedule`, which fires only on the default branch. Neither
+has a pull request to redden and neither blocks anything, so until this job existed their
+entire output was a red square on the Actions tab. Iron rule 18 applies to CI itself: a
+red run nobody is told about is a check that never fails.
+
+It opens one issue, labelled `upstream-drift`, and de-duplicates on that label rather than
+on the title — a title carries the run id, so matching on it would file a fresh issue every
+Monday for a drift nobody has got to yet. An open issue means the finding is already on the
+board.
 
 ---
 
@@ -239,7 +274,18 @@ That coupling *is* checked now, in two halves, because no single check could cov
 | Half | Where | When | Catches |
 |--|--|--|--|
 | every recorded requirement is a name `ci.yml` can produce | `check-doc-claims.py` | every run, offline | a rename, in the pull request that made it |
-| the recorded list matches the **live** ruleset | `branch ruleset vs required-checks.txt` | weekly, needs network | someone editing the ruleset in a browser |
+| the recorded list matches the **live** ruleset | `check-required-checks.py`, via the `branch ruleset vs required-checks.txt` job | weekly, needs network | someone editing the ruleset in a browser, and a ruleset that has stopped enforcing |
+
+⚠️ That second half was forty lines of inline Python in `ci.yml` until 2026-08-06, and it
+did not do what its own comment said. It claimed to find the ruleset targeting `main` and
+in fact unioned the required checks of *every* branch-target ruleset — no name filter, no
+`conditions.ref_name` filter — so an organisation-level ruleset arriving through
+`includes_parents` would have been reported as drift against a correct configuration. It
+also never read `enforcement`, so a ruleset switched to `disabled` or `evaluate` still
+listed its required checks and the job printed that everything agreed over a branch
+protected by nothing. Both faults are now fixtures in `--selftest`, which `fast` runs
+offline on every push: the rules are unit-tested, and only the network half waits for the
+weekly cron.
 
 The shared anchor is [`.github/required-checks.txt`](../.github/required-checks.txt), which
 is the only record in this repository of a fact that otherwise exists solely in GitHub
@@ -253,16 +299,25 @@ behind, and `doc-claims` fails. That is not hypothetical politeness. The
 `branch ruleset vs required-checks.txt` row in the table above exists because adding that job
 failed this check, which is how it should work.
 
-**This is also why the `stack` job is `if: always()`** rather than gated like its siblings. A
-*skipped* matrix job does not interpolate its name, so it would report as the literal string
-`full stack on kind (${{ matrix.profile }})` and the two required names would never appear.
-Instead the job always starts, the matrix always expands, both names always report, and every
-*step* inside is gated on a single `RUN_STACK` condition. When nothing was actually stood up
-the job says so out loud with a `::notice::`, because "this green means nothing ran" is
-something the reader deserves to be told.
+**This is also why the `stack` job is `if: ${{ !cancelled() }}`** rather than gated like its
+siblings. A *skipped* matrix job does not interpolate its name, so it would report as the
+literal string `full stack on kind (${{ matrix.profile }})` and the two required names would
+never appear. Instead the job starts whenever the run has not been cancelled, the matrix
+expands, both names report, and every *step* inside is gated on a single `RUN_STACK`
+condition. When nothing was actually stood up the job says so out loud with a `::notice::`,
+because "this green means nothing ran" is something the reader deserves to be told.
 
-The non-matrix jobs (`compose`, `chart`, `image`) can use a plain `if:` safely, since a
-skipped non-matrix job still reports under its own name.
+⚠️ It was `always()` until 2026-08-06, and the difference is not cosmetic: `always()` returns
+true **even when the run has been cancelled**, so a superseded push left both legs running to
+completion and quietly defeated `cancel-in-progress`. `!cancelled()` keeps every property
+above — when `fast` fails it is still true, so the job still runs and both names still
+report — and stops only on genuine cancellation, where the superseding run is the one whose
+checks anyone is waiting on. GitHub's own guidance names `!cancelled()` as the form to prefer.
+
+The four gated jobs (`compose`, `chart`, `image`, `chart-cluster`) use the same
+`!cancelled() && …` shape. A plain `if:` would be *safe* for a non-matrix job, since a skipped
+one still reports under its own name — but it carries an implicit `success()` over `needs`,
+which is what used to let a failed `changes` job skip them into a green ruleset.
 
 For the same reason, none of this uses `paths-ignore:` on the triggers. A job that never
 *starts* leaves its check pending forever; a job that starts and is skipped reports as
@@ -300,7 +355,7 @@ Measured on run [`30998470446`](https://github.com/ChrisAdkin8/k8s-ai-observabil
 |--|--|
 | `what changed` | 5s |
 | `helm chart (lint, render, assertions fire)` | 12s |
-| `selftest + rule tests + shell syntax` (`fast`) | 16s |
+| `selftest + rule tests + shell syntax` (`fast`) | 16s ⚠️ **not yet re-measured** |
 | `simulator image (build both arches, smoke-test amd64)` | 19s |
 | `compose stack (no Kubernetes)` | 60s |
 | `chart on kind (helm test, foreign Prometheus)` | 4m09s |
@@ -309,6 +364,15 @@ Measured on run [`30998470446`](https://github.com/ChrisAdkin8/k8s-ai-observabil
 | **whole workflow** | **5m27s** |
 
 `verify.sh` itself accounts for 160s of `full` and 150s of `lite`.
+
+⚠️ **The `fast` row is a true measurement of a job that no longer exists, and is
+therefore not yet verified against the job as it stands.** Four steps were added to it
+on 2026-08-06 — installing and running `actionlint`, `check-action-shell.py`, and
+`check-required-checks.py --selftest` — so the 16s above predates roughly a 5 MB
+download and nine extra shellcheck invocations. Left in place rather than guessed at,
+because a figure with a run id behind it can be checked and an invented one cannot; it
+needs one run on `main` to replace. That is the habit this section already argues for,
+applied to its own table.
 
 ⚠️ ~~These predate the early ServiceMonitor apply.~~ **DONE — re-measured 2026-08-05 on run
 `30998470446`, the first run after it.** The pre-change figures, on run `30870290833`, were
@@ -346,9 +410,53 @@ like the contributor's fault.
 
 ## When something fails
 
-The `stack` and `compose` jobs collect diagnostics and upload them as artifacts on failure.
-The stack artifact name includes the matrix profile, because both legs upload and two
-artifacts of the same name collide.
+The `stack`, `compose` and chart-on-kind paths collect diagnostics and upload them as
+artifacts on failure. The stack artifact name includes the matrix profile, because both
+legs upload and two artifacts of the same name collide.
+
+⚠️ Two of those three were broken, in opposite ways, and both are worth knowing about
+because the shape recurs. `compose` gated its collection on
+`steps.up.outcome != 'success'` — the outcome of `docker compose up -d`, which is step 2 of
+6 and succeeds essentially always. So the bundle was collected *only* when compose failed
+to start, and never on any failure the job actually exists to catch. It read as correct
+because the `stack` job's identical-looking guard **is** correct: there `up` is
+`task local:up`, which is the whole job. Both now key on `job.status`. And the chart-on-kind
+path collected nothing at all — the required check that touches a cluster, and the one that
+also gates a release, gave you whatever `helm test --logs` printed and no pod list, events
+or describes. That now lives in the composite action, so both callers get it.
+
+The pattern under all three: **a guard that only ever runs on green runs has never been
+observed doing anything**, which is iron rule 18 pointed at CI itself.
+
+⚠️ The chart one proved that twice. Its first version was `if: always() && job.status !=
+'success'`, copied from the compose fix — and **`job.status` is not updated inside a
+composite action**: it reads `success` even after a step there has exited 1
+([actions/runner#1682](https://github.com/actions/runner/issues/1682)). So the replacement
+guard was constant-false and collected nothing, in the same change that fixed the original.
+Nothing was watching, because `actionlint` cannot parse a composite action and
+`check-action-shell.py` read only the shell, not the expression above it. It reads both now:
+a `job.` reference inside a composite action is a hard error there, with a selftest, and the
+real guard keys on `steps.<id>.outcome`, which does work.
+
+`check-action-shell.py` now covers the **general** form of that bug as well as the
+specific one. A guard can die two ways, and both are silent because GitHub resolves an
+unknown context member to the empty string rather than failing the run:
+
+| Written | Why it never fires |
+|--|--|
+| `job.status != 'success'` | the context is inert inside a composite action |
+| `steps.clustr.outcome == 'failure'` | one letter out; no step declares that `id:` |
+
+Both are hard errors there, with selftests, and both are driven to failure against the
+real file. Closing the second one exposed a third: `bad_contexts` matched `^\s*if:` line
+by line, so a **folded** `if: >-` hid everything on its continuation lines — and the
+guard being protected is written exactly that way, six terms over six lines. Expressions
+are joined before either check reads them now.
+
+⚠️ **That guard is still not yet verified against a real run.** The mechanical checks
+stop both known-wrong constructs returning; neither proves the right one fires. Nothing
+in `task preflight` executes a composite action, so the first real evidence will be a red
+`chart on kind` that uploads a bundle. Until then this is reasoned, not observed.
 
 Reproduce locally with the same commands CI uses:
 
@@ -362,14 +470,38 @@ LITE=1 task local:up  # the lite leg
 
 ## Pinned versions
 
-The toolchain is pinned in the workflow's `env:` block: `kind`, `kubectl`, `helm`, `task`
-and Prometheus (for `promtool`). An unpinned toolchain turns someone else's release into a
-mystery red run on an unrelated commit.
+The toolchain is pinned in the workflow's `env:` block: `kind`, `kubectl`, `helm`, `task`,
+`actionlint` and Prometheus (for `promtool`). An unpinned toolchain turns someone else's
+release into a mystery red run on an unrelated commit.
 
-Two of those pins are coupled to things outside the workflow. `kind` ships a default node
+**Every one of them is checksummed too.** A version pin fixes the *name* of an artefact,
+not its bytes: `curl -fsSL <url>` trusts whatever the far end serves under that name. The
+SHA-256 sums sit beside the versions in the same `env:` block and come from each
+publisher's own checksum file, so bumping a version fails loudly until the sum moves with
+it. The actions are pinned by commit SHA and tended by Dependabot; the binaries had the
+weaker half of that guarantee and none of the second.
+
+**The runner is pinned too**, to `ubuntu-24.04` rather than `ubuntu-latest`. It was the
+largest unpinned dependency in the repo — a runner-image migration moves shellcheck,
+python3, docker, buildx and the preinstalled `kubectl` at once, on a date nobody here
+chooses. The cost is one obligation in the other direction: GitHub deprecates an image
+about a year before removing it, so that number has to move deliberately, roughly annually.
+
+Three of those pins are coupled to things outside the workflow. `kind` ships a default node
 image that must match what `kind/gpu-sim.yaml` pins, and `kubectl` tracks that node image's
-minor version. Helm is deliberately held on the v3 line: v4 is a major this repo has not
-validated, and CI should exercise what people actually run.
+minor version. ⚠️ The kind pin is written in **three** places, not two — `ci.yml`,
+`publish-chart.yml` and the `kind-version` input default in
+[`.github/actions/verify-chart`](../.github/actions/verify-chart/action.yml) — and the
+third had drifted two minors behind while both callers fell through to it.
+`check-doc-claims.py` now asserts all three agree. Helm is deliberately held on the v3
+line: v4 is a major this repo has not validated, and CI should exercise what people
+actually run.
+
+`kube-prometheus-stack` is pinned as well, in the composite action, **derived from
+`scripts/config.sh` rather than restated**. It used to install whatever was newest, which
+meant the required `chart on kind` check was not reproducible and an upstream release could
+redden an unrelated pull request — the exact thing `weekly upstream drift` is
+schedule-only to avoid.
 
 Every pin in the repo, and the single place each one is set, is in
 [docs/versions.md](versions.md).
@@ -388,6 +520,29 @@ Release artifacts are not built by this workflow. Two others fire on a `v*` tag:
 
 Both verify by consuming what they published, rather than trusting that the push succeeded.
 A successful push only proves bytes moved.
+
+⚠️ **Both now refuse to publish from a commit CI has not passed.** The ruleset on `main`
+gates pull requests and says nothing about a tag, so `git tag` on any commit and
+`git push origin vX.Y.Z` used to publish from whatever it contained — and a registry
+version is immutable. [`.github/actions/require-green-ci`](../.github/actions/require-green-ci/action.yml)
+is a thin wrapper over `scripts/check-green-ci.py`, which reads
+`.github/required-checks.txt` and polls the check runs on that commit until every one has
+concluded. It polls rather than reads once because `docs/releasing.md` pushes the commit
+and the tag in a single line, so CI cannot have finished. A `workflow_dispatch` input,
+`allow_red_ci`, is the documented escape hatch for the case where a dispatch rebuilds a
+fixed workflow from a different ref.
+
+⚠️ **The logic is a script and not a heredoc, for the reason `settings-drift` is.** It
+began as eighty lines of shell and inline Python inside the action — pagination, newest
+attempt per name, the classification, two timing branches — none of it lintable, none of
+it testable, all of it deciding whether an immutable artefact ships. "Verified by hand"
+there means running a *copy* in a scratch directory, which is the drifting second copy
+this repo refuses everywhere else. Extracting it is what made
+`tests/fixtures/check-runs.json` possible, and that fixture pins the branches a live run
+touches least: a re-run whose newest attempt failed, a required check that fell onto page
+two, a truncated read, a commit with no run at all, and a `neutral` conclusion that must
+not read as a pass. It also dropped `gh` — an unpinned binary from the runner image, in
+the one path that gates an immutable release. The script is stdlib `urllib`.
 
 ## Static analysis is separate too
 

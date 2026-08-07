@@ -45,10 +45,24 @@ venv/
 # targets only the local variant rather than the whole directory.
 **/.claude/settings.local.json
 
-# The authoring briefs, kept locally but deliberately untracked. Globbed rather than
-# listed one by one — the list went stale the first time a new brief was written.
-prompt.md
-prompt-*.md
+# ⚠️ THE AUTHORING BRIEFS ARE NOW TRACKED, in prompts/, and this block is deliberately
+# left as the record of what changed on 2026-08-06. It used to read:
+#
+#     prompt.md
+#     prompt-*.md
+#
+# with the note that they were "kept locally but deliberately untracked". That was
+# inherited rather than decided — CLAUDE.md said so — and it contradicted the practice
+# the rest of this file defends two paragraphs down: context worth having is context you
+# commit. A brief is the specification for a change; every change in this repo has one;
+# and a clone contained none of them, so nothing about how the work was specified could
+# be checked by a reader. The same argument that keeps CLAUDE.md tracked keeps these.
+#
+# ⚠️ THE CONSEQUENCE IS A CHECK, NOT JUST A FILE MOVE. check-doc-claims.py scans every
+# TRACKED markdown file (`git ls-files "*.md"`), so briefs are now held to the same
+# prose-versus-code claims as the docs. That is the point rather than a side effect, and
+# it is also the thing to remember when writing one: a number stated in a brief now has
+# to be right, or `task doc-claims` says so.
 
 # ⚠️ CLAUDE.md IS TRACKED, and the distinction is the point. A brief is a one-off
 # specification for a single piece of work; CLAUDE.md is the repo's standing law —

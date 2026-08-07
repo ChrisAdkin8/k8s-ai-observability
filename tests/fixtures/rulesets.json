@@ -1,0 +1,389 @@
+{
+  "active-main": {
+    "list": [
+      {
+        "id": 1,
+        "name": "main protection",
+        "target": "branch",
+        "enforcement": "active",
+        "conditions": {
+          "ref_name": {
+            "include": [
+              "refs/heads/main"
+            ],
+            "exclude": []
+          }
+        },
+        "_links": {
+          "self": {
+            "href": "https://api.github.com/repos/o/r/rulesets/1"
+          }
+        }
+      }
+    ],
+    "bodies": {
+      "https://api.github.com/repos/o/r/rulesets/1": {
+        "rules": [
+          {
+            "type": "deletion"
+          },
+          {
+            "type": "required_status_checks",
+            "parameters": {
+              "required_status_checks": [
+                {
+                  "context": "a"
+                },
+                {
+                  "context": "b"
+                }
+              ]
+            }
+          }
+        ]
+      }
+    }
+  },
+  "disabled-main": {
+    "list": [
+      {
+        "id": 1,
+        "name": "main protection",
+        "target": "branch",
+        "enforcement": "disabled",
+        "conditions": {
+          "ref_name": {
+            "include": [
+              "refs/heads/main"
+            ],
+            "exclude": []
+          }
+        },
+        "_links": {
+          "self": {
+            "href": "https://api.github.com/repos/o/r/rulesets/1"
+          }
+        }
+      }
+    ],
+    "bodies": {
+      "https://api.github.com/repos/o/r/rulesets/1": {
+        "rules": [
+          {
+            "type": "deletion"
+          },
+          {
+            "type": "required_status_checks",
+            "parameters": {
+              "required_status_checks": [
+                {
+                  "context": "a"
+                },
+                {
+                  "context": "b"
+                }
+              ]
+            }
+          }
+        ]
+      }
+    }
+  },
+  "evaluate-main": {
+    "list": [
+      {
+        "id": 1,
+        "name": "main protection",
+        "target": "branch",
+        "enforcement": "evaluate",
+        "conditions": {
+          "ref_name": {
+            "include": [
+              "refs/heads/main"
+            ],
+            "exclude": []
+          }
+        },
+        "_links": {
+          "self": {
+            "href": "https://api.github.com/repos/o/r/rulesets/1"
+          }
+        }
+      }
+    ],
+    "bodies": {
+      "https://api.github.com/repos/o/r/rulesets/1": {
+        "rules": [
+          {
+            "type": "deletion"
+          },
+          {
+            "type": "required_status_checks",
+            "parameters": {
+              "required_status_checks": [
+                {
+                  "context": "a"
+                },
+                {
+                  "context": "b"
+                }
+              ]
+            }
+          }
+        ]
+      }
+    }
+  },
+  "foreign-ruleset": {
+    "list": [
+      {
+        "id": 1,
+        "name": "main protection",
+        "target": "branch",
+        "enforcement": "active",
+        "conditions": {
+          "ref_name": {
+            "include": [
+              "refs/heads/main"
+            ],
+            "exclude": []
+          }
+        },
+        "_links": {
+          "self": {
+            "href": "https://api.github.com/repos/o/r/rulesets/1"
+          }
+        }
+      },
+      {
+        "id": 2,
+        "name": "org-wide release policy",
+        "target": "branch",
+        "enforcement": "active",
+        "conditions": {
+          "ref_name": {
+            "include": [
+              "refs/heads/release/*"
+            ],
+            "exclude": []
+          }
+        },
+        "_links": {
+          "self": {
+            "href": "https://api.github.com/repos/o/r/rulesets/2"
+          }
+        }
+      }
+    ],
+    "bodies": {
+      "https://api.github.com/repos/o/r/rulesets/1": {
+        "rules": [
+          {
+            "type": "deletion"
+          },
+          {
+            "type": "required_status_checks",
+            "parameters": {
+              "required_status_checks": [
+                {
+                  "context": "a"
+                },
+                {
+                  "context": "b"
+                }
+              ]
+            }
+          }
+        ]
+      },
+      "https://api.github.com/repos/o/r/rulesets/2": {
+        "rules": [
+          {
+            "type": "deletion"
+          },
+          {
+            "type": "required_status_checks",
+            "parameters": {
+              "required_status_checks": [
+                {
+                  "context": "sbom"
+                },
+                {
+                  "context": "sign"
+                }
+              ]
+            }
+          }
+        ]
+      }
+    }
+  },
+  "drifted-main": {
+    "list": [
+      {
+        "id": 1,
+        "name": "main protection",
+        "target": "branch",
+        "enforcement": "active",
+        "conditions": {
+          "ref_name": {
+            "include": [
+              "refs/heads/main"
+            ],
+            "exclude": []
+          }
+        },
+        "_links": {
+          "self": {
+            "href": "https://api.github.com/repos/o/r/rulesets/1"
+          }
+        }
+      }
+    ],
+    "bodies": {
+      "https://api.github.com/repos/o/r/rulesets/1": {
+        "rules": [
+          {
+            "type": "deletion"
+          },
+          {
+            "type": "required_status_checks",
+            "parameters": {
+              "required_status_checks": [
+                {
+                  "context": "a"
+                }
+              ]
+            }
+          }
+        ]
+      }
+    }
+  },
+  "default-branch-token": {
+    "list": [
+      {
+        "id": 1,
+        "name": "main protection",
+        "target": "branch",
+        "enforcement": "active",
+        "conditions": {
+          "ref_name": {
+            "include": [
+              "~DEFAULT_BRANCH"
+            ],
+            "exclude": []
+          }
+        },
+        "_links": {
+          "self": {
+            "href": "https://api.github.com/repos/o/r/rulesets/1"
+          }
+        }
+      }
+    ],
+    "bodies": {
+      "https://api.github.com/repos/o/r/rulesets/1": {
+        "rules": [
+          {
+            "type": "deletion"
+          },
+          {
+            "type": "required_status_checks",
+            "parameters": {
+              "required_status_checks": [
+                {
+                  "context": "a"
+                },
+                {
+                  "context": "b"
+                }
+              ]
+            }
+          }
+        ]
+      }
+    }
+  },
+  "active-plus-evaluating-org": {
+    "list": [
+      {
+        "id": 1,
+        "name": "main protection",
+        "target": "branch",
+        "enforcement": "active",
+        "conditions": {
+          "ref_name": {
+            "include": [
+              "refs/heads/main"
+            ],
+            "exclude": []
+          }
+        },
+        "_links": {
+          "self": {
+            "href": "https://api.github.com/repos/o/r/rulesets/1"
+          }
+        }
+      },
+      {
+        "id": 2,
+        "name": "org: evaluating a new policy",
+        "target": "branch",
+        "enforcement": "evaluate",
+        "conditions": {
+          "ref_name": {
+            "include": [
+              "~ALL"
+            ],
+            "exclude": []
+          }
+        },
+        "_links": {
+          "self": {
+            "href": "https://api.github.com/repos/o/r/rulesets/2"
+          }
+        }
+      }
+    ],
+    "bodies": {
+      "https://api.github.com/repos/o/r/rulesets/1": {
+        "rules": [
+          {
+            "type": "deletion"
+          },
+          {
+            "type": "required_status_checks",
+            "parameters": {
+              "required_status_checks": [
+                {
+                  "context": "a"
+                },
+                {
+                  "context": "b"
+                }
+              ]
+            }
+          }
+        ]
+      },
+      "https://api.github.com/repos/o/r/rulesets/2": {
+        "rules": [
+          {
+            "type": "deletion"
+          },
+          {
+            "type": "required_status_checks",
+            "parameters": {
+              "required_status_checks": [
+                {
+                  "context": "sbom"
+                }
+              ]
+            }
+          }
+        ]
+      }
+    }
+  }
+}

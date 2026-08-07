@@ -30,10 +30,27 @@ on:
     - cron: '17 4 * * 1'
 
 # Pushing twice should not leave two 20-minute runs racing.
+#
+# ⚠️ BUT NOT ON main. Superseding a pull-request run costs nothing — the newer commit
+# is the one anyone cares about. Superseding a PUSH to main destroys the only record
+# that a merged commit was ever verified, and a release tag is pushed at a commit on
+# main (docs/releasing.md step 4). Two merges a minute apart would leave the first with
+# a cancelled run, and nothing downstream would notice: the ruleset gates the pull
+# request, not the tag. So main runs to completion and only branches supersede.
 concurrency:
   group: ci-${{ github.workflow }}-${{ github.ref }}
-  cancel-in-progress: true
+  cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
 
+# ⚠️ READ-ONLY BY DEFAULT, AND ONE JOB DELIBERATELY WIDENS IT. Every job in this file
+# inherits `contents: read` except `drift-notify`, which restates it alongside
+# `issues: write` so it can file a drift report. That is the only write scope in CI and
+# it is worth naming rather than discovering: job-level permissions REPLACE this default
+# rather than extending it, so the widening is visible in exactly one place.
+#
+# It is reachable only from `schedule` and `workflow_dispatch`, both of which require
+# the default branch or write access — a pull request, including one from a fork, cannot
+# run that job at all. The alternative was a separate workflow, which buys nothing: the
+# same token, the same scope, one more file to keep in step.
 permissions:
   contents: read
 
@@ -41,7 +58,14 @@ env:
   # Pinned deliberately: an unpinned toolchain turns someone else's release into a
   # mystery red run on an unrelated commit.
   #   kind    — v0.32.0 ships kindest/node:v1.36.1 as its default, which is what
-  #             kind/gpu-sim.yaml pins. Bump the two together.
+  #             kind/gpu-sim.yaml pins. ⚠️ THERE ARE THREE PLACES, NOT TWO: the
+  #             composite action .github/actions/verify-chart takes a `kind-version`
+  #             input, and its default sat two minors behind this pin — building a
+  #             v0.32-era node image on a v0.30 binary, which kind/gpu-sim.yaml's own
+  #             comment names as a documented way to get a cluster that never becomes
+  #             Ready. Both callers now pass this value explicitly and
+  #             check-doc-claims.py asserts all three agree, so the coupling is
+  #             mechanised rather than remembered.
   #   kubectl — tracks the node image's minor (1.36).
   #   helm    — v3, NOT the v4 line. Helm 4 is a major version this repo has not been
   #             validated against, and CI should exercise what users actually run.
@@ -53,6 +77,37 @@ env:
   # this is a Prometheus version. Without the leading v: the git tag carries one and
   # the tarball name does not, and both spellings are needed below.
   PROMETHEUS_VERSION: 3.7.3
+  # actionlint lints the workflows themselves, INCLUDING the bash inside every `run:`
+  # body, which it hands to shellcheck. That was 763 lines this repo linted with
+  # nothing: the `fast` job's shellcheck covers scripts/*.sh and stops there, while
+  # codeql.yml's header names that same shellcheck as the gate for the half CodeQL
+  # cannot read. The workflows fell between the two claims — and the SIGPIPE bug of
+  # iron rule 17 lived in exactly that gap.
+  ACTIONLINT_VERSION: 1.7.7
+  # ⚠️ A VERSION PIN FIXES A NAME, NOT BYTES. Every tool below arrives as
+  # `curl -fsSL <url>`, which trusts whatever the far end serves under that name —
+  # so the pins above were, until now, content-unverified. The actions in this file
+  # are pinned by commit SHA and tended by Dependabot; these binaries had the weaker
+  # half of that guarantee and none of the second. kind/gpu-sim.yaml already says the
+  # same thing about the node image ("Append @sha256:... if you want it pinned by
+  # content as well as by tag") and nothing had taken it up.
+  #
+  # Each value is the publisher's own, read from their checksum file on 2026-08-06:
+  #   kind        kind-linux-amd64.sha256sum
+  #   kubectl     dl.k8s.io/.../kubectl.sha256
+  #   helm        helm-v3.21.3-linux-amd64.tar.gz.sha256sum
+  #   task        task_checksums.txt
+  #   prometheus  sha256sums.txt
+  #   actionlint  actionlint_1.7.7_checksums.txt
+  # Bump a version and the next run fails on the sum until it is moved with it. That
+  # is the intent: a mismatch is either a bad bump or a substituted artefact, and both
+  # deserve a red run rather than a silent install.
+  KIND_SHA256: 50030de23cf40a18505f20426f6a8506bedf13c6e509244bd1fa9463721b0f54
+  KUBECTL_SHA256: ebbd080e7c2e275093b55915722043257eb24004363e20acb3c4d71919f88336
+  HELM_SHA256: 15e041a93a590dce8100f39385cd98c84a765c9e36aeeb9e2dc6ff9e4769e2e0
+  TASK_SHA256: 02c679ffae53dca791804847d78b31731615894e292948397c971c87ac9e95bd
+  PROMETHEUS_SHA256: fc9e5da126817438cf2820d9a7206c75e3122802ba8d20add3a6219a59ca6913
+  ACTIONLINT_SHA256: 023070a287cd8cccd71515fedc843f1985bf96c436b7effaecce67290e7e0757
 
 jobs:
   # ---------------------------------------------------------------------------
@@ -73,7 +128,15 @@ jobs:
   # ---------------------------------------------------------------------------
   changes:
     name: what changed
-    runs-on: ubuntu-latest
+    # ⚠️ PINNED, NOT `ubuntu-latest` — here and in every job in every workflow. The
+    # env block above argues that an unpinned toolchain turns someone else's release
+    # into a mystery red run on an unrelated commit, and `ubuntu-latest` was the
+    # largest unpinned dependency in this repository: a runner-image migration moves
+    # shellcheck, python3, docker, buildx and the preinstalled kubectl at once, on a
+    # date nobody here picks. Pinning carries one obligation in the other direction —
+    # GitHub deprecates an image roughly a year before removing it, and says so on
+    # every run — so this number does have to move, deliberately, about once a year.
+    runs-on: ubuntu-24.04
     timeout-minutes: 5
     outputs:
       code: ${{ steps.filter.outputs.code }}
@@ -107,7 +170,19 @@ jobs:
             echo "base commit unavailable — running everything"; exit 0
           fi
 
-          changed="$(git diff --name-only "$BASE" "$HEAD")"
+          # ⚠️ THREE DOTS, NOT TWO, and the difference is the whole optimisation.
+          # `git diff A B` lists every path where the two TREES differ, so once main
+          # gains a code change this branch does not carry, that file counts as
+          # "changed here" and a genuinely docs-only pull request stands up two
+          # clusters anyway. The staleness of the branch decided the answer rather
+          # than its contents. `A...B` diffs against the MERGE BASE, which is the
+          # question actually being asked: what does this branch change?
+          #
+          # It stays fail-open in the same direction — a merge base that cannot be
+          # computed makes git exit non-zero, which `set -e` turns into a failed job
+          # rather than a quiet "markdown only", and the RUN_STACK gate below now
+          # treats a failed `changes` as a code change.
+          changed="$(git diff --name-only "$BASE...$HEAD")"
           echo "changed files:"; echo "$changed" | sed 's/^/  /'
 
           # Non-markdown means code. An EMPTY diff also means code, for the same
@@ -129,12 +204,18 @@ jobs:
           fi
 
   # ---------------------------------------------------------------------------
-  # Seconds, no cluster, no network. Runs in parallel with the slow job so a typo
-  # in the most-edited file in the repo does not cost a 20-minute wait.
+  # Seconds, and no cluster. NOT no network: it fetches promtool and actionlint, two
+  # small release archives, both checksummed. The comment claimed otherwise for as long
+  # as promtool has been installed here, and adding actionlint made it wronger — worth
+  # correcting rather than leaving, because "no network" is exactly the property someone
+  # would rely on when deciding this job cannot be flaky. It can, if a release CDN is.
+  #
+  # Runs in parallel with the slow job so a typo in the most-edited file in the repo
+  # does not cost a 20-minute wait.
   # ---------------------------------------------------------------------------
   fast:
     name: selftest + rule tests + shell syntax
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 5
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -198,6 +279,52 @@ jobs:
       - name: shellcheck
         run: shellcheck -S warning scripts/*.sh
 
+      # ⚠️ THE GLOB ABOVE STOPS AT scripts/, AND 763 LINES OF BASH LIVE PAST IT.
+      # This workflow, the two publish workflows and the composite action carry 55
+      # `run:` blocks between them, and until now the ONLY thing that read any of it
+      # was check-sigpipe.py, which covers exactly one class. codeql.yml's header
+      # names the shellcheck above as the gate for the half CodeQL cannot read;
+      # the workflows' own shell fell between the two claims. The SIGPIPE bug of
+      # iron rule 17 lived in that gap, in this file, in the changes filter.
+      #
+      # actionlint hands every `run:` body to shellcheck, and additionally type-checks
+      # the workflow itself: `needs` that name no job, `${{ }}` referencing a context
+      # that is not available where it is written, invalid `if:` expressions. The
+      # second half is what would have caught the gate bug fixed in this same change.
+      #
+      # SHELLCHECK_OPTS carries the severity, because actionlint has no flag of its
+      # own for it — `-S warning` matches the step above rather than introducing a
+      # second standard, and SC2154 is excluded because a `run:` body legitimately
+      # reads variables the step's `env:` supplies, which shellcheck cannot see.
+      - name: Install actionlint
+        run: |
+          set -euo pipefail
+          mkdir -p "$HOME/.local/bin"
+          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+          curl -fsSLo /tmp/actionlint.tgz \
+            "https://github.com/rhysd/actionlint/releases/download/v${ACTIONLINT_VERSION}/actionlint_${ACTIONLINT_VERSION}_linux_amd64.tar.gz"
+          echo "${ACTIONLINT_SHA256}  /tmp/actionlint.tgz" | sha256sum -c -
+          tar -xz -C "$HOME/.local/bin" -f /tmp/actionlint.tgz actionlint
+          chmod +x "$HOME/.local/bin/actionlint"
+          actionlint --version
+
+      - name: actionlint (workflow syntax + the bash inside every run:)
+        env:
+          SHELLCHECK_OPTS: -S warning -e SC2154
+        run: actionlint -no-color -oneline -pyflakes=
+
+      # ⚠️ actionlint CANNOT READ A COMPOSITE ACTION, so the step above does not
+      # cover .github/actions/. Verified with v1.7.7 on 2026-08-06: pointed at
+      # action.yml it reports `"on" section is missing in workflow` and gives up,
+      # because it only models workflow files. That leaves this repo's most
+      # important verification — the one publish-chart.yml and the `chart-cluster`
+      # job SHARE — as the single unlinted shell file in the tree, which is the
+      # opposite of what "one implementation, two subjects" is supposed to buy.
+      - name: Composite-action shell
+        run: |
+          python3 scripts/check-action-shell.py --selftest
+          python3 scripts/check-action-shell.py
+
       # The MATCHING RULES of the weekly drift check, against a committed fixture
       # rather than against upstream. The drift job below runs on a schedule and
       # needs network; this needs neither, and it covers the one piece of
@@ -207,6 +334,29 @@ jobs:
       # answer either way, so the rule cannot be tested by running it.
       - name: vLLM drift-check matching rules
         run: python3 scripts/check-vllm-buckets.py --selftest
+
+      # The MATCHING RULES of the weekly ruleset check, against committed fixtures
+      # rather than against the live GitHub API — the same split as the line above,
+      # and for a sharper reason. `settings-drift` is the job that answers "is main
+      # still protected", and its judgement is entirely in which rulesets it counts
+      # and whether it looks at `enforcement`. Both fail SILENTLY when wrong: a
+      # disabled ruleset still lists its required checks, so the old inline version
+      # printed "ok, they agree" over a branch protected by nothing at all.
+      #
+      # There is no way to test that by running it — the real run prints a plausible
+      # answer either way, and the only input that would prove it is a repository
+      # setting deliberately broken in a browser.
+      - name: Required-checks drift matching rules
+        run: python3 scripts/check-required-checks.py --selftest
+
+      # The publish gate's rules, on the same argument one line up and a sharper
+      # version of it: that gate runs ONLY on a tag, so its refusing branches — a
+      # re-run whose newest attempt failed, a truncated page read, a commit with no
+      # run at all — are paths no ordinary run ever touches. A release is the worst
+      # possible place to discover one of them is wrong, because the artefact is
+      # already immutable by the time anybody looks.
+      - name: Publish-gate matching rules
+        run: python3 scripts/check-green-ci.py --selftest
 
       # promtool is the only tool this job installs, and it is worth it: the stack
       # job below can only ever observe the two alerts the shipped workloads happen
@@ -218,8 +368,13 @@ jobs:
           set -euo pipefail
           mkdir -p "$HOME/.local/bin"
           echo "$HOME/.local/bin" >> "$GITHUB_PATH"
-          curl -fsSL "https://github.com/prometheus/prometheus/releases/download/v${PROMETHEUS_VERSION}/prometheus-${PROMETHEUS_VERSION}.linux-amd64.tar.gz" \
-            | tar -xz -C /tmp "prometheus-${PROMETHEUS_VERSION}.linux-amd64/promtool"
+          # Downloaded to a FILE and summed before it is unpacked, rather than piped
+          # straight into tar: a pipe leaves nothing to verify, and verifying after
+          # unpacking is verifying something that has already run.
+          curl -fsSLo /tmp/prometheus.tgz \
+            "https://github.com/prometheus/prometheus/releases/download/v${PROMETHEUS_VERSION}/prometheus-${PROMETHEUS_VERSION}.linux-amd64.tar.gz"
+          echo "${PROMETHEUS_SHA256}  /tmp/prometheus.tgz" | sha256sum -c -
+          tar -xz -C /tmp -f /tmp/prometheus.tgz "prometheus-${PROMETHEUS_VERSION}.linux-amd64/promtool"
           mv "/tmp/prometheus-${PROMETHEUS_VERSION}.linux-amd64/promtool" "$HOME/.local/bin/promtool"
           chmod +x "$HOME/.local/bin/promtool"
 
@@ -300,63 +455,41 @@ jobs:
   settings-drift:
     name: branch ruleset vs required-checks.txt
     if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 5
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
+      # ⚠️ MOVED OUT OF THIS FILE, and the move is the fix. Forty lines of inline
+      # python here could not be tested, could not be linted, and did not do what
+      # the comment above it claimed: it said "find the ruleset targeting main,
+      # named lookup rather than a hardcoded id" and then unioned the required
+      # checks of EVERY branch-target ruleset, with no name filter and no
+      # `conditions.ref_name` filter. Since /rulesets defaults to
+      # includes_parents=true, an organisation-level ruleset would have been folded
+      # in and reported as "the ruleset requires checks the repo does not record"
+      # against a perfectly correct configuration.
+      #
+      # Worse in the other direction: it never read `enforcement`. A ruleset set to
+      # `disabled` or `evaluate` still lists its required_status_checks, so main
+      # could have been protected by nothing while this job printed that everything
+      # agreed — the single failure it exists to detect.
+      #
+      # The script is stdlib-only and carries a --selftest over committed fixtures,
+      # which `fast` runs offline on every push. Same split as check-vllm-buckets.py:
+      # the judgement is unit-tested, the network half runs weekly.
       - name: The ruleset requires exactly what the repo says it does
-        run: |
-          set -euo pipefail
-          api="https://api.github.com/repos/${GITHUB_REPOSITORY}/rulesets"
-          curl -fsSL -H 'Accept: application/vnd.github+json' "$api" -o /tmp/rulesets.json
-          python3 - <<'PY'
-          import json, os, subprocess, sys, urllib.request
-
-          want = [l.strip() for l in open(".github/required-checks.txt")]
-          want = sorted(l for l in want if l and not l.startswith("#"))
-
-          # Find the ruleset targeting `main`. Named lookup rather than a hardcoded
-          # id: an id is meaningless in a fork and silently wrong after a recreate.
-          sets = json.load(open("/tmp/rulesets.json"))
-          live = []
-          for rs in sets:
-              if rs.get("target") != "branch":
-                  continue
-              url = rs["_links"]["self"]["href"]
-              with urllib.request.urlopen(url) as r:
-                  full = json.load(r)
-              for rule in full.get("rules", []):
-                  if rule["type"] == "required_status_checks":
-                      live += [c["context"] for c in
-                               rule["parameters"]["required_status_checks"]]
-          live = sorted(set(live))
-
-          if not live:
-              sys.exit("::error::no required status checks found on any branch ruleset. "
-                       "Either the ruleset was deleted, or it no longer requires anything "
-                       "— both mean main is less protected than this repo claims.")
-          if live != want:
-              print(f"  ruleset requires : {live}")
-              print(f"  repo records     : {want}")
-              missing = [c for c in want if c not in live]
-              extra = [c for c in live if c not in want]
-              if missing:
-                  print(f"::error::recorded as required but the ruleset does NOT require: "
-                        f"{missing}. main is less protected than .github/required-checks.txt "
-                        f"claims.")
-              if extra:
-                  print(f"::error::the ruleset requires checks the repo does not record: "
-                        f"{extra}. If a job was renamed in settings and not here, pull "
-                        f"requests may already be blocked.")
-              sys.exit(1)
-          print(f"  ok  ruleset and .github/required-checks.txt agree on {len(want)}: {want}")
-          PY
+        run: python3 scripts/check-required-checks.py
 
   upstream-drift:
-    name: vLLM upstream drift (buckets + metric set)
+    # ⚠️ THE NAME COVERS BOTH STEPS. It said "vLLM upstream drift" while the job also
+    # compared every pinned tool checksum against its publisher — so a checksum failure
+    # arrived under a heading that mentioned neither checksums nor tools, which is a
+    # reader's first and worst clue about what broke. The job KEY stays `upstream-drift`
+    # because `drift-notify` names it in `needs:` and CONTRIBUTING.md lists it.
+    name: weekly upstream drift (vLLM + tool pins)
     if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 5
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -366,6 +499,143 @@ jobs:
       # not look" and "we looked and it was fine" are not the same result.
       - name: vLLM bucket boundaries and metric set
         run: python3 scripts/check-vllm-buckets.py
+
+      # ⚠️ THE OTHER HALF OF THE CHECKSUM PINS, and the half that cannot run offline.
+      # check-doc-claims.py asserts the sums written in two workflows AGREE WITH EACH
+      # OTHER; nothing asserted they still describe the artefact the pinned URL serves.
+      # A bumped version beside a stale sum fails much later, at `sha256sum -c`, with a
+      # message that reads like a substituted artefact rather than a forgotten line.
+      #
+      # It also catches the case worth having a weekly job for at all: a published
+      # release re-cut under the same tag. That is rare and it is exactly the event a
+      # content pin exists to detect, so it should not wait for someone's next bump.
+      #
+      # Compared against each publisher's OWN checksum file, which is why this proves
+      # "the pin still matches what is served" and not "the bytes are trustworthy" —
+      # the committed constants are what carry that second claim.
+      - name: The pinned checksums still match what the publishers serve
+        run: |
+          set -euo pipefail
+          rc=0
+          cmp_sum() {  # $1 label  $2 sums-url  $3 filename-key  $4 pinned
+            curl -fsSL "$2" -o /tmp/sums.txt || {
+              echo "  ??  $1: could not fetch $2"; rc=1; return; }
+            # ⚠️ ONE awk OVER A FILE, NOT `grep | awk | head -1`. The first version of
+            # this step was written with that pipeline and check-sigpipe.py caught it
+            # before it ever ran: `head` exits at the first line, SIGPIPEs awk, and
+            # under `set -o pipefail` the substitution returns 141 — so `set -e` kills
+            # the step on the FIRST tool checked. awk reading a file exits early with
+            # nobody upstream to signal. The leading `*` is the binary marker some
+            # publishers emit before the filename.
+            got=$(awk -v k="$3" '{ n=$2; sub(/^\*/, "", n); if (n == k) { print $1; exit } }' /tmp/sums.txt)
+            # A bare-hash file — kubectl's .sha256 — has no filename column at all.
+            [ -n "$got" ] || got=$(tr -d '[:space:]' < /tmp/sums.txt)
+            if [ "$got" = "$4" ]; then
+              echo "  ok  $1"
+            else
+              echo "::error title=Pinned checksum no longer matches::$1: the publisher now serves $got, ci.yml pins $4. Either the version was bumped without moving the sum, or the release was re-cut under the same tag."
+              rc=1
+            fi
+          }
+          cmp_sum kind \
+            "https://github.com/kubernetes-sigs/kind/releases/download/${KIND_VERSION}/kind-linux-amd64.sha256sum" \
+            "kind-linux-amd64" "$KIND_SHA256"
+          cmp_sum kubectl \
+            "https://dl.k8s.io/release/${KUBECTL_VERSION}/bin/linux/amd64/kubectl.sha256" \
+            "kubectl" "$KUBECTL_SHA256"
+          cmp_sum helm \
+            "https://get.helm.sh/helm-${HELM_VERSION}-linux-amd64.tar.gz.sha256sum" \
+            "helm-${HELM_VERSION}-linux-amd64.tar.gz" "$HELM_SHA256"
+          cmp_sum task \
+            "https://github.com/go-task/task/releases/download/${TASK_VERSION}/task_checksums.txt" \
+            "task_linux_amd64.tar.gz" "$TASK_SHA256"
+          cmp_sum prometheus \
+            "https://github.com/prometheus/prometheus/releases/download/v${PROMETHEUS_VERSION}/sha256sums.txt" \
+            "prometheus-${PROMETHEUS_VERSION}.linux-amd64.tar.gz" "$PROMETHEUS_SHA256"
+          cmp_sum actionlint \
+            "https://github.com/rhysd/actionlint/releases/download/v${ACTIONLINT_VERSION}/actionlint_${ACTIONLINT_VERSION}_checksums.txt" \
+            "actionlint_${ACTIONLINT_VERSION}_linux_amd64.tar.gz" "$ACTIONLINT_SHA256"
+          exit $rc
+
+  # ---------------------------------------------------------------------------
+  # ⚠️ A RED RUN NOBODY IS TOLD ABOUT IS A CHECK THAT NEVER FAILS — iron rule 18,
+  # applied to the two jobs above. Both run only on `schedule`, which fires only on
+  # the default branch, so neither has a pull request to redden and neither blocks
+  # anything. Their entire output was a red square on the Actions tab and one
+  # notification email to whoever owns the repository. `upstream_drift.yml` exists
+  # as an ISSUE TEMPLATE, which says plainly that an issue is the intended
+  # destination; nothing was carrying the finding there.
+  #
+  # ⚠️ ONE JOB FOR BOTH, NOT A STEP IN EACH. Two copies of the de-duplication logic
+  # would be two chances to get it wrong, and the failure mode of getting it wrong
+  # is a new issue every Monday forever, which trains people to ignore the label.
+  #
+  # DE-DUPLICATED ON THE LABEL, NOT THE TITLE. A title carries the run id, so
+  # matching on it would open a fresh issue weekly for a drift nobody has got to
+  # yet. An open `upstream-drift` issue means the finding is already on the board.
+  # ---------------------------------------------------------------------------
+  drift-notify:
+    name: open an issue when a weekly check goes red
+    needs: [upstream-drift, settings-drift]
+    # `!cancelled()` rather than `always()`: a cancelled weekly run has not established
+    # that anything drifted, and filing an issue about it would be noise on the label
+    # this job's de-duplication depends on staying meaningful.
+    if: ${{ !cancelled() && (needs.upstream-drift.result == 'failure' || needs.settings-drift.result == 'failure') }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    # Job-level permissions REPLACE the workflow default rather than extending it,
+    # so `contents: read` is restated alongside the write scope — the same trap
+    # publish-image.yml documents, where the failure reads as a bad credential.
+    permissions:
+      contents: read
+      issues: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: File one, if there is not one open already
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+          UPSTREAM: ${{ needs.upstream-drift.result }}
+          SETTINGS: ${{ needs.settings-drift.result }}
+        run: |
+          set -euo pipefail
+          # ⚠️ CREATED FIRST, BECAUSE IT DOES NOT EXIST YET. The issue TEMPLATE
+          # applies `bug`, and there is no `upstream-drift` label in this repository
+          # — `gh issue create --label` on a missing label is a hard error, so the
+          # first red weekly run would have failed here instead of filing anything.
+          # `bug` is the wrong thing to de-duplicate on anyway: any open bug would
+          # suppress a drift report. Idempotent, so this also works in a fork.
+          gh label create upstream-drift \
+            --description "A pinned upstream, or the branch ruleset, has moved under this repo" \
+            --color B60205 2>/dev/null || true
+          # Written to a file rather than piped, for the reason the changes filter
+          # states: a consumer that exits early SIGPIPEs the producer and pipefail
+          # promotes 141 to the status of the step.
+          # sigpipe-ok: no pipe.
+          gh issue list --label upstream-drift --state open --json number > /tmp/open.json
+          if [ "$(python3 -c 'import json;print(len(json.load(open("/tmp/open.json"))))')" != "0" ]; then
+            echo "::notice title=Drift already tracked::An open upstream-drift issue exists, so no new one was filed. $RUN_URL"
+            exit 0
+          fi
+          {
+            echo "A weekly drift check went red on \`main\`."
+            echo
+            echo "| check | result |"
+            echo "|--|--|"
+            echo "| weekly upstream drift (vLLM + tool pins) | \`$UPSTREAM\` |"
+            echo "| branch ruleset vs required-checks.txt | \`$SETTINGS\` |"
+            echo
+            echo "Run: $RUN_URL"
+            echo
+            echo "Neither check fixes anything — both detect, and a human decides."
+            echo "See \`scripts/check-vllm-buckets.py\` and \`scripts/check-required-checks.py\`"
+            echo "for what each one compares and why."
+          } > /tmp/body.md
+          gh issue create \
+            --title "Weekly drift check failed (run ${GITHUB_RUN_ID})" \
+            --label upstream-drift \
+            --body-file /tmp/body.md
 
   # ---------------------------------------------------------------------------
   # The path with no Kubernetes at all — and the FIRST command in the README, which
@@ -387,9 +657,19 @@ jobs:
     # and both syntax passes. When it is red this job is proving something already
     # known to be broken. Safe as a plain `needs:` here, unlike the matrix `stack`
     # job — a skipped NON-matrix job still reports under its own name.
+    # ⚠️ `always()`, AND THE POLARITY OF THE SECOND TEST IS THE POINT. This was a bare
+    # `if: needs.changes.outputs.code == 'true'`, which carries an implicit `success()`
+    # over both dependencies — so a `changes` job that FAILED (checkout flake, a
+    # five-minute timeout on `fetch-depth: 0`) skipped this job, and GitHub reports a
+    # skipped job to a ruleset as passed. All four required checks went green with
+    # nothing stood up. The filter SCRIPT is carefully fail-open ("being wrong in this
+    # direction costs 13 minutes; the other way ships untested code"); the job wrapped
+    # around it was fail-into-green, which is the posture this repo writes assertions
+    # against. `!= 'false'` treats an absent output — the only thing a failed `changes`
+    # can produce — as a code change.
     needs: [changes, fast]
-    if: needs.changes.outputs.code == 'true'
-    runs-on: ubuntu-latest
+    if: ${{ !cancelled() && needs.fast.result == 'success' && needs.changes.outputs.code != 'false' }}
+    runs-on: ubuntu-24.04
     # Generous against a measured ~1 minute. Nothing here waits on a Helm release; the
     # budget is image pulls plus the readiness poll below.
     timeout-minutes: 10
@@ -473,7 +753,7 @@ jobs:
           }
           # The rules evaluate every 30s and rate() needs two samples in the window,
           # so give the first evaluations time to land before asserting.
-          for i in $(seq 1 40); do
+          for _ in $(seq 1 40); do
             gpu=$(q 'DCGM_FI_DEV_GPU_UTIL' || echo 0)
             llm=$(q 'rate(vllm:generation_tokens_total[1m]) > 0' || echo 0)
             [ "$gpu" -gt 0 ] && [ "$llm" -gt 0 ] && break
@@ -553,12 +833,21 @@ jobs:
       # timed-out run is the one whose logs you need. Guarded on `up` so a run
       # superseded before the stack existed does not upload an empty bundle.
       #
-      # ⚠️ AND NOT ON SUCCESS. `always()` was collecting and uploading a bundle for
-      # every GREEN run too — nobody has ever opened one, and nobody would: it is the
-      # logs of a stack that worked. `!= 'success'` still covers failure, cancellation
-      # and timeout, which is the whole reason this is not `failure()`.
+      # ⚠️ AND NOT ON SUCCESS — BUT WHOSE SUCCESS. This read
+      # `steps.up.outcome != 'success'`, which is the outcome of `docker compose up -d`,
+      # step 2 of 6. That step succeeds essentially always, so the condition was false
+      # on every run where anything downstream broke: the readiness poll timing out,
+      # a producer not being scraped, a target down, a board 404. In other words the
+      # bundle was collected ONLY when compose itself failed to start, and never on
+      # any failure this job exists to catch. It read as correct because the STACK
+      # job's identical-looking guard IS correct — there `up` is `task local:up`,
+      # which is cluster + install + verify, the whole job.
+      #
+      # `job.status` is the thing actually meant: not-success covers failure,
+      # cancellation and timeout, which is why this is still not `failure()`. The `up`
+      # guard stays, so a run superseded before the stack existed uploads nothing.
       - name: Collect compose logs
-        if: always() && steps.up.outcome != 'skipped' && steps.up.outcome != 'success'
+        if: always() && steps.up.outcome != 'skipped' && job.status != 'success'
         working-directory: compose
         run: |
           mkdir -p /tmp/compose-diag
@@ -571,7 +860,7 @@ jobs:
           cp /tmp/targets.json /tmp/compose-diag/ 2>/dev/null || true
 
       - name: Upload compose diagnostics
-        if: always() && steps.up.outcome != 'skipped' && steps.up.outcome != 'success'
+        if: always() && steps.up.outcome != 'skipped' && job.status != 'success'
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: compose-diagnostics-${{ github.run_id }}-${{ github.run_attempt }}
@@ -606,10 +895,11 @@ jobs:
   # ---------------------------------------------------------------------------
   chart:
     name: helm chart (lint, render, assertions fire)
-    # `fast` too, for the reason the `compose` job states.
+    # `fast` too, and `always()` with the inverted second test, for the reasons the
+    # `compose` job states at length — a failed `changes` job must run this, not skip it.
     needs: [changes, fast]
-    if: needs.changes.outputs.code == 'true'
-    runs-on: ubuntu-latest
+    if: ${{ !cancelled() && needs.fast.result == 'success' && needs.changes.outputs.code != 'false' }}
+    runs-on: ubuntu-24.04
     timeout-minutes: 15
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -624,8 +914,9 @@ jobs:
           set -euo pipefail
           mkdir -p "$HOME/.local/bin"
           echo "$HOME/.local/bin" >> "$GITHUB_PATH"
-          curl -fsSL "https://get.helm.sh/helm-${HELM_VERSION}-linux-amd64.tar.gz" \
-            | tar -xz -C /tmp linux-amd64/helm
+          curl -fsSLo /tmp/helm.tgz "https://get.helm.sh/helm-${HELM_VERSION}-linux-amd64.tar.gz"
+          echo "${HELM_SHA256}  /tmp/helm.tgz" | sha256sum -c -
+          tar -xz -C /tmp -f /tmp/helm.tgz linux-amd64/helm
           mv /tmp/linux-amd64/helm "$HOME/.local/bin/helm"
           chmod +x "$HOME/.local/bin/helm"
           helm version --short
@@ -744,26 +1035,20 @@ jobs:
           exit $rc
 
       # ⚠️ The rule the whole build step exists to keep. If a dashboard, a rule
-      # file or the simulator ever appears under charts/, the
+      # file or the simulator ever appears outside the one path that owns it, the
       # single-source-of-truth constraint has been quietly abandoned and
       # assembling into dist/ is doing nothing.
+      #
+      # ⚠️ THIS WAS INLINE BASH UNTIL 2026-08-07, AND THAT IS WHY IT WENT RED
+      # UNNOTICED. It needs no cluster, no cloud and no Docker — `task preflight`'s
+      # entire scope — so a local run said green while `main` was red for a day.
+      # The pattern, the allowlist and the reasoning now live in the script, with a
+      # `--selftest`, and `task preflight` runs the same code this does.
       - name: No second committed copy of any canonical file
         run: |
-          set -euo pipefail
           echo "tracked files under charts/:"
           git ls-files charts/ | sed 's/^/  /'
-          bad=$(git ls-files \
-                | grep -E '(^|/)(llm[-_]sim\.py|.*-rules\.yaml|.*-prometheusrule\.yaml)$|^charts/.*\.json$' \
-                | grep -vE '^(scripts/llm-sim\.py|manifests/alerts/.*-prometheusrule\.yaml|tests/rules/.*_test\.yaml|charts/.*/values\.schema\.json)$' \
-                || true)
-          if [ -n "$bad" ]; then
-            echo "second copies of canonical files are committed:" >&2
-            echo "$bad" | sed 's/^/  /' >&2
-            echo "These are assembled into dist/ by scripts/chart-build.py precisely so" >&2
-            echo "no copy exists in the tree. Delete them." >&2
-            exit 1
-          fi
-          echo "none — the chart is assembled, not vendored"
+          python3 scripts/check-second-copy.py
 
   # ---------------------------------------------------------------------------
   # The simulator image — BUILT for both architectures, RUN on one.
@@ -795,10 +1080,11 @@ jobs:
   # ---------------------------------------------------------------------------
   image:
     name: simulator image (build both arches, smoke-test amd64)
-    # `fast` too, for the reason the `compose` job states.
+    # `fast` too, and `always()` with the inverted second test, for the reasons the
+    # `compose` job states at length — a failed `changes` job must run this, not skip it.
     needs: [changes, fast]
-    if: needs.changes.outputs.code == 'true'
-    runs-on: ubuntu-latest
+    if: ${{ !cancelled() && needs.fast.result == 'success' && needs.changes.outputs.code != 'false' }}
+    runs-on: ubuntu-24.04
     timeout-minutes: 15
     env:
       HAVE_DOCKERHUB: ${{ secrets.DOCKERHUB_USERNAME != '' && secrets.DOCKERHUB_TOKEN != '' }}
@@ -814,6 +1100,19 @@ jobs:
         with:
           username: ${{ secrets.DOCKERHUB_USERNAME }}
           password: ${{ secrets.DOCKERHUB_TOKEN }}
+
+      # ⚠️ REQUIRED FOR THE arm64 HALF, and its absence here was an asymmetry with
+      # publish-image.yml, which sets QEMU up for the identical multi-arch build of
+      # the identical Dockerfile. That Dockerfile has a `RUN useradd`, so the arm64
+      # layer EXECUTES arm64 binaries and needs binfmt emulation. Without this step
+      # the build depended on whatever binfmt handlers the runner image happens to
+      # register — an undeclared dependency, and exactly what pinning `ubuntu-24.04`
+      # above is meant to stop this file from having. The block below argues that
+      # option (a) "adds QEMU's own failure modes"; that argument applies to RUNNING
+      # arm64 under emulation, which this job still does not do. Building it always
+      # needed QEMU.
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@96fe6ef7f33517b61c61be40b68a1882f3264fb8 # v3
 
       - name: Set up buildx
         uses: docker/setup-buildx-action@bb05f3f5519dd87d3ba754cc423b652a5edd6d2c # v3
@@ -937,24 +1236,62 @@ jobs:
   # ---------------------------------------------------------------------------
   chart-cluster:
     name: chart on kind (helm test, foreign Prometheus)
+    # `always()` with the inverted second test, for the reasons the `compose` job
+    # states. It matters most HERE: this is a REQUIRED check, so a skip caused by a
+    # failed `changes` job was reported to the ruleset as a pass.
     needs: [changes, fast]
-    if: needs.changes.outputs.code == 'true'
-    runs-on: ubuntu-latest
-    timeout-minutes: 30
+    if: ${{ !cancelled() && needs.fast.result == 'success' && needs.changes.outputs.code != 'false' }}
+    runs-on: ubuntu-24.04
+    # ⚠️ 60, NOT 30, AND THE OLD CAP WAS BELOW THIS JOB'S OWN WAITS. The composite
+    # action serialises five bounded waits — kind `--wait 5m`, kube-prometheus-stack
+    # `--timeout 15m`, the negative install `10m`, the real install `15m`, the Grafana
+    # rollout `5m` — which is 50 minutes before the dashboard poll starts. A healthy
+    # run is 4m09s (docs/ci.md), so 30 never bit on green and only ever guillotined a
+    # broken run: precisely what the `stack` job's 90-minute cap is written to avoid
+    # ("a cap below the worst case would guillotine the BROKEN run, which is the one
+    # whose diagnostics matter"). Re-derive this if the action's timeouts change.
+    timeout-minutes: 60
+    env:
+      # The `secrets` context is not available in a step-level `if`, so it is
+      # collapsed to a boolean here, exactly as the `stack` and `compose` jobs do.
+      HAVE_DOCKERHUB: ${{ secrets.DOCKERHUB_USERNAME != '' && secrets.DOCKERHUB_TOKEN != '' }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: 0
 
-      - name: Install pinned Helm
+      # ⚠️ THIS JOB PULLS FROM DOCKER HUB TOO, and was the only one of the four that
+      # did not log in. It pulls `kindest/node` for the cluster and `grafana/grafana`
+      # via kube-prometheus-stack, which is the same rate-limited anonymous path the
+      # workflow header is written about — on the required check most exposed to it.
+      # Gated on the secrets existing, so a fork PR still runs.
+      - name: Log in to Docker Hub (skipped without secrets)
+        if: env.HAVE_DOCKERHUB == 'true'
+        uses: docker/login-action@dbcb813823bdd20940b903addbd779551569679f # v4.6.0
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+
+      # ⚠️ kubectl IS PINNED HERE NOW. This job used the runner image's copy — the
+      # only cluster job in the repo that did — while the env block above pins
+      # KUBECTL_VERSION to track the node image's minor and docs/ci.md states that
+      # coupling as a rule. A skew this job cannot see is a skew it cannot report.
+      - name: Install pinned Helm and kubectl
         run: |
           set -euo pipefail
           mkdir -p "$HOME/.local/bin"
           echo "$HOME/.local/bin" >> "$GITHUB_PATH"
-          curl -fsSL "https://get.helm.sh/helm-${HELM_VERSION}-linux-amd64.tar.gz" \
-            | tar -xz -C /tmp linux-amd64/helm
+
+          curl -fsSLo /tmp/helm.tgz "https://get.helm.sh/helm-${HELM_VERSION}-linux-amd64.tar.gz"
+          echo "${HELM_SHA256}  /tmp/helm.tgz" | sha256sum -c -
+          tar -xz -C /tmp -f /tmp/helm.tgz linux-amd64/helm
           mv /tmp/linux-amd64/helm "$HOME/.local/bin/helm"
-          chmod +x "$HOME/.local/bin/helm"
+
+          curl -fsSLo "$HOME/.local/bin/kubectl" \
+            "https://dl.k8s.io/release/${KUBECTL_VERSION}/bin/linux/amd64/kubectl"
+          echo "${KUBECTL_SHA256}  $HOME/.local/bin/kubectl" | sha256sum -c -
+
+          chmod +x "$HOME"/.local/bin/*
           helm version --short
 
       # The chart cannot be installed from charts/ — .Files.Get cannot read outside
@@ -962,10 +1299,17 @@ jobs:
       - name: Build the chart into dist/
         run: python3 scripts/chart-build.py
 
+      # ⚠️ kind-version IS PASSED EXPLICITLY. The action's own default sat at v0.30.0
+      # while this file pins v0.32.0 — and the cluster it builds uses kind/gpu-sim.yaml,
+      # which pins kindest/node:v1.36.1 as "the image kind v0.32.0 ships as its
+      # default". A v0.32-era node image on a v0.30 binary is the mismatch that file's
+      # own comment calls a documented way to get a cluster that never becomes Ready.
+      # check-doc-claims.py now asserts the three agree, so this cannot drift again.
       - name: Install it against a foreign Prometheus and helm test it
         uses: ./.github/actions/verify-chart
         with:
           chart: dist/charts/k8s-ai-observability
+          kind-version: ${{ env.KIND_VERSION }}
 
   # ---------------------------------------------------------------------------
   # The real test: a kind cluster, both Helm releases, all the wiring, and every
@@ -976,6 +1320,18 @@ jobs:
     # status checks ("full stack on kind (full)" / "(lite)"), so a ruleset can require
     # both and a red lite leg cannot hide behind a green full one.
     name: full stack on kind (${{ matrix.profile }})
+    # ⚠️ `!cancelled()`, NOT `always()`, AND THE DIFFERENCE IS 13 RUNNER-MINUTES PER
+    # SUPERSEDED PUSH. `always()` returns true even when the run has been CANCELLED, so
+    # a branch push that supersedes an in-flight run left both legs of this matrix
+    # running to completion anyway — quietly defeating `cancel-in-progress`, which is
+    # the whole reason the concurrency group exists. GitHub's own guidance is to prefer
+    # `!cancelled()` for "run regardless of success or failure".
+    #
+    # Everything the block below argues is preserved: when `fast` FAILS, `!cancelled()`
+    # is still true, so this job still RUNS, the matrix still expands, and both required
+    # names still report. Only genuine cancellation now skips it — and a cancelled run
+    # is one whose checks nobody is waiting on, because the run that superseded it is.
+    #
     # ⚠️ `if: always()` IS WHAT MAKES `needs: fast` SAFE HERE, and without it this job
     # would reintroduce the exact bug the block below documents. `fast` is 9-12s and
     # covers the selftests, doc-claims, the rule tests and both syntax passes; when it
@@ -998,7 +1354,7 @@ jobs:
     # and the ruleset is satisfied. The cost is a runner spin-up per leg — seconds
     # against the ~6.5 minutes each leg takes when it has real work to do.
     needs: [changes, fast]
-    if: always()
+    if: ${{ !cancelled() }}
     strategy:
       # NOT fail-fast. If lite breaks while full passes, that difference IS the signal
       # — cancelling the healthy leg to save four minutes would throw away the
@@ -1006,7 +1362,7 @@ jobs:
       fail-fast: false
       matrix:
         profile: [full, lite]
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     # Derived from the repo's OWN timeouts, not guessed:
     #   install.sh:40  helm kube-prometheus-stack  --wait --timeout 15m
     #   install.sh:45  rollout status operator     --timeout=5m
@@ -1036,7 +1392,17 @@ jobs:
       # collapsing them here keeps the condition on eight steps from drifting apart.
       # Each reason gets its own ::notice:: below, because "this green means nothing
       # ran" and WHY are different things to tell the reader.
-      RUN_STACK: ${{ needs.changes.outputs.code == 'true' && needs.fast.result == 'success' }}
+      #
+      # ⚠️ `!= 'false'`, NOT `== 'true'`, AND THAT IS A THIRD REASON THIS JOB CAN GO
+      # GREEN. A `changes` job that FAILED emits no output at all, and `'' == 'true'`
+      # is false — so both legs of the matrix reported success in three seconds
+      # without standing anything up, and the first notice below told the reader it
+      # was a docs-only change. Since `changes` is not itself a required check, all
+      # four required checks were green on a pull request nothing had verified. The
+      # filter script is meticulously fail-open; only the job around it was not.
+      # `!= 'false'` makes an absent answer mean "run it", which is the same posture
+      # the script takes for an unreachable base commit.
+      RUN_STACK: ${{ needs.changes.outputs.code != 'false' && needs.fast.result == 'success' }}
       # scripts/config.sh does LITE="${LITE:-0}", and :- treats empty as unset, so the
       # 'full' leg passing '' is exactly equivalent to not setting it at all.
       #
@@ -1059,10 +1425,24 @@ jobs:
       # ::notice:: puts it on the run summary, not just in a collapsed log. The job NAME
       # cannot carry it — that string has to stay byte-identical or the ruleset on main
       # stops matching the check, which is the bug the step-level gate exists to fix.
+      # ⚠️ THE FIRST TEST IS NOT REDUNDANT. Without it this step also fired when the
+      # `changes` job FAILED — an empty output is `!= 'true'` — and told the reader
+      # "only markdown changed" about a run where nothing was known about the diff at
+      # all. A wrong diagnosis is worse than none: it closes the question.
       - name: Docs-only change — the stack was NOT stood up
-        if: needs.changes.outputs.code != 'true'
+        if: needs.changes.result == 'success' && needs.changes.outputs.code != 'true'
         run: |
           echo "::notice title=Stack not verified::Only markdown changed, so every step in this job was skipped. This green means 'nothing here could have been affected', NOT 'the stack was stood up and passed'."
+
+      # The third way this job reaches a conclusion without standing anything up, and
+      # the only one that is a fault rather than a decision. It cannot be silent: the
+      # steps below now RUN in this case (RUN_STACK is `!= 'false'`), so this notice
+      # exists to say that the cluster came up despite the gate having no answer,
+      # rather than because of one.
+      - name: The changes filter failed — running everything
+        if: needs.changes.result != 'success'
+        run: |
+          echo "::notice title=Change detection failed::The 'what changed' job did not succeed, so this run could not tell whether the diff touches anything a cluster tests. Failing open: the stack was stood up in full. Fix that job — its failure used to make every required check go green with nothing verified."
 
       # The other way this job goes green without standing anything up. Says which of
       # the two it was, so a reader is never left inferring it from the run graph.
@@ -1109,18 +1489,26 @@ jobs:
           mkdir -p "$HOME/.local/bin"
           echo "$HOME/.local/bin" >> "$GITHUB_PATH"
 
+          # Every artefact is summed before it is used. The tarballs land in a file
+          # first rather than being piped into tar, because a pipe leaves nothing to
+          # verify and checking after extraction checks something already unpacked.
           curl -fsSLo "$HOME/.local/bin/kind" \
             "https://kind.sigs.k8s.io/dl/${KIND_VERSION}/kind-linux-amd64"
+          echo "${KIND_SHA256}  $HOME/.local/bin/kind" | sha256sum -c -
 
           curl -fsSLo "$HOME/.local/bin/kubectl" \
             "https://dl.k8s.io/release/${KUBECTL_VERSION}/bin/linux/amd64/kubectl"
+          echo "${KUBECTL_SHA256}  $HOME/.local/bin/kubectl" | sha256sum -c -
 
-          curl -fsSL "https://get.helm.sh/helm-${HELM_VERSION}-linux-amd64.tar.gz" \
-            | tar -xz -C /tmp linux-amd64/helm
+          curl -fsSLo /tmp/helm.tgz "https://get.helm.sh/helm-${HELM_VERSION}-linux-amd64.tar.gz"
+          echo "${HELM_SHA256}  /tmp/helm.tgz" | sha256sum -c -
+          tar -xz -C /tmp -f /tmp/helm.tgz linux-amd64/helm
           mv /tmp/linux-amd64/helm "$HOME/.local/bin/helm"
 
-          curl -fsSL "https://github.com/go-task/task/releases/download/${TASK_VERSION}/task_linux_amd64.tar.gz" \
-            | tar -xz -C /tmp task
+          curl -fsSLo /tmp/task.tgz \
+            "https://github.com/go-task/task/releases/download/${TASK_VERSION}/task_linux_amd64.tar.gz"
+          echo "${TASK_SHA256}  /tmp/task.tgz" | sha256sum -c -
+          tar -xz -C /tmp -f /tmp/task.tgz task
           mv /tmp/task "$HOME/.local/bin/task"
 
           chmod +x "$HOME"/.local/bin/*

@@ -73,6 +73,18 @@ git push origin main && git push origin vX.Y.Z
 
 ### 5. Watch the two publish workflows
 
+⚠️ **Both wait for CI to go green on the tagged commit before they build anything.** The
+ruleset on `main` gates pull requests and says nothing about a tag, so until this existed
+`git push origin vX.Y.Z` published from whatever that commit contained — and a registry
+version is immutable, which is why the table below has four rows. The first step of each
+workflow polls the check runs on the commit until every name in
+`.github/required-checks.txt` has concluded. Since step 4 above pushes the branch and the
+tag in one line, expect roughly the length of a CI run (about 5m30s, docs/ci.md) of
+apparent inactivity before anything else happens. That is the gate doing its job.
+
+If a required check was *skipped* on that commit — a docs-only change — the gate accepts it
+the way a ruleset would, and says so with a warning naming which.
+
 The tag fires [`publish-image.yml`](../.github/workflows/publish-image.yml) and
 [`publish-chart.yml`](../.github/workflows/publish-chart.yml). Both verify by *consuming*
 what they published rather than trusting the push: the image is pulled back and scraped,
@@ -118,3 +130,9 @@ vendors, packages and inspects the archive, publishes nothing, and says so in th
 ⚠️ A dispatch runs the workflow from the ref you choose, so a retry after a fix runs the
 *fixed* workflow but builds from that ref rather than from the tag. If the chart content is
 identical it does not matter; record it in the CHANGELOG either way, as `v0.8.0` did.
+
+⚠️ That is also the case the **`allow_red_ci`** dispatch input exists for. A branch carrying
+a workflow fix may have no completed CI run of its own, so the green-CI gate would refuse
+it. Setting `allow_red_ci: true` publishes anyway and prints a `::warning::` saying the
+release was not checked against a green run. It is the escape hatch, not the normal path —
+if you find yourself reaching for it twice, the tag is on the wrong commit.

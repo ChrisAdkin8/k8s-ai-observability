@@ -75,6 +75,28 @@ ROOT = Path(__file__).resolve().parent.parent
 DASHBOARDS_README = "manifests/dashboards/README.md"
 EXCLUDED = {"CHANGELOG.md"}  # append-only history; stale numbers there are the record
 
+# EXCLUDED's reasoning, applied to a file that declares itself frozen rather than to a
+# name. A shipped prompt is a RECORD of what was specified, and its counts were true on
+# the day it was written: prompts/prompt-fidelity.md says the simulator "emits 10 of
+# upstream's ~37 V1 metrics", and d91b0e1 — the work that prompt specifies — is what made
+# it 15. Editing that number to satisfy this script would falsify the record, and the file
+# says in its own banner that it is kept unedited for exactly that reason.
+#
+# Records are dropped from the NUMERIC claims only. They stay in the dashboard-id scan,
+# which found three briefs citing an id this repo has never had on its first run over
+# them: a wrong id was wrong when it was written, where a stale count was not.
+#
+# ⚠️ Keyed on the banner text, so a reworded banner puts records back into the numeric
+# scan — and that fails LOUDLY, an old count against current code, rather than going
+# quiet. Loud is the safe direction for a phrase matcher; CLAUDE.md rule 16 is the case
+# where it went the other way.
+RECORD_BANNER = "SHIPPED — this is a RECORD"
+
+
+def is_record(text: str) -> bool:
+    """True for a shipped prompt: a statement of what WAS, not a claim about the tree."""
+    return RECORD_BANNER in text
+
 # Prose spells small numbers as words ("six alerts", "nine PromQL queries") and larger
 # ones as digits ("33 of them"). Both forms have to be readable or the matchers miss
 # exactly the claims that bit.
@@ -187,8 +209,20 @@ VERSIONS_DOC = "docs/versions.md"
 # not published anywhere, it was simply written em-dash-free on request. That is exactly
 # the state the README was in before this check existed, and the README drifted back three
 # times from it. A style held by hand is a style that returns.
+#
+# ⚠️ THE CRITERION IS "PAGES A STRANGER READS FIRST", and it is what stops this list
+# becoming an unstated house-wide rule. An em dash in docs/ci.md is fine; membership here
+# has to mean something, or the rest of docs/ becomes ambiguous rather than excluded.
+#
+# docs/development-method.md joined on 2026-08-06 on both counts. It is linked from the
+# README's opening paragraph, and it is the page that EXPLAINS this preference — a page
+# saying "this page follows that preference throughout" and then not doing so is a
+# contradiction a reader meets before the author does. It is also the likeliest source of
+# the fourth hand-strip: this repo's prose is drafted by a tool whose default punctuation
+# is the em dash, and that page is about how the drafting works.
 EM_DASH_FREE = ["README.md",
                 "ROADMAP.md",
+                "docs/development-method.md",
                 "manifests/dashboards/gpu-sim-dcgm.grafana-com.md",
                 "manifests/dashboards/llm-sim-overview.grafana-com.md"]
 
@@ -264,6 +298,61 @@ def derive_ci_job_count() -> int:
     keys = re.findall(r"^  ([a-z][a-z0-9-]*):[ \t]*$", body[1], re.M)
     keys = [k for k in keys if k != "fast"]
     return len(keys) or die("ci-job-count", f"no jobs found in {CI_WORKFLOW} — dead")
+
+
+VERIFY_CHART_ACTION = ".github/actions/verify-chart/action.yml"
+PUBLISH_CHART_WORKFLOW = ".github/workflows/publish-chart.yml"
+
+
+# ⚠️ EVERY VALUE PINNED IN MORE THAN ONE FILE, and the rule that finds it in each.
+# `reference, don't restate` is the standing instruction, but a workflow cannot read
+# another workflow's `env:` — GitHub has no include — so these genuinely must be
+# written twice, which makes them exactly the fork-waiting-to-disagree this file exists
+# for. The kind pin had already come apart in three places before anyone noticed.
+#
+# ⚠️ THE kind ROW IS A THREE-WAY COUPLING THAT LOOKED LIKE A TWO-WAY ONE, and it had
+# already come apart before this check existed. ci.yml's env block says "kind v0.32.0
+# ships kindest/node:v1.36.1 as its default, which is what kind/gpu-sim.yaml pins. Bump
+# the two together" — but there was a third: the `kind-version` input default in the
+# verify-chart composite action, which sat at v0.30.0 while NEITHER CALLER overrode it.
+# So the `chart on kind` REQUIRED check, and the release path, both built a v0.32-era
+# node image on a v0.30 binary — the pairing kind/gpu-sim.yaml's own comment calls a
+# documented way to get a cluster that never becomes Ready.
+#
+# The node image itself was already covered: config.sh's assert_kind_contract holds
+# gpu-sim.yaml to K8S_VERSION. This was the leg nothing watched, which is exactly why
+# it was the one that drifted.
+CROSS_FILE_PINS = {
+    "KIND_VERSION": [(CI_WORKFLOW, r"^\s*KIND_VERSION:\s*(v[\d.]+)\s*$"),
+                     (PUBLISH_CHART_WORKFLOW, r"^\s*KIND_VERSION:\s*(v[\d.]+)\s*$"),
+                     (VERIFY_CHART_ACTION, r"^\s*default:\s*(v[\d.]+)\s*$")],
+    "HELM_VERSION": [(CI_WORKFLOW, r"^\s*HELM_VERSION:\s*(v[\d.]+)\s*$"),
+                     (PUBLISH_CHART_WORKFLOW, r"^\s*HELM_VERSION:\s*(v[\d.]+)\s*$")],
+    # ⚠️ THE SUM MATTERS MORE THAN THE VERSION IT GUARDS. A version pinned to v3.21.3
+    # in two files that disagree is obvious the first time someone reads both; two
+    # different 64-character hex strings are not. And a stale sum beside a bumped
+    # version fails at `sha256sum -c` with a message that reads like a substituted
+    # artefact rather than like a forgotten line.
+    "HELM_SHA256": [(CI_WORKFLOW, r"^\s*HELM_SHA256:\s*([0-9a-f]{64})\s*$"),
+                    (PUBLISH_CHART_WORKFLOW, r"^\s*HELM_SHA256:\s*([0-9a-f]{64})\s*$")],
+}
+
+
+def cross_file_pins() -> dict:
+    """{pin name: {file: value}} for every value written down in more than one file."""
+    out = {}
+    for name, sources in CROSS_FILE_PINS.items():
+        found = {}
+        for rel, pattern in sources:
+            hits = re.findall(pattern, read(rel), re.M)
+            if not hits:
+                die("cross-pin", f"no {name} found in {rel} — the derivation is dead. "
+                                 f"If the pin moved or was renamed, teach "
+                                 f"CROSS_FILE_PINS where it went; do not delete the row, "
+                                 f"because that silently stops comparing them.")
+            found[rel] = hits[0]
+        out[name] = found
+    return out
 
 
 def derive_ci_gated_count() -> int:
@@ -495,6 +584,20 @@ def main() -> None:
                              f"row, or stop claiming it.")
     print(f"  ok  versions-pins {len(pins)} compose pin(s) each have a row in {VERSIONS_DOC}")
 
+    # ---- every value written down in more than one file
+    checked = 0
+    for name, found in cross_file_pins().items():
+        if len(set(found.values())) != 1:
+            for rel, val in sorted(found.items()):
+                print(f"  {rel}: {name} = {val}", file=sys.stderr)
+            die("cross-pin", f"{name} is pinned in {len(found)} files and they "
+                             f"disagree. GitHub has no include, so these genuinely "
+                             f"have to be written twice — which is why they are "
+                             f"compared here rather than trusted.")
+        checked += len(found)
+    print(f"  ok  cross-pin   {len(CROSS_FILE_PINS)} pin(s) agree across {checked} "
+          f"file reference(s)")
+
     # ---- CI check names: two set comparisons, not counts
     #
     # ⚠️ The ruleset on `main` requires these strings and lives in GitHub SETTINGS,
@@ -534,8 +637,18 @@ def main() -> None:
     print(f"  ok  ci-jobs     all {len(ci_names)} check name(s) appear in {CI_DOC}")
 
     # ---- the numeric claims
+    #
+    # Excluded here and nowhere else in this script — see RECORD_BANNER for why, and for
+    # why the id scan above still reads them.
+    live = {p: t for p, t in texts.items() if not is_record(t)}
+    if len(live) == len(texts) and any(p.startswith("prompts/") for p in texts):
+        die("records", f"no tracked markdown carries {RECORD_BANNER!r} — either every "
+                       "prompt is live, or the banner was reworded and this exclusion is "
+                       "dead. If it was reworded, teach RECORD_BANNER the new text.")
+    skipped = len(texts) - len(live)
+    print(f"  ok  records    {skipped} shipped record(s) held out of the numeric claims")
     for c in CLAIM_CHECKS:
-        scan = dict(texts)
+        scan = dict(live)
         for rel in c.get("extra", []):
             scan[rel] = read(rel)
         cast = c.get("cast", to_int)
@@ -669,6 +782,13 @@ def selftest() -> None:
                       c.get("cast", to_int)) == []
     assert blessed_ids("no ids at all") == set()
     print("  ok  empty      no-match is representable — main() treats it as fatal")
+
+    # ⚠️ Both directions. Detecting the banner is half of it; the half that matters is
+    # that a LIVE brief is not mistaken for a record, because that would silently retire
+    # every numeric claim in the file the check most needs to read.
+    assert is_record("> ## ⚠️ SHIPPED — this is a RECORD, not a specification")
+    assert not is_record("W1 — emit `prefix_cache_*`, the families the claim needed")
+    print("  ok  records    the shipped banner is detected, a live brief is not")
 
 
 if __name__ == "__main__":

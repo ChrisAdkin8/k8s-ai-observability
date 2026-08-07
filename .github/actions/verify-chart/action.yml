@@ -35,7 +35,24 @@ inputs:
   kind-version:
     description: 'kind release to install.'
     required: false
-    default: v0.30.0
+    # ⚠️ THIS DEFAULT WAS TWO MINORS BEHIND THE REST OF THE REPO, and neither caller
+    # overrode it. ci.yml pins KIND_VERSION: v0.32.0, and the cluster built below uses
+    # kind/gpu-sim.yaml, which pins kindest/node:v1.36.1 as "the image kind v0.32.0
+    # ships as its default". A v0.32-era node image on a v0.30 binary is precisely the
+    # pairing that file warns about: kind ties node images to kind RELEASES, and a
+    # mismatch is a documented way to get a cluster that never becomes Ready.
+    #
+    # Both callers now pass this explicitly, and check-doc-claims.py asserts that this
+    # default, ci.yml's KIND_VERSION and publish-chart.yml's all agree — so the default
+    # is a safety net rather than the operative value, and it can no longer rot in
+    # silence the way it did.
+    default: v0.32.0
+  kps-chart-version:
+    description: >
+      kube-prometheus-stack chart version. Empty means "derive it from
+      scripts/config.sh", which is what both callers want.
+    required: false
+    default: ''
 
 # ⚠️ EVERY INPUT REACHES THE SHELL AS AN ENVIRONMENT VARIABLE, NEVER AS `${{ }}`
 # INSIDE A `run:` BODY. An expression interpolated into a script is substituted as TEXT
@@ -50,12 +67,23 @@ runs:
   using: composite
   steps:
     - name: Create a kind cluster
+      id: cluster
       shell: bash
       env:
         KIND_VER: ${{ inputs.kind-version }}
       run: |
         set -euo pipefail
         curl -fsSLo /tmp/kind "https://kind.sigs.k8s.io/dl/${KIND_VER}/kind-linux-amd64"
+        # ⚠️ THE WEAKER FORM OF THE CHECK IN ci.yml, AND DELIBERATELY SO. There the
+        # sums are constants committed to this repository, which is what makes them
+        # worth something against a substituted artefact. Here the version is an
+        # INPUT, so there is no constant to compare against and the sum has to come
+        # from the same publisher over the same connection: that catches a truncated
+        # or corrupted download and does not claim to catch anything else. Stating
+        # which of the two this is beats implying they are the same check.
+        curl -fsSLo /tmp/kind.sha256sum \
+          "https://github.com/kubernetes-sigs/kind/releases/download/${KIND_VER}/kind-linux-amd64.sha256sum"
+        echo "$(cut -d' ' -f1 /tmp/kind.sha256sum)  /tmp/kind" | sha256sum -c -
         chmod +x /tmp/kind && sudo mv /tmp/kind /usr/local/bin/kind
         kind create cluster --config kind/gpu-sim.yaml --wait 5m
         kubectl get nodes
@@ -64,6 +92,7 @@ runs:
     # label nodes. Without it the fake operator watches a pool no node belongs to and
     # the install is green with ZERO GPUs.
     - name: Label a node for the simulated GPU pool
+      id: label
       shell: bash
       run: |
         set -euo pipefail
@@ -77,16 +106,42 @@ runs:
     # NO selector overrides: upstream defaults ruleSelectorNilUsesHelmValues and its
     # siblings to true, which makes the selector `release=<that release>`. That default
     # IS the BYO case, so leaving it alone is the realistic test.
+    #
+    # ⚠️ AND IT IS PINNED. This installed whatever kube-prometheus-stack happened to be
+    # newest, while scripts/config.sh pins KPS_CHART_VERSION for every other path in
+    # the repo. Two consequences, both bad. The result was not reproducible: yesterday's
+    # green and today's red could differ only by an upstream release nobody here chose.
+    # And it punched straight through the boundary the `upstream-drift` job exists to
+    # hold — that job is schedule-only precisely because "reddening someone's unrelated
+    # pull request because vLLM moved a bucket that morning trains people to ignore
+    # red", and an unpinned chart did exactly that, on a REQUIRED check.
+    #
+    # DERIVED FROM config.sh RATHER THAN RESTATED. A second copy of the number is a
+    # fork waiting to disagree, and this file already reads values.yaml the same way.
+    # Empty means "derive"; the guard makes a renamed variable fail loudly rather than
+    # quietly reinstate the floating install.
     - name: Install kube-prometheus-stack as a FOREIGN release
+      id: kps
       shell: bash
       env:
         REL: ${{ inputs.kps-release }}
         NS: ${{ inputs.kps-namespace }}
+        KPS_VER_IN: ${{ inputs.kps-chart-version }}
       run: |
         set -euo pipefail
+        kps_ver="$KPS_VER_IN"
+        if [ -z "$kps_ver" ]; then
+          kps_ver=$(sed -n 's/^KPS_CHART_VERSION="\([^"]*\)".*/\1/p' scripts/config.sh)
+        fi
+        [ -n "$kps_ver" ] || {
+          echo "::error::could not read KPS_CHART_VERSION from scripts/config.sh. The" \
+               "derivation is dead, and falling back to an unpinned install is how this" \
+               "check stopped being reproducible in the first place." >&2; exit 1; }
+        echo "  kube-prometheus-stack $kps_ver (scripts/config.sh)"
         helm repo add prometheus-community https://prometheus-community.github.io/helm-charts
         helm repo update
         helm install "$REL" prometheus-community/kube-prometheus-stack \
+          --version "$kps_ver" \
           -n "$NS" --create-namespace --wait --timeout 15m
         kubectl -n "$NS" get prometheus \
           -o jsonpath='{.items[0].spec.ruleSelector}{"\n"}'
@@ -98,6 +153,7 @@ runs:
     # thing that says so, which is why it is asserted to FAIL here rather than assumed
     # to be unnecessary.
     - name: helm test FAILS on the default releaseLabel (the silent failure)
+      id: neg
       shell: bash
       env:
         VER: ${{ inputs.version }}
@@ -119,6 +175,7 @@ runs:
         helm uninstall neg -n neg --wait
 
     - name: Install correctly and helm test it
+      id: pos
       shell: bash
       env:
         VER: ${{ inputs.version }}
@@ -136,6 +193,7 @@ runs:
         helm test rig -n rig --logs
 
     - name: Both boards are reachable in the foreign Grafana
+      id: boards
       shell: bash
       env:
         NS: ${{ inputs.kps-namespace }}
@@ -155,7 +213,7 @@ runs:
         test -n "$uids" || { echo "::error::derived no dashboard uids — the check is dead" >&2; exit 1; }
         for uid in $uids; do
           code=000
-          for i in $(seq 1 30); do
+          for _ in $(seq 1 30); do
             code=$(curl -s -o /dev/null -w '%{http_code}' -u "admin:$pw" \
                    "http://localhost:13001/api/dashboards/uid/$uid")
             [ "$code" = "200" ] && break
@@ -165,3 +223,92 @@ runs:
             || { echo "::error::/d/$uid returned $code — the sidecar never imported it (grafana.dashboardLabel?)" >&2; exit 1; }
           echo "  ok  /d/$uid -> 200"
         done
+
+    # ⚠️ THE ONLY CLUSTER PATH IN THIS REPO THAT COLLECTED NOTHING. `stack` and
+    # `compose` both build a diagnostic bundle, and this — the required check, and the
+    # one that also gates a release — gave you whatever `helm test --logs` printed and
+    # nothing else. A `helm test` that fails because a pod never became Ready is not
+    # diagnosable from its own output.
+    #
+    # ⚠️ EVERY STEP OUTCOME, NAMED — AND NOT `job.status`, WHICH IS INERT HERE.
+    # The first version of this guard was `always() && job.status != 'success'`, copied
+    # from the fix applied to the `compose` job in the same change. It never fired.
+    # `job.status` IS NOT UPDATED INSIDE A COMPOSITE ACTION: it reads `success` even
+    # after a step in that action has exited 1 (actions/runner#1682). So the condition
+    # was constant-false and this collected nothing — the identical dead-guard bug that
+    # motivated the whole step, reintroduced one layer down, in the change that fixed it.
+    #
+    # Nothing caught it. `actionlint` cannot parse a composite action, which is why
+    # scripts/check-action-shell.py exists; that script linted the SHELL and had nothing
+    # to say about the expression above it. It does now — a `job.` reference in a
+    # composite action is a hard error there, with a selftest.
+    #
+    # `steps.<id>.outcome` IS correct in a composite action, hence the six ids.
+    # `always()` itself works here — runner#1682's reporter used it, and their step ran;
+    # only the value it read was wrong.
+    #
+    # ⚠️ THE POLARITY IS `!= 'success'`, NOT `== 'failure'`, AND THE DIFFERENCE IS THE
+    # RUN YOU MOST NEED THE BUNDLE FROM. `timeout-minutes` expiry CANCELS the job, and a
+    # cancelled step's outcome is `cancelled` — no `== 'failure'` term is true for it, so
+    # the guard collected nothing from exactly the run that walked all 50 minutes of
+    # bounded waits. This read as correct for the same reason the `job.status` bug did:
+    # the failing path is the one nobody exercises.
+    #
+    # ci.yml states the same rule in prose for the compose job — "not-success covers
+    # failure, cancellation and timeout, which is why this is still not `failure()`" —
+    # and this file disagreed with it until 2026-08-07. `job.status` is unreadable here
+    # (see above), so the polarity is applied per step instead.
+    #
+    # ⚠️ Under `!=`, a step that NEVER RAN also compares unequal, so it fires too. That
+    # is wanted: it means an earlier step already failed. It is only safe because none of
+    # the six carries an `if:` — all are unconditional, so on a green run all six read
+    # `success` and the OR is false. Add a conditional step to that list and this guard
+    # starts firing on healthy runs.
+    #
+    # Everything below is best-effort — a broken cluster must not break the dump — and
+    # the whole thing is skipped on green, because nobody opens the logs of a run that
+    # worked.
+    - name: Diagnostics
+      id: diag
+      if: >-
+        always() && (steps.cluster.outcome != 'success'
+        || steps.label.outcome != 'success'
+        || steps.kps.outcome != 'success'
+        || steps.neg.outcome != 'success'
+        || steps.pos.outcome != 'success'
+        || steps.boards.outcome != 'success')
+      shell: bash
+      env:
+        NS: ${{ inputs.kps-namespace }}
+      run: |
+        d=/tmp/chart-diag
+        mkdir -p "$d"
+        kubectl get pods -A -o wide                    > "$d/pods.txt"     2>&1 || true
+        kubectl get events -A --sort-by=.lastTimestamp > "$d/events.txt"   2>&1 || true
+        kubectl get servicemonitor,prometheusrule -A   > "$d/crds.txt"     2>&1 || true
+        helm list -A                                   > "$d/releases.txt" 2>&1 || true
+        # The ruleSelector is the whole subject of the negative case: when `helm test`
+        # passes where it must fail, this is the field that explains why.
+        kubectl -n "$NS" get prometheus -o yaml        > "$d/prometheus.yaml" 2>&1 || true
+        for ns in neg rig "$NS"; do
+          for pod in $(kubectl -n "$ns" get pods -o name 2>/dev/null); do
+            echo "### $ns/$pod" >> "$d/logs.txt"
+            kubectl -n "$ns" logs "$pod" --all-containers --tail=200 >> "$d/logs.txt" 2>&1 || true
+            kubectl -n "$ns" describe "$pod" >> "$d/describe.txt" 2>&1 || true
+          done
+        done
+        echo "--- collected ---"; ls -la "$d"
+
+    # Named for the CALLER, because both of them upload one: `chart-cluster` on a pull
+    # request and `verify-published` on a tag. Two artifacts of the same name in one
+    # run collide, which is the lesson the stack job's matrix.profile suffix records.
+    # Gated on the COLLECTOR having run, not on the outcomes again: one place decides,
+    # and a second copy of that six-term expression is a fork waiting to disagree.
+    - name: Upload chart diagnostics
+      if: always() && steps.diag.outcome != 'skipped'
+      uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+      with:
+        name: chart-diagnostics-${{ github.job }}-${{ github.run_id }}-${{ github.run_attempt }}
+        path: /tmp/chart-diag
+        retention-days: 14
+        if-no-files-found: warn
