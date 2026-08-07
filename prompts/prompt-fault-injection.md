@@ -43,8 +43,9 @@ evidence.
 A half-day spike ran the cheap empirical version of every question in this file that did not
 need a cluster (`ROADMAP.md`'s own warning: ask whether the cheap empirical version exists
 before planning around an estimate). **The numbers below are measured, not modelled**, and
-two of them changed the work. The scripts are on the `spike/fault-injection` branch under
-`spike/`; rerun them rather than trusting the transcription.
+two of them changed the work. The scripts are **tracked at `spike/`** (`0d426e5`, and
+`spike/README.md` records why they are on `main` rather than on a branch); rerun them rather
+than trusting the transcription.
 
 | Question | Answer | Where it lands |
 |--|--|--|
@@ -119,12 +120,13 @@ Adding one touches five places, and the last one fails `task preflight`:
 |--|--|
 | `manifests/alerts/llm-prometheusrule.yaml` | the rule |
 | `tests/rules/llm-rules_test.yaml` | promtool cases, both sides (rule 18) |
-| `docs/llm-simulation.md:405-412` | the alert table has a row per alert |
+| `docs/llm-simulation.md:404-411` | the alert table has a row per alert |
 | `docs/architecture.md:128` | enumerates the alert names |
 | **`docs/llm-simulation.md:43`** | **"Recording rules + six alerts" is derived and checked** |
 
-`scripts/check-doc-claims.py:118` counts `- alert:` entries in the LLM rule file and
-compares against the prose number. **Measured in the spike** by appending a seventh alert:
+`derive_llm_alerts()` (`scripts/check-doc-claims.py:140-143`, registered at `:423-425`)
+counts `- alert:` entries in the LLM rule file and compares against the prose number.
+**Measured in the spike** by appending a seventh alert:
 
 ```
   docs/llm-simulation.md:43: claims 6; derived 7 (alerts in the LLM rule file)
@@ -230,7 +232,9 @@ KV cache with, and it is available here without disturbing the queue.
 
 ### Concurrency at a sub-capacity arrival rate — DERIVED, RE-DERIVE IT BEFORE USING IT
 
-Capacity is 2.74 rps (`drive-llm-load.sh:49-53`). Below it, mean concurrency is
+Capacity is 2.74 rps — **read it off `llmsim_capacity_rps` (`llm-sim.py:813`), not off the
+base-latency comment at `drive-llm-load.sh:49-53`**, which is what rule 3 and the incident
+in `10-profiles.yaml:34` are about. Below it, mean concurrency is
 `arrival_rate x service_time`, and service time itself depends on load through
 `CONGESTION_AT_FULL_LOAD` (`llm-sim.py:225`), so it needs one fixed-point iteration. At
 1.8 rps it converges near **9 concurrent requests**, so mean active tokens are about
@@ -326,8 +330,11 @@ nothing. In this harness the caller's EXIT trap is what puts the cluster back. L
 `mktemp` and the `trap` to each caller.
 
 ⚠️ **Price the extraction honestly: it edits the repo's most load-bearing script, and
-proving it still works needs a full cluster `verify.sh` run** (~4 minutes of checks after a
-cluster exists, and it is the gate everything else is measured against). If that run is not
+proving it still works needs a full cluster `verify.sh` run** (160s of checks on `full` and
+150s on `lite` after a cluster exists — `docs/ci.md:366`, run `30998470446`, which owns
+every timing in this repo — and it is the gate everything else is measured against). Note
+that this is the *post* port-forward-fix figure; the 247s a reader may remember is the
+number that fix was measured against. If that run is not
 available in the same sitting, ship the drill with its own copy behind a ⚠️ marked in the
 file that owns it (rule 16) and land the extraction as its own commit afterwards — but do
 not leave the duplication unmarked.
@@ -360,10 +367,12 @@ flag, no new transport.
 ```
 
 **W0.2 It is portable because a ConfigMap volume is a file and a bind mount is a file.**
-`llm-sim.py` polls `/etc/llm-sim/profile.json` and neither knows nor cares what wrote it. The
-compose stack already mounts profiles this way (`compose/compose.yaml:60`,
-`--profile /etc/llm-sim/steady.json`) and the cluster already mounts them as a ConfigMap
-directory (`llm-driven.yaml:103-109`). **So the simulator needs no platform code at all** —
+`llm-sim.py` polls the path it was given and neither knows nor cares what wrote it. The
+compose stack already mounts a profiles directory (`compose/compose.yaml:60`) and names the
+file on the command line (`:54`, `--profile /etc/llm-sim/steady.json`); the cluster mounts a
+ConfigMap directory (`llm-driven.yaml:103-109`) and names `/etc/llm-sim/profile.json` (`:85`).
+**The filename differs per platform and the mechanism does not** — which is the part that
+matters here, and the part the helper has to take as an argument rather than assume. **So the simulator needs no platform code at all** —
 which is the whole reason to choose this over a fault API, a sidecar, or a CRD.
 
 Everything the delivery path needs already exists: the 10s poll, `apply_profile` swapping the
@@ -453,7 +462,7 @@ resolves `eks|gke|local` positionally through `ensure_context`, so `compose` is 
 in an existing convention rather than a new one. **kind, EKS and GKE are one backend**: same
 manifests, same verbs, differing only in cost and node count. Compose is the second.
 
-A mode with no analogue on a target reports **SKIP with the reason** — `verify.sh:47-49`
+A mode with no analogue on a target reports **SKIP with the reason** — `verify.sh:45-48`
 already has that vocabulary, and its rule that SKIP must never paper over a real mismatch. The
 clearest case is W9: compose has no ServiceMonitor and no `PrometheusRule` CR, so non-adoption
 is not a fault that exists there.
@@ -574,7 +583,7 @@ while frozen and the first unfrozen call replays the entire frozen interval in o
 minutes of arrivals and completions land in a single scrape gap, every histogram takes a
 step change, and `rate()` reports a spike that never happened.
 
-**MEASURED, not predicted** (`spike/` on the spike branch, a 5 minute freeze at 1.8 rps):
+**MEASURED, not predicted** (`spike/thaw_burst.py`, a 5 minute freeze at 1.8 rps):
 
 | | Tokens in the first post-thaw scrape gap |
 |--|--|
@@ -640,13 +649,14 @@ FAILED: alertname: LLMMetricsStale, time: 25m
 ```
 
 `got:[]` is what this failure looks like in production too, except nothing prints it. Same
-genre as `llm-prometheusrule.yaml:380-385` for the burn alerts and `:95-104` for the phase
+genre as `llm-prometheusrule.yaml:380-386` for the burn alerts and `:95-104` for the phase
 means.
 
 ⚠️ **The window is a real trade-off, not a default.** 10m over `generation_tokens_total`
-says "no request has completed in ten minutes". On this rig the saturated tenant's e2e is
-~68s so that is safe, but a real deployment generating long outputs at low concurrency can
-exceed it legitimately. State the assumption in the rule comment and pick the window
+says "no request has completed in ten minutes". On this rig the saturated tenant's queue
+wait plateaus near 58s (`drive-llm-load.sh:49-53`, 160 / 2.74 by Little's Law) and e2e is
+that plus a prefill and a decode, so 10m clears it by an order of magnitude — but a real
+deployment generating long outputs at low concurrency can exceed it legitimately. State the assumption in the rule comment and pick the window
 deliberately.
 
 **W3.6 The negative case is what makes it worth having.** An **idle** tenant reads
@@ -710,8 +720,8 @@ A drill run without one is not a test.
 **W6.1 ⚠️ The isolation window is narrow, and the spike found its edge.** The obvious move
 — raise the arrival rate so the request population is large and stable — breaks the drill,
 because the queue that fills the KV cache also raises TTFT. Measured across eight seeds
-(`spike/kv_isolation.py`, bucket p95 computed the way the alert computes it, over
-`TTFT_BUCKETS`, not from raw samples):
+(`spike/kv_profile.py` — the same run as the Background table, one script for both; bucket
+p95 computed the way the alert computes it, over `TTFT_BUCKETS`, not from raw samples):
 
 | rps | max queue depth | bucket p95 TTFT | isolated? |
 |--|--|--|--|
@@ -742,7 +752,7 @@ raise `prompt_tokens.mean`. Neither touches latency (verified above). The candid
 both — prompt length for the mechanism, capacity for the trim — because prompt length is
 how a real deployment fills its KV cache.
 
-**W6.3 The isolation is the assertion.** Expected while it holds:
+**W6.4 The isolation is the assertion.** Expected while it holds:
 
 | Query | Expected |
 |--|--|
@@ -754,12 +764,12 @@ how a real deployment fills its KV cache.
 The last three rows are the point: this mode exists to fire **one** alert and demonstrate
 that the other two stayed quiet, which is the state ROADMAP.md says no fixture provides.
 
-**W6.4 Say what the drill did and did not do.** It moved a gauge past a threshold and the
+**W6.5 Say what the drill did and did not do.** It moved a gauge past a threshold and the
 alert that watches that gauge fired. The engine's behaviour is unchanged. See the
 `num_preemptions_total` note in Background; do not let the write-up imply modelled KV
 pressure.
 
-**W6.5 Expect a clamped 1.0** at any robust setting (`llm-sim.py:693`), and note the
+**W6.6 Expect a clamped 1.0** at any robust setting (`llm-sim.py:693`), and note the
 consequence in the write-up: with a `for: 5m` over a fluctuating population, the settings
 that fire reliably are the settings where the crossing is invisible. That is a real property
 of gauge-plus-duration alerting, worth one paragraph.
@@ -995,7 +1005,7 @@ evaluation interval.
 - **Any `verify.sh` check asserting a fault.** Rule 7: a finding with a shelf life belongs in
   a scenario script. The only thing CI gains from this work is `llm-sim.py --selftest`
   coverage of the freeze knob, and the promtool cases for any new alert.
-- **Modelling KV pressure, or emitting `num_preemptions_total`.** See W6.4.
+- **Modelling KV pressure, or emitting `num_preemptions_total`.** See W6.5.
 - **A configuration language, a CRD, a fault API or a sidecar.** W0 is a JSON block in a file
   the simulator already reads. Anything that needs a controller, a schema compiler or a second
   transport has left the design, and the stdlib-only rule is what it hits first.
