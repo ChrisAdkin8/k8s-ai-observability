@@ -31,11 +31,13 @@ If you changed shell, `bash -n scripts/*.sh` is the next thing CI checks; every 
 the repo goes through `python3 -m py_compile` beside it, so a syntax error in the release
 tooling no longer waits until someone tries to cut a release.
 
-CI runs eight jobs beyond `fast`: `changes` (which gates the expensive ones on a
+CI runs nine jobs beyond `fast`: `changes` (which gates the expensive ones on a
 non-markdown diff), `compose`, `chart`, `chart-cluster`, `image`, and the two `stack` legs,
-plus `upstream-drift` and `settings-drift`. Those last two are scheduled and dispatch-only,
-so an upstream vLLM release never reddens someone's unrelated PR, and a ruleset edit is
-caught weekly rather than on someone's branch. [docs/ci.md](docs/ci.md) is the map.
+plus `upstream-drift`, `settings-drift` and `drift-notify`. Those last three are scheduled
+and dispatch-only, so an upstream vLLM release never reddens someone's unrelated PR, and a
+ruleset edit is caught weekly rather than on someone's branch; `drift-notify` files an
+issue when either of the other two goes red, because a weekly failure nobody is told about
+is a check that never fails. [docs/ci.md](docs/ci.md) is the map.
 
 ⚠️ That count is checked. `scripts/check-doc-claims.py` derives it from `ci.yml`, because
 this paragraph said *six* and named `upstream-drift` as the only job off pull requests long

@@ -310,8 +310,15 @@ jobs:
     name: pull back anonymously + install against a foreign Prometheus
     needs: publish
     if: needs.publish.outputs.pushed == 'true'
-    runs-on: ubuntu-latest
-    timeout-minutes: 45
+    runs-on: ubuntu-24.04
+    # ⚠️ 75, NOT 45, AND THE OLD CAP WAS BELOW THIS JOB'S OWN WAITS. The composite
+    # action at the end serialises 50 minutes of bounded waits on its own — kind
+    # `--wait 5m`, kube-prometheus-stack `15m`, the negative install `10m`, the real
+    # install `15m`, the Grafana rollout `5m` — before the anonymous pull, both
+    # renders and the assertion sweep above it are counted. A healthy run is minutes,
+    # so 45 never bit on green and only ever guillotined a broken one, which is the
+    # run whose diagnostics decide whether an immutable release is sound.
+    timeout-minutes: 75
 
     # ⚠️ DELIBERATELY NOT `packages: read`. The whole point of W1.4 is that the
     # package is PUBLIC, and a job holding a credential cannot tell the
@@ -335,8 +342,9 @@ jobs:
           set -euo pipefail
           mkdir -p "$HOME/.local/bin"
           echo "$HOME/.local/bin" >> "$GITHUB_PATH"
-          curl -fsSL "https://get.helm.sh/helm-${HELM_VERSION}-linux-amd64.tar.gz" \
-            | tar -xz -C /tmp linux-amd64/helm
+          curl -fsSLo /tmp/helm.tgz "https://get.helm.sh/helm-${HELM_VERSION}-linux-amd64.tar.gz"
+          echo "${HELM_SHA256}  /tmp/helm.tgz" | sha256sum -c -
+          tar -xz -C /tmp -f /tmp/helm.tgz linux-amd64/helm
           mv /tmp/linux-amd64/helm "$HOME/.local/bin/helm"
           chmod +x "$HOME/.local/bin/helm"
           helm version --short

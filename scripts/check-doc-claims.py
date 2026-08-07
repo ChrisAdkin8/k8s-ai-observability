@@ -300,6 +300,61 @@ def derive_ci_job_count() -> int:
     return len(keys) or die("ci-job-count", f"no jobs found in {CI_WORKFLOW} — dead")
 
 
+VERIFY_CHART_ACTION = ".github/actions/verify-chart/action.yml"
+PUBLISH_CHART_WORKFLOW = ".github/workflows/publish-chart.yml"
+
+
+# ⚠️ EVERY VALUE PINNED IN MORE THAN ONE FILE, and the rule that finds it in each.
+# `reference, don't restate` is the standing instruction, but a workflow cannot read
+# another workflow's `env:` — GitHub has no include — so these genuinely must be
+# written twice, which makes them exactly the fork-waiting-to-disagree this file exists
+# for. The kind pin had already come apart in three places before anyone noticed.
+#
+# ⚠️ THE kind ROW IS A THREE-WAY COUPLING THAT LOOKED LIKE A TWO-WAY ONE, and it had
+# already come apart before this check existed. ci.yml's env block says "kind v0.32.0
+# ships kindest/node:v1.36.1 as its default, which is what kind/gpu-sim.yaml pins. Bump
+# the two together" — but there was a third: the `kind-version` input default in the
+# verify-chart composite action, which sat at v0.30.0 while NEITHER CALLER overrode it.
+# So the `chart on kind` REQUIRED check, and the release path, both built a v0.32-era
+# node image on a v0.30 binary — the pairing kind/gpu-sim.yaml's own comment calls a
+# documented way to get a cluster that never becomes Ready.
+#
+# The node image itself was already covered: config.sh's assert_kind_contract holds
+# gpu-sim.yaml to K8S_VERSION. This was the leg nothing watched, which is exactly why
+# it was the one that drifted.
+CROSS_FILE_PINS = {
+    "KIND_VERSION": [(CI_WORKFLOW, r"^\s*KIND_VERSION:\s*(v[\d.]+)\s*$"),
+                     (PUBLISH_CHART_WORKFLOW, r"^\s*KIND_VERSION:\s*(v[\d.]+)\s*$"),
+                     (VERIFY_CHART_ACTION, r"^\s*default:\s*(v[\d.]+)\s*$")],
+    "HELM_VERSION": [(CI_WORKFLOW, r"^\s*HELM_VERSION:\s*(v[\d.]+)\s*$"),
+                     (PUBLISH_CHART_WORKFLOW, r"^\s*HELM_VERSION:\s*(v[\d.]+)\s*$")],
+    # ⚠️ THE SUM MATTERS MORE THAN THE VERSION IT GUARDS. A version pinned to v3.21.3
+    # in two files that disagree is obvious the first time someone reads both; two
+    # different 64-character hex strings are not. And a stale sum beside a bumped
+    # version fails at `sha256sum -c` with a message that reads like a substituted
+    # artefact rather than like a forgotten line.
+    "HELM_SHA256": [(CI_WORKFLOW, r"^\s*HELM_SHA256:\s*([0-9a-f]{64})\s*$"),
+                    (PUBLISH_CHART_WORKFLOW, r"^\s*HELM_SHA256:\s*([0-9a-f]{64})\s*$")],
+}
+
+
+def cross_file_pins() -> dict:
+    """{pin name: {file: value}} for every value written down in more than one file."""
+    out = {}
+    for name, sources in CROSS_FILE_PINS.items():
+        found = {}
+        for rel, pattern in sources:
+            hits = re.findall(pattern, read(rel), re.M)
+            if not hits:
+                die("cross-pin", f"no {name} found in {rel} — the derivation is dead. "
+                                 f"If the pin moved or was renamed, teach "
+                                 f"CROSS_FILE_PINS where it went; do not delete the row, "
+                                 f"because that silently stops comparing them.")
+            found[rel] = hits[0]
+        out[name] = found
+    return out
+
+
 def derive_ci_gated_count() -> int:
     """How many jobs `fast` GATES, which is not the same as how many jobs exist.
 
@@ -528,6 +583,20 @@ def main() -> None:
         die("versions-pins", f"{VERSIONS_DOC} opens by claiming every pinned version. Add a "
                              f"row, or stop claiming it.")
     print(f"  ok  versions-pins {len(pins)} compose pin(s) each have a row in {VERSIONS_DOC}")
+
+    # ---- every value written down in more than one file
+    checked = 0
+    for name, found in cross_file_pins().items():
+        if len(set(found.values())) != 1:
+            for rel, val in sorted(found.items()):
+                print(f"  {rel}: {name} = {val}", file=sys.stderr)
+            die("cross-pin", f"{name} is pinned in {len(found)} files and they "
+                             f"disagree. GitHub has no include, so these genuinely "
+                             f"have to be written twice — which is why they are "
+                             f"compared here rather than trusted.")
+        checked += len(found)
+    print(f"  ok  cross-pin   {len(CROSS_FILE_PINS)} pin(s) agree across {checked} "
+          f"file reference(s)")
 
     # ---- CI check names: two set comparisons, not counts
     #
