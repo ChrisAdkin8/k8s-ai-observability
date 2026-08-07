@@ -52,11 +52,23 @@ env:
   OCI_REPO: ghcr.io/${{ github.repository_owner }}/charts
   CHART_NAME: k8s-ai-observability
   HELM_VERSION: v3.21.3
+  # ⚠️ MUST MATCH ci.yml's KIND_VERSION, and check-doc-claims.py asserts it. The
+  # composite action below builds a cluster from kind/gpu-sim.yaml, which pins a node
+  # image kind ties to a specific kind RELEASE; the action's own default had drifted
+  # two minors behind, so the release path was verifying the chart on a pairing the
+  # cluster config warns against.
+  KIND_VERSION: v0.32.0
+  # Published SHA-256 sums for the versions pinned above, read from the publishers'
+  # own checksum files on 2026-08-06. A version pin fixes a name, not bytes; see the
+  # longer note in ci.yml's env block.
+  HELM_SHA256: 15e041a93a590dce8100f39385cd98c84a765c9e36aeeb9e2dc6ff9e4769e2e0
+  ORAS_VERSION: 1.3.0
+  ORAS_SHA256: 6cdc692f929100feb08aa8de584d02f7bcc30ec7d88bc2adc2054d782db57c64
 
 jobs:
   publish:
     name: package from dist/ + push
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 20
 
     # Job-level permissions REPLACE the workflow default rather than adding to
@@ -386,6 +398,9 @@ jobs:
       # The steps above stay HERE because they are specific to a published artefact:
       # an anonymous pull proves the package is public, and nothing about a local
       # build can prove that.
+      # kind-version passed explicitly for the reason ci.yml's `chart-cluster` job
+      # states: the action's own default had drifted two minors behind the node image
+      # kind/gpu-sim.yaml pins, and the release path was the other caller running on it.
       - name: Install it against a foreign Prometheus and helm test it
         uses: ./.github/actions/verify-chart
         with:
@@ -393,6 +408,7 @@ jobs:
           version: ${{ needs.publish.outputs.chart_version }}
           kps-release: ${{ env.KPS_RELEASE }}
           kps-namespace: ${{ env.KPS_NS }}
+          kind-version: ${{ env.KIND_VERSION }}
 
 
       - name: Summary
