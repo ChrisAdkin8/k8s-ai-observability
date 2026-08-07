@@ -4,8 +4,14 @@ Written on 2026-08-06 to settle the empirical questions in `prompts/prompt-fault
 (ROADMAP.md item 1, fault injection) before any of it was implemented. Every measured
 number quoted in that prompt comes from this directory.
 
-**This is scaffolding, not a repo feature.** Nothing here is wired into `task preflight`,
+**This is scaffolding, not a repo feature.** Nothing here is executed by `task preflight`,
 CI or the chart, and nothing here ships.
+
+⚠️ **EXECUTED AND VALIDATED ARE DIFFERENT THINGS, AND ONLY THE FIRST EXCLUDES YOU.**
+Nothing here runs, but everything here is still *checked*: the repo's validators walk
+`git ls-files`, so a file added to this directory is inside `check-second-copy.py` and,
+if it is markdown, inside `check-doc-claims.py` too. Adding something here is not a way
+to stay out of CI's way — assuming otherwise is what produced the collision below.
 
 ⚠️ **THIS FILE USED TO SAY IT SHOULD NOT BE ON `main`.** The heading read "NOT for main"
 and the paragraph above ended "it should not merge to `main` as-is". `0d426e5` contradicted
@@ -17,10 +23,10 @@ survives the spike is still rewritten in its real place — the list below is th
 work, not a description of what already happened.
 
 ⚠️ **The collision that caused is worth knowing about.** `stale-rules.yaml` ends in
-`-rules.yaml`, which is what CI's "No second committed copy of any canonical file" step
-matches, repo-wide. It held that job red on `main` for a day with nobody noticing, because
-the job is not a required check. `spike/` is now excluded there, with the reasoning written
-beside the allowlist in `.github/workflows/ci.yml`.
+`-rules.yaml`, which is what the canonical-copy guard matches, repo-wide. It held the chart
+job red on `main` for a day with nobody noticing, because that job is not a required check.
+`scripts/check-second-copy.py` owns the allowlist and the reasoning for sparing `spike/`;
+read it there rather than trusting this paragraph, which is a pointer and not the rule.
 
 What survives the spike is:
 
