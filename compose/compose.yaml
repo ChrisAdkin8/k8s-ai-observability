@@ -110,6 +110,17 @@ services:
     environment:
       # Matches the cluster: anonymous Viewer so the boards need no login, admin kept
       # for editing. Safe for the same reason it is there — this binds to localhost.
+      #
+      # ⚠️ THAT SAFETY IS THE PORT BINDING, NOT THE CONFIGURATION, and the distinction
+      # only matters once. Anonymous `Viewer` beside a published admin password is a
+      # public Grafana with a published login the moment this reaches a routable
+      # address. Both settings are deliberate and both read as correct on the way past,
+      # which is exactly why nobody would catch it in review: there is no wrong line
+      # here, only a wrong context.
+      #
+      # Anyone exposing this stack changes GF_SECURITY_ADMIN_PASSWORD and decides what
+      # the admin path is reachable from BEFORE opening the port, not after. Nothing in
+      # this repo exposes it and nothing checks that you have not — see compose/README.md.
       GF_AUTH_ANONYMOUS_ENABLED: "true"
       GF_AUTH_ANONYMOUS_ORG_ROLE: Viewer
       GF_SECURITY_ADMIN_PASSWORD: admin

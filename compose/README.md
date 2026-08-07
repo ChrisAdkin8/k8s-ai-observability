@@ -14,6 +14,14 @@ cd compose && docker compose up -d
 No login needed to view (anonymous `Viewer`, as on the cluster). To edit, log in as
 `admin` / `admin`. Stop with `docker compose down`.
 
+⚠️ **Putting this on a routable address still needs a hardening pass nobody has done.**
+The two lines above are safe because `compose.yaml` binds to localhost, and *only*
+because of that — on a public address they are a Grafana with anonymous read and a
+published admin password. Neither setting is wrong; the context would be. The
+conditional is recorded beside them in `compose/compose.yaml` (the `grafana` service),
+and it has to be settled **before** a port is opened rather than after, because there is
+no check here that would notice.
+
 > **Ports 3000 and 9090 clash with `scripts/grafana.sh` and `scripts/prometheus.sh`.**
 > If you are also running a cluster port-forward, the loopback-bound forward wins and you
 > get the *other* Prometheus at the same URL, with no error anywhere. Override:
