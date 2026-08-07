@@ -109,6 +109,13 @@ from doing the work. **Treat the ordering as firmer than the numbers** — and t
 as the softest of the four, because it is the largest and it has already been re-priced twice,
 both times upward. Re-derive it before planning around it.
 
+⚠️ **The table still needs verification priced as its own line.** House rule is code **plus
+25–35% verification**. W1 bundles `--selftest` into its estimate rather than separating it,
+which is the same conflation the paragraph below warns about in prose — and prose is not a
+number anyone can check the total against. That W1 has been re-priced upward twice, both
+times because of the instrument's verification, is the argument for splitting it rather than
+against. Raised by CodeRabbit on PR #39.
+
 ⚠️ The reason it moved is worth stating because it will apply to whoever picks this up, and
 **W1 is an instrument, not a feature.** An HTTP server that streams tokens is an hour. One
 whose output you would publish a number from needs verified per-event flushing (the failure is
