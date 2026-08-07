@@ -86,6 +86,76 @@ Comparison links are at the foot of this file, one per released version.
   constants that took measurement to find. It carries the size ceiling finding too, since
   "how big can a README GIF be" has no documented answer and cost a branch to settle.
 
+- **A release gate: `scripts/check-green-ci.py` and the `require-green-ci` composite
+  action.** `publish-image.yml` and `publish-chart.yml` now refuse to publish from a commit
+  CI has not passed, by polling the check runs on the commit being tagged. A registry
+  version is immutable, so this is the last point at which the answer is still "no".
+  Stdlib-only, so the release path pulls in no `gh`, with a `--selftest` over
+  `tests/fixtures/check-runs.json`.
+
+- **`scripts/check-required-checks.py` and `.github/required-checks.txt`.** The `main`
+  ruleset is repository settings: editable in a browser, versioned by nothing, and the
+  single control deciding whether a pull request can merge. The file records what it
+  requires; the script compares the record to the live ruleset weekly, asserting that an
+  **active** ruleset targets `main`, that its checks match in both directions, and that it
+  targets *only* `main`. `evaluate` and `disabled` are not protection — a ruleset in either
+  state still lists its required checks, so `main` could be protected by nothing while
+  everything looked fine.
+
+- **`scripts/check-action-shell.py`**, which shellchecks the bash inside composite actions.
+  `actionlint` covers `.github/workflows/` and structurally cannot parse a composite action,
+  so that shell was linted by nothing. It also rejects an `if:` leaning on a context that is
+  inert there, which is a real bug this repo had: `job.status` is not updated inside a
+  composite action.
+
+- **`scripts/check-second-copy.py`**, the rule that `chart-build.py`'s whole build step
+  exists to keep — no second committed copy of a dashboard, rule file or the simulator.
+  It was inline bash in one CI job, needing no cluster, cloud or Docker, so `task preflight`
+  could not run it. One implementation, two callers.
+
+- **`ROADMAP.md`**, five capabilities the repo has never had, each stating what it adds,
+  what it depends on and how we would know it works. Defects in shipped work stay marked
+  where they live and out of this page.
+
+- **`docs/development-method.md`**, how work here is specified before it is written: the
+  prompt file, the review round, what a spike is, and why its findings rewrite the
+  specification.
+
+- **The prompt review harness**: `.claude/agents/prompt-fact-checker.md` fanned out one per
+  section by the `/review-prompt` skill, plus `task prompt-review`, which runs a separate
+  cold `claude -p`. The two halves are deliberate — a subagent is briefed by the author,
+  which is the exact channel a fresh session exists to close.
+
+- **`prompts/` is now tracked**, on the argument the rest of the repo rests on: context
+  worth having is context you commit. It also puts the briefs inside
+  `check-doc-claims.py`'s scan of tracked markdown, which found three citing a dashboard id
+  this repo has never had, in its first run.
+
+### Changed
+
+- **`main` now requires seven status checks, up from four.** `helm chart (lint, render,
+  assertions fire)`, `compose stack (no Kubernetes)` and `simulator image (build both
+  arches, smoke-test amd64)` were advisory: they encode central claims of this repo and
+  could all be red on a pull request that merged. That was recorded as a known gap, and on
+  2026-08-06 it cost a day of `main` being red with nobody looking. They now block.
+
+  The ruleset was also narrowed from `~ALL` to `~DEFAULT_BRANCH`. It had governed every
+  branch, so a contributor without an admin bypass could not push a feature branch at all —
+  the first push has no check runs, so every required check reads as expected-but-missing.
+
+- **CI runners are pinned and every tool download is checksum-verified**, and `kind` is
+  pinned inside the composite action with the three copies asserted to agree.
+  `publish-chart.yml` passes step outputs through `env:` rather than interpolating them
+  into a shell body.
+
+- **The em-dash check covers more of the pages a stranger reads first**, now including
+  `ROADMAP.md` and `docs/development-method.md` — the second because a page explaining the
+  preference and then breaking it is a contradiction a reader meets before the author does.
+
+- **CI timings live in `docs/ci.md` rather than `CLAUDE.md`**, with the run id they came
+  from. They had drifted in standing law: a wrong run id, and one total no run ever
+  produced.
+
 ### Removed
 
 - **`docs/record-demo.md`, and the `docs/llm-demo.gif` it specified**, which was never
@@ -104,6 +174,42 @@ Comparison links are at the foot of this file, one per released version.
 
   The path is reused above, for a page describing `demo.gif`, which exists. What made the
   old one worth deleting was that it specified an asset nobody had built, not its name.
+
+- **`prompts/prompt-adoption.md`, and `prompts/prompt-launch.md` that briefly replaced it.**
+  The first was analysis rather than a specification — it said so itself — and four of its
+  five priorities had shipped, leaving six stale claims nothing checks. The second carried
+  the live half in house style and was dropped with the work.
+
+  The one fact in either that was true independently of the work now lives where it belongs:
+  `compose/compose.yaml` enables anonymous Grafana `Viewer` access beside a published admin
+  password, which is correct on localhost and disqualifying on a routable address. Marked
+  beside the settings, and mirrored into `compose/README.md` because `task outstanding`
+  scans tracked markdown only.
+
+### Fixed
+
+- **The canonical-copy guard failed on spike scaffolding, and held `main` red for a day.**
+  `spike/stale-rules.yaml` ends in `-rules.yaml`, which the guard matches repo-wide, and it
+  is a copy of nothing — a candidate detector written from scratch for a brief. Nobody saw
+  it because the job that runs the guard was not a required check. `spike/` is now
+  excluded, and the failure message no longer tells the reader to delete a file that
+  `chart-build.py` never touches.
+
+- **One transient API read no longer ends a release.** The publish gate raised on the first
+  unreadable response and exited, so a single 502 aborted a release after the tag was
+  already pushed. It now retries three times consecutively, resetting on any good read, and
+  still exits 2 rather than 1 on a real outage — the absence of a verdict is not a verdict.
+
+- **Chart diagnostics are collected on a timeout, not only on a failure.** The guard tested
+  `outcome == 'failure'`, but a `timeout-minutes` expiry cancels the job and a cancelled
+  step reports `cancelled`. The run that walked all 50 minutes of bounded waits was
+  precisely the one that produced no bundle.
+
+- **`targets_protected_branch` had never filtered anything on live data.** It read
+  `conditions` from the rulesets *list* endpoint, which does not return that field, so by
+  its own rule that absent conditions mean "everything" it matched every branch ruleset on
+  every real run. It was invisible because the committed fixtures carried a shape GitHub
+  does not produce; they now mirror the API.
 
 ## [0.10.0] — 2026-08-05
 
