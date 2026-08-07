@@ -91,7 +91,14 @@ rig knows the right answer.
     because quoting it makes this rule match itself and report as an open item. It does
     *not* key on `⚠️`, which is the repo's general warning marker and appears in tracked
     markdown by the hundred. An item phrased in new words is silently missed, and rule
-    17's own gap sat unseen that way. Match an existing phrasing, or extend the list. When you finish one, **strike it and say what happened** —
+    17's own gap sat unseen that way. Match an existing phrasing, or extend the list.
+    ⚠️ **It scans TRACKED MARKDOWN only** (`git ls-files '*.md'`), so an item marked in a
+    `.txt`, a workflow or a script is invisible to it however it is phrased — the
+    `required-checks.txt` item that sat open until 2026-08-07 never appeared once. Widening
+    the glob is not the fix: `Taskfile.yml` *contains* the phrase list, so scanning YAML
+    makes the tool match itself. **If an item needs to be tool-visible, it belongs in
+    markdown**; mark it in the file that owns it, and point there from a page that is.
+    When you finish one, **strike it and say what happened** —
     `⚠️ ~~the claim~~ **DONE — <what, when>**` — never delete it, because the reasoning
     outlives the action. The same applies to *evidence*: a long
     justification belongs in the file that owns the work, not in this one, which is loaded
