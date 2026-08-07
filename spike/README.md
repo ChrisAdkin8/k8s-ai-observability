@@ -1,11 +1,28 @@
-# Spike evidence — NOT for main
+# Spike evidence — scaffolding, tracked on purpose
 
 Written on 2026-08-06 to settle the empirical questions in `prompts/prompt-fault-injection.md`
 (ROADMAP.md item 1, fault injection) before any of it was implemented. Every measured
 number quoted in that prompt comes from this directory.
 
 **This is scaffolding, not a repo feature.** Nothing here is wired into `task preflight`,
-CI or the chart, and it should not merge to `main` as-is. What survives the spike is:
+CI or the chart, and nothing here ships.
+
+⚠️ **THIS FILE USED TO SAY IT SHOULD NOT BE ON `main`.** The heading read "NOT for main"
+and the paragraph above ended "it should not merge to `main` as-is". `0d426e5` contradicted
+that the same day it was written, and the contradiction is resolved here in favour of
+tracking, on the argument that tracked the briefs one commit earlier: every measured number
+in `prompt-fault-injection.md` comes from these scripts, and a reader who cannot rerun them
+has to take the numbers on trust. That is the failure this repo exists to prevent. What
+survives the spike is still rewritten in its real place — the list below is the outstanding
+work, not a description of what already happened.
+
+⚠️ **The collision that caused is worth knowing about.** `stale-rules.yaml` ends in
+`-rules.yaml`, which is what CI's "No second committed copy of any canonical file" step
+matches, repo-wide. It held that job red on `main` for a day with nobody noticing, because
+the job is not a required check. `spike/` is now excluded there, with the reasoning written
+beside the allowlist in `.github/workflows/ci.yml`.
+
+What survives the spike is:
 
 - `spike_test.yaml` + `stale-rules.yaml` -> the promtool cases belong in
   `tests/rules/llm-rules_test.yaml` once the `LLMMetricsStale` alert lands (W3).

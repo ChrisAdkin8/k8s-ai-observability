@@ -1038,6 +1038,19 @@ jobs:
       # file or the simulator ever appears under charts/, the
       # single-source-of-truth constraint has been quietly abandoned and
       # assembling into dist/ is doing nothing.
+      #
+      # ⚠️ IT MATCHES ON FILENAME, WHICH IS NOT THE SAME AS "IS A COPY". The
+      # pattern is repo-wide on purpose — the allowlist below names the only
+      # paths a canonical file may live at, so a copy anywhere is caught, not
+      # just one under charts/. The cost is that a file which merely ENDS in
+      # `-rules.yaml` trips it while being a copy of nothing.
+      #
+      # `spike/` is excluded for exactly that reason. It is scaffolding for the
+      # briefs (see spike/README.md), chart-build.py never reads it, and nothing
+      # there ships. spike/stale-rules.yaml is a candidate detector written from
+      # scratch for prompt-fault-injection.md W3.5, not a second copy of
+      # manifests/alerts/. It was committed in 0d426e5 and turned this job red on
+      # `main` for a day, unnoticed, because the job is not a required check.
       - name: No second committed copy of any canonical file
         run: |
           set -euo pipefail
@@ -1045,13 +1058,16 @@ jobs:
           git ls-files charts/ | sed 's/^/  /'
           bad=$(git ls-files \
                 | grep -E '(^|/)(llm[-_]sim\.py|.*-rules\.yaml|.*-prometheusrule\.yaml)$|^charts/.*\.json$' \
-                | grep -vE '^(scripts/llm-sim\.py|manifests/alerts/.*-prometheusrule\.yaml|tests/rules/.*_test\.yaml|charts/.*/values\.schema\.json)$' \
+                | grep -vE '^(scripts/llm-sim\.py|manifests/alerts/.*-prometheusrule\.yaml|tests/rules/.*_test\.yaml|charts/.*/values\.schema\.json|spike/.*)$' \
                 || true)
           if [ -n "$bad" ]; then
-            echo "second copies of canonical files are committed:" >&2
+            echo "a canonical file name appears outside the one path that owns it:" >&2
             echo "$bad" | sed 's/^/  /' >&2
-            echo "These are assembled into dist/ by scripts/chart-build.py precisely so" >&2
-            echo "no copy exists in the tree. Delete them." >&2
+            echo >&2
+            echo "If it IS a copy: delete it. chart-build.py assembles the chart into" >&2
+            echo "dist/ precisely so no second copy exists in the tree." >&2
+            echo "If it is NOT a copy and merely shares the name, it does not belong" >&2
+            echo "in this check — add its path to the allowlist above and say why." >&2
             exit 1
           fi
           echo "none — the chart is assembled, not vendored"
