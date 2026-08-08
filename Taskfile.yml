@@ -260,10 +260,6 @@ tasks:
       - python3 scripts/check-sigpipe.py --selftest
       - python3 scripts/check-sigpipe.py
 
-  # The other half of rule 17, which had no check from 2026-08-04 until 2026-08-07.
-  # `sigpipe` above covers the first bug of that day; this covers the second, where zsh
-  # does not word-split unquoted parameters and bash does. shellcheck knows it as SC2086,
-  # which is `info`-level and therefore suppressed by the `-S warning` above, on purpose.
   # ⚠️ THE CHEAPEST HALF OF A PROMPT REVIEW, DONE DETERMINISTICALLY. Briefs cite the
   # tree by `file:line` and those citations rot. One review round on 2026-08-07 found
   # four dead pointers in one brief, including a path that has never existed. That is
@@ -285,6 +281,24 @@ tasks:
       - python3 scripts/check-spike-routing.py --selftest
       - python3 scripts/check-spike-routing.py
 
+  # ⚠️ THE ONLY SELFTEST IN THE TREE THAT RAN NOWHERE. `phase.py` decides which step of
+  # the loop a brief is in, and shipped with fifteen assertions wired into no task and no
+  # workflow — so the four that pin the `text.count(basename)` bug could not catch its
+  # return. It takes no cluster and no network, like everything else here.
+  #
+  # No live pass: `phase.py <prompt>` answers a question about ONE brief and its spike
+  # branch, which is not an invariant of the tree and would go red on a repo with no
+  # spike open. The selftest covers the real tree from inside, where it can say what it
+  # expects (rule 7).
+  spike-phase:
+    desc: Unit-test the spike-loop phase detector (no cluster, no network)
+    cmds:
+      - python3 .claude/skills/spike-loop/phase.py --selftest
+
+  # The other half of rule 17, which had no check from 2026-08-04 until 2026-08-07.
+  # `sigpipe` above covers the first bug of that day; this covers the second, where zsh
+  # does not word-split unquoted parameters and bash does. shellcheck knows it as SC2086,
+  # which is `info`-level and therefore suppressed by the `-S warning` above, on purpose.
   word-splitting:
     desc: Find code relying on word-splitting, which zsh and bash do differently
     cmds:
@@ -339,6 +353,7 @@ tasks:
       - task: word-splitting
       - task: citations
       - task: spike-routing
+      - task: spike-phase
       - task: second-copy
       - task: shellcheck
       - task: action-shell

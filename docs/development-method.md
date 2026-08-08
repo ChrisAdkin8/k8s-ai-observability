@@ -141,6 +141,7 @@ Each is a rule in `CLAUDE.md`, which owns the detail.
 
 | Stage | Mechanism |
 |---|---|
+| Every stage, one step per invocation | `/spike-loop prompts/prompt-<subject>.md`, which reads the tree to decide the phase and then does only that one. `.claude/skills/spike-loop/phase.py` owns the decision, because working it out by eye is how four confident wrong answers happened in one session |
 | The mechanical half of stage 2 | `.claude/agents/prompt-fact-checker.md`, fanned out by `/review-prompt` |
 | The cold half of stage 2 | `task prompt-review -- prompts/prompt-<subject>.md`, a separate `claude -p` |
 | Standing context | `CLAUDE.md`, loaded every session, kept short so its rules are not lost in noise |

@@ -254,6 +254,25 @@ jobs:
       - name: Prose claims vs the code they describe
         run: python3 scripts/check-doc-claims.py
 
+      # ⚠️ THESE THREE RAN IN `task preflight` AND NOWHERE ELSE, which is the same
+      # asymmetry check-second-copy.py had until 2026-08-07 — except pointing the
+      # other way, and therefore worse. That one ran in CI but not locally, so it
+      # sat red on `main` for a day and CI said so. These ran locally but not in
+      # CI, so a contributor who never runs preflight could land dead citations,
+      # unrouted spike artefacts and a broken phase detector with all four required
+      # checks green and nothing anywhere saying otherwise. One implementation, two
+      # callers, in both directions.
+      #
+      # `citations` and `spike-routing` scan the tree; `spike-phase` is a selftest
+      # only, because the phase of one brief is not an invariant of the repo (rule 7).
+      - name: Citations, spike routing, and the phase detector
+        run: |
+          python3 scripts/check-citations.py --selftest
+          python3 scripts/check-citations.py
+          python3 scripts/check-spike-routing.py --selftest
+          python3 scripts/check-spike-routing.py
+          python3 .claude/skills/spike-loop/phase.py --selftest
+
       # ⚠️ Cheap, and it has already earned it twice: `tar tzf | head` failed a
       # chart publish on a correct archive, and `echo | grep -qvE` in this file's
       # own changes filter would have skipped the cluster jobs on a large code

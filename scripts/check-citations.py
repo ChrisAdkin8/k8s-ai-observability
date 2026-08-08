@@ -2,7 +2,7 @@
 """check-citations.py — every `path:line` in tracked markdown must resolve.
 
     python3 scripts/check-citations.py            # scan tracked *.md
-    python3 scripts/check-citations.py --selftest  # unit-test the rules, no tree
+    python3 scripts/check-citations.py --selftest  # unit-test the rules, then the tree
 
 ⚠️ THE CHEAPEST HALF OF A PROMPT REVIEW, DONE DETERMINISTICALLY. Briefs cite the tree
 by `file:line` and those citations rot: a file is renamed, a spike moves, a function
@@ -44,8 +44,26 @@ EXT = r"(?:py|sh|yaml|yml|json|tf|txt|md|tpl)"
 #
 # The lookbehind keeps the other half — a path preceded by a word character, slash or dot
 # is part of something longer and not a citation this repo writes.
+#
+# ⚠️ AND A HYPHEN, WHICH IS THE THIRD WRONG ATTEMPT. `\w/.` still let
+# `https://github.com/vllm/blob/main/scripts/llm-sim.py:445` through, matching at
+# `sim.py:445` — preceded by `-`, which none of the three excluded characters covers. The
+# comment above claimed the `/` rule "is what excludes URLs" and it does not, for any
+# hyphenated filename, which is most of this tree. That reported a dead citation in
+# correct prose and turned `task preflight` red, so the failure was loud rather than
+# silent, but it was still the check being wrong about the tree. Selftest case 8's
+# fixture could not catch it: `example.com/x.py:80` has no hyphen in it.
 CITE = re.compile(
-    rf"(?<![\w/.])([A-Za-z0-9_.-][A-Za-z0-9_./-]*\.{EXT}):(\d+)(?:-(\d+))?")
+    rf"(?<![\w/.-])([A-Za-z0-9_.-][A-Za-z0-9_./-]*\.{EXT}):(\d+)(?:-(\d+))?")
+
+# ⚠️ A SHIPPED PROMPT IS A RECORD, AND ITS CITATIONS WERE TRUE WHEN IT WAS WRITTEN.
+# `check-doc-claims.py` holds the same banner for the same reason and says it there;
+# this is the second reader of that decision, not a second decision. Nine tracked
+# prompts carry it and hold 71 citations between them, so without this carve-out any
+# unrelated rename forces a choice between rewriting a record and adding an exception.
+# The selftest asserts the two files still spell it identically, because a fork here is
+# silent in one direction: a reworded banner puts records back into the scan.
+RECORD_BANNER = "SHIPPED — this is a RECORD"
 
 # Files cited by this repo that live in somebody else's. These are upstream vLLM source,
 # read at a version pinned in docs/versions.md and deliberately not vendored — rule 4
@@ -80,7 +98,17 @@ def resolve(path: str, tracked: set, by_base: dict) -> tuple:
         return None, ""                      # external, and declared so
     if path in tracked:
         return path, ""
-    cands = by_base.get(os.path.basename(path), [])
+    # ⚠️ THE BASENAME FALLBACK IS FOR BARE CITATIONS ONLY, and applying it to path-shaped
+    # ones defeated the single thing this check exists to catch. `docs/llm-sim.py:445`
+    # resolved to `scripts/llm-sim.py` and passed — a citation naming the WRONG DIRECTORY
+    # is precisely "a file moved and the pointer did not", and it was answered by looking
+    # up the basename and finding the file at its new home. Worse than silent: the range
+    # check then validated the line number against a file the citation does not name.
+    # UPSTREAM above already draws this bare-vs-path distinction, for the same reason,
+    # eight lines earlier.
+    if "/" in path:
+        return None, "no such tracked file"
+    cands = by_base.get(path, [])
     if len(cands) == 1:
         return cands[0], ""
     if not cands:
@@ -89,7 +117,12 @@ def resolve(path: str, tracked: set, by_base: dict) -> tuple:
 
 
 def offenders(files: dict, tracked: set, by_base: dict, lengths: dict) -> list:
-    """[(citing file, citing line, cited path, detail)] for every citation that fails."""
+    """[(citing file, citing line, cited path, detail)] for every citation that fails.
+
+    `files` is already filtered to what gets scanned — `main()` drops shipped RECORDs
+    before calling, so the carve-out is one decision in one place rather than a
+    condition threaded through here.
+    """
     bad = []
     for name, text in files.items():
         for at, path, lo, hi in citations(text):
@@ -97,7 +130,17 @@ def offenders(files: dict, tracked: set, by_base: dict, lengths: dict) -> list:
             if why:
                 bad.append((name, at, path, why))
             elif target is not None:
-                n = lengths[target]
+                # ⚠️ REVERSED FIRST, because the bound test cannot see it: `:99999-2`
+                # has hi=2, which is in range for every file, so only lo was ever wrong
+                # and lo is tested against 1 alone. A typo'd range was the one citation
+                # shape that resolved, passed, and pointed nowhere.
+                if hi < lo:
+                    bad.append((name, at, path,
+                                f"reversed line range {lo}-{hi}"))
+                    continue
+                n = lengths.get(target)
+                if n is None:
+                    continue      # tracked but unreadable; main() reports it separately
                 if lo < 1 or hi > n:
                     bad.append((name, at, path,
                                 f"cites line {hi} of a {n}-line file"))
@@ -119,20 +162,63 @@ def _tree():
 
 
 def _read(rel):
-    with open(os.path.join(ROOT, rel), encoding="utf-8", errors="replace") as fh:
-        return fh.read()
+    """Text of a tracked file, or None when it cannot be read.
+
+    ⚠️ TRACKED IS NOT THE SAME AS PRESENT, and an unguarded `open()` here took the whole
+    gate down with a traceback rather than reporting anything. `git ls-files` lists the
+    INDEX: a file deleted from the working tree without `git rm` — an in-progress rename,
+    which is exactly the state that rots citations — raises FileNotFoundError, and a
+    submodule gitlink raises IsADirectoryError. Because `preflight` stops at the first
+    red task, that traceback also hid every check ordered after this one.
+    """
+    try:
+        with open(os.path.join(ROOT, rel), encoding="utf-8", errors="replace") as fh:
+            return fh.read()
+    except OSError:
+        return None
+
+
+def _scan(tracked) -> tuple:
+    """(text by path, unreadable paths). ONE read of the tree, where there were two.
+
+    `main()` read every tracked file for its line count and then every tracked markdown
+    file again for its text, so each run walked the tree twice — and `--selftest` ran
+    both passes a second time on top of that.
+    """
+    texts, unreadable = {}, []
+    for p in sorted(tracked):
+        t = _read(p)
+        if t is None:
+            unreadable.append(p)
+        else:
+            texts[p] = t
+    return texts, unreadable
+
+
+def scannable(texts: dict) -> dict:
+    """The markdown this check scans: tracked `*.md`, minus shipped RECORDs."""
+    return {p: t for p, t in texts.items()
+            if p.endswith(".md") and RECORD_BANNER not in t}
 
 
 def main() -> int:
     tracked, by_base = _tree()
-    md = sorted(p for p in tracked if p.endswith(".md"))
-    files = {p: _read(p) for p in md}
-    lengths = {p: len(_read(p).splitlines()) for p in tracked}
+    texts, unreadable = _scan(tracked)
+    lengths = {p: len(t.splitlines()) for p, t in texts.items()}
+    files = scannable(texts)
+    records = sum(1 for p, t in texts.items()
+                  if p.endswith(".md") and RECORD_BANNER in t)
     bad = offenders(files, tracked, by_base, lengths)
     total = sum(len(citations(t)) for t in files.values())
+    note = ""
+    if unreadable:
+        shown = ", ".join(unreadable[:3]) + (" …" if len(unreadable) > 3 else "")
+        note = (f"\n      note: {len(unreadable)} tracked file(s) are not readable in the "
+                f"working tree, so no line count was checked against them: {shown}")
     if not bad:
-        print(f"  ok  citations  {total} `path:line` reference(s) across {len(md)} "
-              f"tracked markdown file(s) all resolve")
+        print(f"  ok  citations  {total} `path:line` reference(s) across {len(files)} "
+              f"tracked markdown file(s) all resolve "
+              f"({records} shipped record(s) held out){note}")
         return 0
     print("citations that do not resolve:", file=sys.stderr)
     for name, at, path, why in bad:
@@ -222,14 +308,65 @@ def selftest() -> int:
     check(len(bad("`spike/kv_isolation.py:1` and `spike/kv_profile.py:999`")) == 2,
           "two independent bad citations are both found (the rule is not inert)")
 
-    # 10. The real tree, which is what CI asserts.
+    # 10. ⚠️ THE WRONG-DIRECTORY CASE, WHICH IS THE ONE THIS CHECK EXISTS FOR AND THE ONE
+    #     IT PASSED. `docs/llm-sim.py` is not tracked; the basename fallback found
+    #     `scripts/llm-sim.py` and called it resolved, so "a file moved and the pointer
+    #     did not" was answered by silently following the file to its new home. Every
+    #     fixture above cites either a correct path or a basename that exists nowhere,
+    #     so none of them could see it. Expected: caught.
+    got = bad("see `docs/llm-sim.py:445` for it")
+    check(len(got) == 1 and "no such tracked file" in got[0][2],
+          "a path-shaped citation is NOT rescued by its basename living elsewhere")
+    #     ...and the bare form still resolves, which is the behaviour being preserved.
+    check(bad("see `llm-sim.py:445`") == [],
+          "...while a BARE basename still resolves (the fix is narrow)")
+
+    # 11. ⚠️ THE HYPHENATED URL. Case 8's URL fixture has no hyphen, so it could not fail;
+    #     this repo's filenames are mostly hyphenated. Expected: [] for both.
+    check(bad("see https://github.com/vllm/blob/main/scripts/llm-sim.py:445 online") == [],
+          "a URL ending in a hyphenated filename is not read as a citation")
+    check(bad("at https://example.com/foo-bar.py:80 today") == [],
+          "...and neither is one whose basename is not in the tree at all")
+
+    # 12. Reversed and impossible ranges. `hi` is in range in both, so only the reversal
+    #     itself distinguishes them. Expected: caught, both.
+    got = bad("`scripts/llm-sim.py:99999-2`")
+    check(len(got) == 1 and "reversed" in got[0][2], "a reversed line range is caught")
+    check(len(bad("`scripts/llm-sim.py:900-5`")) == 1,
+          "...including one whose start is inside the file")
+
+    # 13. Shipped RECORDs are held out of the scan, as check-doc-claims.py holds them out
+    #     of the numeric one. Expected: only the non-record file is scanned.
+    recs = {"prompts/shipped.md": f"{RECORD_BANNER}\n\nsee `spike/kv_isolation.py:1`\n",
+            "docs/live.md": "see `scripts/llm-sim.py:1`\n"}
+    check(list(scannable(recs)) == ["docs/live.md"],
+          "a shipped RECORD is held out of the citation scan")
+    #     ...and the same text without the banner IS scanned, so the carve-out is keyed on
+    #     the banner and not on the path. Expected: both scanned.
+    check(len(scannable({k: v.replace(RECORD_BANNER, "draft") for k, v in recs.items()}))
+          == 2, "...and only the banner holds it out, not the directory it sits in")
+    #     ⚠️ The banner is check-doc-claims.py's decision; this file is its second reader.
+    #     A fork is silent in one direction, so assert the two spellings still agree.
+    other = _read("scripts/check-doc-claims.py") or ""
+    check(f'RECORD_BANNER = "{RECORD_BANNER}"' in other,
+          "RECORD_BANNER is spelled identically in check-doc-claims.py")
+
+    # 14. An unreadable tracked path is a None, not a traceback — and a citation to a file
+    #     whose length is unknown is skipped rather than crashing on a missing key.
+    check(_read("no/such/path/deleted-mid-rename.py") is None,
+          "an unreadable tracked path reads as None rather than raising")
+    check(offenders({"t.md": "`scripts/llm-sim.py:999999`"}, tracked, by_base, {}) == [],
+          "a citation into a file with no known length is skipped, not a KeyError")
+
+    # 15. The real tree, which is what CI asserts.
     t, b = _tree()
-    md = sorted(p for p in t if p.endswith(".md"))
-    files = {p: _read(p) for p in md}
-    lengths_live = {p: len(_read(p).splitlines()) for p in t}
+    texts, unreadable = _scan(t)
+    lengths_live = {p: len(x.splitlines()) for p, x in texts.items()}
+    files = scannable(texts)
     live = offenders(files, t, b, lengths_live)
     total = sum(len(citations(x)) for x in files.values())
-    check(live == [], f"the tracked tree is clean ({total} citations, {len(md)} files)")
+    check(live == [], f"the tracked tree is clean ({total} citations, {len(files)} "
+                      f"scanned file(s), {len(unreadable)} unreadable)")
 
     print(f"\n{'FAIL' if failures else 'PASS'}  check-citations selftest "
           f"({len(failures)} failure(s))")
