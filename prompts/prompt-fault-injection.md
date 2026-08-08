@@ -390,32 +390,46 @@ were invisible under zsh.
 
 ### ⚠️ A THIRD `zsh` vs `bash` class, and nothing in this repo catches it — MEASURED 2026-08-07
 
-Rule 17 records two: a SIGPIPE'd producer under `pipefail`, and unquoted word-splitting.
-Here is a third, found by writing this harness rather than by reasoning about it:
+Rule 17 says `zsh` is not `bash`, and CI is `bash`. ⚠️ **There is a third shell on this
+desk, and it is also called `bash`:** macOS ships `/bin/bash` **3.2.57**, released in 2007
+and kept at that version for licensing reasons. `bash -c` on a Mac is therefore *not* the
+shell CI runs, and rule 17's own instruction — test with `bash -c` — silently means the
+wrong thing here.
+
+This construct is what surfaced it:
 
 ```sh
 [ "$(qn "ALERTS{alertname=\"LLMMetricsStaleFast\",alertstate=\"firing\"}")" != "0" ]
 ```
 
-**zsh evaluates it correctly. bash fails with `[: too many arguments`** — the escaped quotes
-inside a command substitution inside a test's quoted argument are parsed as argument
-separators. Confirmed by running the identical line under `bash -c` and `zsh -c`.
+**Measured across five bash versions, 2026-08-08:**
 
-**Nothing flags it.** `shellcheck` is silent at **every** severity including `-S style`, and
-neither `check-sigpipe.py` nor `check-word-splitting.py` looks for it.
+| bash | verdict |
+|--|--|
+| 3.2 (macOS `/bin/bash`) | ⚠️ `[: too many arguments` |
+| 4.0 | ⚠️ `[: too many arguments` |
+| 4.4, 5.0, **5.2** (ubuntu-24.04, **what CI runs**) | fine |
+| zsh | fine |
 
-⚠️ **And it is the shape this harness is made of.** W1.4 requires every expectation to be
-scoped by `model_name`, which means a quoted label matcher, inside a query string, inside a
-command substitution, inside a test — this construct, in every row of every table. The
-failure is worse than a crash: under `set -e` the test neither passes nor fails, it **errors
-past**, so a polling loop reads "not yet" forever. In the spike that meant a measurement loop
-running to its 300s deadline while the alert had been firing for four minutes.
+⚠️ **So this is NOT a CI hazard, and the first version of this section said it was.** It is
+a local false failure: the construct is correct, `ubuntu-24.04` runs it correctly, and only
+an obsolete local shell rejects it. **Do not write a check for it** — a check would flag
+correct code, which is the failure `check-word-splitting.py`'s first draft already made
+here (29 findings on 12 correct scripts) and the reason rule 18 gained its note about
+selftests that only ever confirm the author's belief.
 
-**The repair is `verify.sh`'s existing habit**: assign the query result to a variable, then
-test the variable (`:640` is the pattern). That turns out to be load-bearing rather than
-stylistic, and it is why this has never bitten the repo. **Copy it deliberately**, say why in
-the harness header, and consider whether it earns a check of its own — that decision belongs
-with W1 rather than here.
+**What to take from it is about the instrument, not the construct.** The spike lost a 300s
+measurement loop to this: under `set -e` the failing test neither passes nor fails, it
+**errors past**, so a polling loop reads "not yet" forever while the alert it was waiting
+for had been firing for four minutes. The time went on suspecting the alert, the rule and
+the simulator, in that order, before the shell. **When a shell result is surprising on a
+Mac, check `bash --version` before you check anything else** — and reach for
+`docker run --rm bash:5.2` when the answer matters, which is the cheap empirical version of
+this whole question.
+
+Writing the harness in `verify.sh`'s existing style — assign the query result to a variable,
+then test the variable (`:640`) — sidesteps it anyway, and is worth copying for legibility
+rather than for portability.
 
 ### What `verify.sh` already asserts, which your drills must not break — VERIFIED
 

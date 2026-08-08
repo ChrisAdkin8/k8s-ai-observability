@@ -100,6 +100,11 @@ build products of `manifests/alerts/`, so they are not committed.
   runs minutes apart held 6 requests and 0.
 - **`LLMMetricsStale` fires against a real frozen simulator**, driven tenant only, with the
   idle-tenant negative shown against live data (guardless 2 series, guarded 1).
-- **A third `zsh` vs `bash` split**: `[ "$(f "q with \"quotes\"")" != "0" ]` works in zsh and
-  is `[: too many arguments` in bash. `shellcheck` is silent at every severity and neither
-  repo checker looks for it. The repair is `verify.sh`'s assign-then-test habit.
+- ⚠️ ~~**A third `zsh` vs `bash` split**: `[ "$(f "q with \"quotes\"")" != "0" ]` works in
+  zsh and is `[: too many arguments` in bash.~~ **WRONG, corrected 2026-08-08.** It is a
+  **bash 3.2 and 4.0** failure, fixed by 4.4. macOS ships `/bin/bash` 3.2.57; CI runs
+  ubuntu-24.04 with **5.2**, where the construct is fine. So it is a local false failure and
+  not a CI hazard, and it does **not** warrant a check — flagging it would flag correct code.
+  What it cost was an hour of suspecting the alert, the rule and the simulator before
+  suspecting the shell: on a Mac, check `bash --version` before trusting a `bash -c` result,
+  and use `docker run --rm bash:5.2` when it matters.
