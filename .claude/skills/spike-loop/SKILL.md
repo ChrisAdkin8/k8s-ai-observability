@@ -3,7 +3,7 @@ name: spike-loop
 description: Drive one prompt file through the loop in docs/development-method.md — review, spike, run the experiment, fold the findings back, land. Phase-aware, so it does the next step rather than all of them.
 argument-hint: [prompt-file]
 disable-model-invocation: true
-allowed-tools: Read, Edit, Write, Bash, Grep, Glob
+allowed-tools: Read, Edit, Write, Bash, Grep, Glob, Skill, Task
 ---
 
 Drive the single prompt file named in `$ARGUMENTS` through the loop in `docs/development-method.md`.
@@ -22,7 +22,8 @@ space becomes two arguments and the script reads the first — rule 17's word-sp
 class, in the skill that exists to enforce the loop's discipline. If `$ARGUMENTS` holds
 more than one path, say so and stop rather than picking one.
 
-It prints the phase, why, and the four observations behind it.
+It prints the phase, why, and the observations behind it. Exit 2 means git could not be
+read, so there is **no** phase — do not proceed on a guess.
 
 ⚠️ **THIS IS THE ONE DECIDABLE STEP, SO CODE DECIDES IT.** Reading `git branch` and
 grepping the prompt by eye is exactly the habit that produced four wrong answers in one
@@ -33,6 +34,7 @@ wrongly sends the whole loop to the wrong step and nothing downstream notices.
 
 | Phase | Read |
 |--|--|
+| 0 — done | nothing. Say the branch is already in `main` and **stop** |
 | 1 — review | `.claude/skills/spike-loop/phases/1-review.md` |
 | 2 — the experiment | `.claude/skills/spike-loop/phases/2-experiment.md` |
 | 3 — fold back | `.claude/skills/spike-loop/phases/3-fold-back.md` |
