@@ -119,6 +119,16 @@ rig knows the right answer.
     `-S warning` deliberately. **The repair is an array, not quoting** — quoting changes
     the argument count, an array means the same thing in both shells. Verified by running
     the construct under each: `bash` 2 arguments, `zsh` 1, identical `$*`.
+    ⚠️ **`bash -c` ON A MAC IS NOT CI'S BASH, SO THE INSTRUCTION ABOVE IS NOT SELF-SUFFICIENT
+    HERE.** macOS ships `/bin/bash` **3.2.57** (2007, held there for licensing); CI is
+    ubuntu-24.04 with **5.2**. The gap runs BOTH ways, and the second is the nastier: 3.2
+    rejects things 5.2 accepts, so a local `bash -c` can fail on correct code. Measured
+    2026-08-08 —
+    `[ "$(f "a \"quoted\" b")" = x ]` is `[: too many arguments` on 3.2 and 4.0 and fine
+    from 4.4 on. An hour went on suspecting an alert, a rule and a simulator before the
+    shell. **Check `bash --version` before believing a surprising local result, and use
+    `docker run --rm bash:5.2` when the answer decides anything.** No check for this: the
+    construct is correct, and flagging it would flag correct code.
 
 18. **An assertion that only ever passes is not an assertion.** This is the general rule
     that **5** (poll, never single-shot) and **6** (expected values written first) are the

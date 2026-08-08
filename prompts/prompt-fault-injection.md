@@ -79,7 +79,7 @@ exist**; they ran green against a spike implementation that was deliberately not
 | What does the event sleep compare? | ⚠️ **A simulated `due` against `time.monotonic()`** — after a freeze that is permanently negative and the loop busy-spins. **70 passes/s against 2/s** | W3.2 |
 | Is the thaw burst real inside `worker()`? | **Yes: 9.0x a normal scrape gap** naive, **0.9x** with the offset. Confirms the scratch harness at a different rate | W3.2 |
 | Does `validate_profile` reject an unknown key? | ⚠️ **No.** `p.update(raw)` carries anything through, so `{"freze": true}` validates, applies, bumps the generation counter and injects **nothing** | W0.1 |
-| How long from freeze to `LLMMetricsStale` firing? | ⚠️ **The rate() window AND the `for:`, in series.** Measured 56s + 30s = **87s** on a `[1m]`/`30s` twin. Shipped `[10m]`/`5m` means **~15 minutes** | W3.5, Background |
+| How long from freeze to `LLMMetricsStale` firing? | ⚠️ **The rate() window AND the `for:`, in series** — 56s + 30s = **87s** measured on a `[1m]`/`30s` twin. A `[10m]`/`5m` rule would be **~15 minutes**, which is why **the `for:` is dropped** and detection is the window alone, ~10m | W3.5, Background |
 | Can the drill freeze `llm-driven` as it ships? | ⚠️ **Not reliably.** At 0.4 rps the population hits zero, `running > 0` excludes it, and the drill reports "no alert" about a state it never created. **One run held 6 requests, the next held 0** | W3.4 |
 | Does the alert fire against a real frozen simulator? | **Yes** — driven tenant only, fixtures untouched, and the idle-tenant negative shown against **live data** (guardless 2 series, guarded 1) | W3.5, W3.6 |
 | Does `extract.sh` need new logic for the driven profile? | **No** — one extra filename, exactly as W0.7 predicted | W0.7 |
@@ -329,8 +329,9 @@ evaluation latency is a **seven to eight minute** run at best, and five of the t
 one.
 
 ⚠️ **A `for:` is the floor, not the wait, whenever the expression carries a range vector.**
-`LLMMetricsStale` is the case: its `rate(...[10m])` has to drain before the `for: 5m` starts,
-so the real figure is about **fifteen minutes** (measured, W3.5). Every alert above whose
+`LLMMetricsStale` is the case: its `rate(...[10m])` has to drain before any `for:` starts, so
+it carries **no `for:`** and detection is the window alone, ~10m (measured, W3.5 — with a
+`for: 5m` on top it would have been fifteen). Every alert above whose
 expression reads a window inherits the same arithmetic — `LLMHighTTFT` sits on a `[5m]`
 quantile, so a tenant that becomes slow is a 5m window plus a 2m `for:`, not 2m. **Add the
 window to the `for:` before quoting a duration**, and take the totals in this table as the
@@ -390,32 +391,46 @@ were invisible under zsh.
 
 ### ⚠️ A THIRD `zsh` vs `bash` class, and nothing in this repo catches it — MEASURED 2026-08-07
 
-Rule 17 records two: a SIGPIPE'd producer under `pipefail`, and unquoted word-splitting.
-Here is a third, found by writing this harness rather than by reasoning about it:
+Rule 17 says `zsh` is not `bash`, and CI is `bash`. ⚠️ **There is a third shell on this
+desk, and it is also called `bash`:** macOS ships `/bin/bash` **3.2.57**, released in 2007
+and kept at that version for licensing reasons. `bash -c` on a Mac is therefore *not* the
+shell CI runs, and rule 17's own instruction — test with `bash -c` — silently means the
+wrong thing here.
+
+This construct is what surfaced it:
 
 ```sh
 [ "$(qn "ALERTS{alertname=\"LLMMetricsStaleFast\",alertstate=\"firing\"}")" != "0" ]
 ```
 
-**zsh evaluates it correctly. bash fails with `[: too many arguments`** — the escaped quotes
-inside a command substitution inside a test's quoted argument are parsed as argument
-separators. Confirmed by running the identical line under `bash -c` and `zsh -c`.
+**Measured across five bash versions, 2026-08-08:**
 
-**Nothing flags it.** `shellcheck` is silent at **every** severity including `-S style`, and
-neither `check-sigpipe.py` nor `check-word-splitting.py` looks for it.
+| bash | verdict |
+|--|--|
+| 3.2 (macOS `/bin/bash`) | ⚠️ `[: too many arguments` |
+| 4.0 | ⚠️ `[: too many arguments` |
+| 4.4, 5.0, **5.2** (ubuntu-24.04, **what CI runs**) | fine |
+| zsh | fine |
 
-⚠️ **And it is the shape this harness is made of.** W1.4 requires every expectation to be
-scoped by `model_name`, which means a quoted label matcher, inside a query string, inside a
-command substitution, inside a test — this construct, in every row of every table. The
-failure is worse than a crash: under `set -e` the test neither passes nor fails, it **errors
-past**, so a polling loop reads "not yet" forever. In the spike that meant a measurement loop
-running to its 300s deadline while the alert had been firing for four minutes.
+⚠️ **So this is NOT a CI hazard, and the first version of this section said it was.** It is
+a local false failure: the construct is correct, `ubuntu-24.04` runs it correctly, and only
+an obsolete local shell rejects it. **Do not write a check for it** — a check would flag
+correct code, which is the failure `check-word-splitting.py`'s first draft already made
+here (29 findings on 12 correct scripts) and the reason rule 18 gained its note about
+selftests that only ever confirm the author's belief.
 
-**The repair is `verify.sh`'s existing habit**: assign the query result to a variable, then
-test the variable (`:640` is the pattern). That turns out to be load-bearing rather than
-stylistic, and it is why this has never bitten the repo. **Copy it deliberately**, say why in
-the harness header, and consider whether it earns a check of its own — that decision belongs
-with W1 rather than here.
+**What to take from it is about the instrument, not the construct.** The spike lost a 300s
+measurement loop to this: under `set -e` the failing test neither passes nor fails, it
+**errors past**, so a polling loop reads "not yet" forever while the alert it was waiting
+for had been firing for four minutes. The time went on suspecting the alert, the rule and
+the simulator, in that order, before the shell. **When a shell result is surprising on a
+Mac, check `bash --version` before you check anything else** — and reach for
+`docker run --rm bash:5.2` when the answer matters, which is the cheap empirical version of
+this whole question.
+
+Writing the harness in `verify.sh`'s existing style — assign the query result to a variable,
+then test the variable (`:640`) — sidesteps it anyway, and is worth copying for legibility
+rather than for portability.
 
 ### What `verify.sh` already asserts, which your drills must not break — VERIFIED
 
@@ -782,7 +797,7 @@ cannot confirm the state it depends on has no business reporting on the alert th
 |--|--|--|
 | `up{job="llm-sim"} == 1` | unchanged | the target is healthy; that is the point |
 | `ALERTS{alertname="LLMMetricsAbsent"}` | 0 | absence cannot see this |
-| `rate(vllm:generation_tokens_total{model_name="...driven"}[5m])` | 0 | frozen counter |
+| `rate(vllm:generation_tokens_total{model_name="...driven"}[5m])` | 0 | frozen counter. **`[5m]` deliberately, not the rule's `[10m]`** — a shorter probe confirms the state at ~5m, while the alert it predicts is still five minutes away |
 | `vllm:num_requests_running{model_name="...driven"}` | > 0, flat | the engine still claims work |
 
 The last two rows together are the signature, and neither alone is one.
@@ -795,8 +810,45 @@ nothing: real vLLM does not emit them. Proposed:
 - alert: LLMMetricsStale
   expr: vllm:num_requests_running > 0
         and rate(vllm:generation_tokens_total[10m]) == 0
-  for: 5m
+  # NO `for:`, for the reason the burn alerts already give in this file at
+  # :366-370: the window IS the smoothing. rate(v[10m]) == 0 is true only after
+  # ten minutes of a flat counter, so a `for:` does not add independent evidence,
+  # it extends the same window from 10 minutes to 15.
+  #
+  # The window is DERIVED, not chosen, and `running > 0` is what sets the
+  # derivation: it restricts this rule to tenants with work in flight, so the
+  # window must exceed the longest a PROGRESSING request can take to complete,
+  # not the gap between arrivals. ~78s here (docs/llm-simulation.md:28); close to
+  # 7m for a real deployment generating 4k tokens at ~10 tok/s. Re-derive it
+  # against your own p99 end-to-end before trusting it.
 ```
+
+⚠️ **The `for:` is dropped deliberately, and this is the second time this file has made that
+call.** `llm-prometheusrule.yaml:366-370` already says it for the burn alerts, in nearly
+these words: *"the long window already provides exactly the smoothing a `for:` would add,
+and stacking both would delay a genuine fast burn by the `for:` on top of an hour of
+averaging. Do not 'fix' this by adding one."* That is this situation exactly, and following
+it takes detection from **~15 minutes to ~10** at no cost in confidence — which is a third
+off W3's cluster time.
+
+The one thing a `for:` would buy is anti-flap for a tenant whose legitimate gap between
+completions lands near the window. But that is a **mis-sized window**, and the repair is a
+larger window rather than a `for:` on top of a wrong one — which is what the comment above
+is warning against. Size the window correctly and a healthy tenant always completes inside
+it, so it cannot flap.
+
+⚠️ **And do not shrink the window to make the drill faster.** 10m is generous here (~8x
+margin) and about right for real vLLM with long outputs. Tuning it down to 5m would make
+this rig's drill quicker and the query wrong everywhere else, which is rule 4's mistake in
+the other direction: the shipped value is the one that transfers, and the drill pays for it.
+
+⚠️ **A stated limit, not a gap to close.** `running > 0` misses a wedge that has stopped
+**admitting** — requests queue, `running` reads 0, `waiting` climbs. `(running > 0 or
+vllm:num_requests_waiting > 0)` would cover both shapes, and it is **left out on purpose**:
+the freeze knob preserves whatever was in flight, so the rig cannot drive that conjunct red,
+and an assertion nothing can fail is a guess (rule 18). Record it as a limit of the detector.
+If it matters later it is an argument for a second fault — drain, then wedge — not for a
+longer expression now.
 
 **Both halves are proven in promtool** (`spike/spike_test.yaml`, `spike/stale-rules.yaml`):
 the expression fires for the frozen tenant only, and the guard-less variant fires for the
@@ -818,22 +870,21 @@ FAILED: alertname: LLMMetricsStale, time: 25m
 genre as `llm-prometheusrule.yaml:380-386` for the burn alerts and `:95-104` for the phase
 means.
 
-⚠️ **THE WINDOW IS A DETECTION LATENCY, AND IT IS ADDED TO THE `for:`, NOT OVERLAPPED WITH
-IT.** `rate(v[10m])` reaches zero only once the **whole** window contains a flat counter, so
-after a freeze the window drains first and the `for:` starts counting after that.
-**Measured** (`spike/stale_e2e.sh`, a `[1m]`/`for: 30s` twin of the shipped rule, real
-Prometheus, real frozen simulator):
+⚠️ **THE WINDOW IS ITSELF A DETECTION LATENCY, AND A `for:` ADDS TO IT RATHER THAN
+OVERLAPPING IT — WHICH IS WHY THERE IS NO `for:` ABOVE.** `rate(v[10m])` reaches zero only
+once the **whole** window contains a flat counter, so after a freeze the window drains first
+and any `for:` starts counting after that. **Measured** (`spike/stale_e2e.sh`, a
+`[1m]`/`for: 30s` twin, real Prometheus, real frozen simulator):
 
 ```
     rate() reached zero   : 56s after the freeze   (a [1m] window)
     alert reached firing  : 87s after the freeze   (+ a 30s `for:`)
 ```
 
-56 + 30 = 86, against 87 observed. So at the **shipped `[10m]` and `for: 5m` this alert takes
-about fifteen minutes to fire**, not five, and not the "seven to eight minutes" the timings
-table budgets for a 5m alert. Budget the drill accordingly, print the residual while it waits
-(W1.5), and if fifteen minutes is too long to be useful, that is an argument about the window
-— which is the trade-off below, now with a cost attached to one side of it.
+56 + 30 = 86, against 87 observed — so the arithmetic is additive, and it is what settled the
+`for:` question above. With one it would have been **~15 minutes**; without one it is the
+window alone, **~10**, and the drill budgets that plus an evaluation interval. Print the
+residual while it waits (W1.5): ten minutes of silence is indistinguishable from a hang.
 
 ⚠️ **The window is a real trade-off, not a default.** 10m over `generation_tokens_total`
 says "no request has completed in ten minutes". On this rig the saturated tenant's queue
@@ -1199,7 +1250,9 @@ smaller. The design held; the wiring around it did not, and the spike found **tw
 one-line clock bugs plus a validation gap** that reading could not reach. W3's code is now
 designed, measured and driven red — what remains is writing it in its real place with the
 selftest, the five-doc bill and a fifteen-minute cluster drill. **Treat ~1 day as firmer
-than before rather than smaller**, and note that the drill's wall clock roughly doubled.
+than before rather than smaller**. The drill's wall clock grew — ~10 minutes for the stale
+mode against the 7 to 8 the timings table assumes — but less than the spike first suggested,
+because dropping the `for:` (W3.5) took a third back off it.
 
 ⚠️ **Wall-clock is not effort here.** Five of the ten modes wait out a 5m `for:`. The
 cluster time is roughly an hour of waiting spread across the drills, and it does not
@@ -1277,7 +1330,10 @@ Written before the work (house convention), and mapped to ROADMAP.md item 1's "D
 
 9. Stale-but-up is produced, shown to defeat the absence alerts, and detected by a rule
    written over `vllm:*` series only — with its idle-tenant negative case asserted in
-   promtool and driven red once.
+   promtool and driven red once. The rule carries **no `for:`**, and its window carries a
+   comment deriving the number from p99 request duration rather than stating it (W3.5). The
+   promtool cases assert firing at the **window**, so they will be wrong if a `for:` is
+   reintroduced without re-deriving them.
 
 10. The freeze knob is off by default, covered by `--selftest` including the thaw-burst
     assertion, and each new selftest assertion has been driven red deliberately (rule 18).

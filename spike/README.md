@@ -94,12 +94,20 @@ build products of `manifests/alerts/`, so they are not committed.
 - **`validate_profile` accepts unknown keys silently**, so `{"freze": true}` validates,
   applies, bumps the generation counter and injects nothing.
 - **Detection latency is the rate() window PLUS the `for:`, in series.** Measured 56s + 30s =
-  87s on a `[1m]`/`30s` twin, so the shipped `[10m]`/`5m` is about **fifteen minutes**.
+  87s on a `[1m]`/`30s` twin, so a `[10m]`/`5m` rule would take about **fifteen minutes**.
+  That is what decided the rule against a `for:` at all — the window is already the smoothing,
+  the same call `llm-prometheusrule.yaml:366-370` makes for the burn alerts — leaving
+  detection at the window alone, ~10m.
 - **`llm-driven` cannot be frozen reliably at its shipped 0.4 rps**: the population hits zero,
   the `running > 0` guard excludes it, and the drill reports a silence it manufactured. Two
   runs minutes apart held 6 requests and 0.
 - **`LLMMetricsStale` fires against a real frozen simulator**, driven tenant only, with the
   idle-tenant negative shown against live data (guardless 2 series, guarded 1).
-- **A third `zsh` vs `bash` split**: `[ "$(f "q with \"quotes\"")" != "0" ]` works in zsh and
-  is `[: too many arguments` in bash. `shellcheck` is silent at every severity and neither
-  repo checker looks for it. The repair is `verify.sh`'s assign-then-test habit.
+- ⚠️ ~~**A third `zsh` vs `bash` split**: `[ "$(f "q with \"quotes\"")" != "0" ]` works in
+  zsh and is `[: too many arguments` in bash.~~ **WRONG, corrected 2026-08-08.** It is a
+  **bash 3.2 and 4.0** failure, fixed by 4.4. macOS ships `/bin/bash` 3.2.57; CI runs
+  ubuntu-24.04 with **5.2**, where the construct is fine. So it is a local false failure and
+  not a CI hazard, and it does **not** warrant a check — flagging it would flag correct code.
+  What it cost was an hour of suspecting the alert, the rule and the simulator before
+  suspecting the shell: on a Mac, check `bash --version` before trusting a `bash -c` result,
+  and use `docker run --rm bash:5.2` when it matters.

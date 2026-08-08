@@ -62,14 +62,14 @@ trap cleanup EXIT
 trap 'exit 130' INT
 trap 'exit 143' TERM
 
-# ⚠️ ASSIGN, THEN TEST -- never `[ "$(qn "q with \"quotes\"")" = x ]`.
-# bash parses the escaped quotes inside a command substitution inside a test's
-# quoted argument as argument separators and dies with "[: too many arguments";
-# zsh accepts the same line and returns the right answer. CI is bash (rule 17).
-# Every expectation here is scoped by model_name, so quoted label matchers inside
-# a query inside a substitution is THE shape this harness is made of, and
-# verify.sh's habit of assigning to a variable first turns out to be load-bearing
-# rather than stylistic. shellcheck is silent on it at every severity.
+# ASSIGN, THEN TEST -- rather than `[ "$(qn "q with \"quotes\"")" = x ]`.
+#
+# ⚠️ The reason is NARROWER than this comment first claimed. That construct fails
+# with "[: too many arguments" on bash 3.2 and 4.0, and is fine from 4.4 onward.
+# macOS ships /bin/bash 3.2.57; CI runs ubuntu-24.04 with bash 5.2, where it works.
+# So it is a LOCAL false failure, not a CI hazard, and the first draft of this
+# comment had it as the opposite. Kept in this style for legibility, not for
+# portability.
 nq() { local v; v="$(qn "$1")"; printf '%s\n' "${v:-0}"; }
 
 check() {  # check <ok> <label> [detail]
@@ -80,7 +80,8 @@ check() {  # check <ok> <label> [detail]
 # ⚠️ EXACTLY ONE LINE OUT, ALWAYS, and that is harder than it looks under
 # `set -o pipefail`. Written first as `curl | python3 || echo '[]'`, this emitted
 # python's output AND the fallback whenever pipefail failed the pipeline -- two
-# lines into a `[ "$(qn ...)" != "0" ]`, which becomes `[: too many arguments`.
+# lines into a `[ "$(qn ...)" != "0" ]`, which becomes `[: too many arguments`
+# on the bash 3.2 this was developed against.
 # The test then neither passed nor failed: it errored past, every poll returned
 # "not yet", and the measurement loop ran to its deadline while the alert had
 # been firing for four minutes. A poll helper that can return two lines silently
