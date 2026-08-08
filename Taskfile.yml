@@ -264,6 +264,27 @@ tasks:
   # `sigpipe` above covers the first bug of that day; this covers the second, where zsh
   # does not word-split unquoted parameters and bash does. shellcheck knows it as SC2086,
   # which is `info`-level and therefore suppressed by the `-S warning` above, on purpose.
+  # ⚠️ THE CHEAPEST HALF OF A PROMPT REVIEW, DONE DETERMINISTICALLY. Briefs cite the
+  # tree by `file:line` and those citations rot. One review round on 2026-08-07 found
+  # four dead pointers in one brief, including a path that has never existed. That is
+  # decidable without reading anything; whether the cited line SAYS what the prose
+  # claims is not, and stays with .claude/agents/prompt-fact-checker.md.
+  citations:
+    desc: Every `path:line` in tracked markdown resolves to a real file and line
+    cmds:
+      - python3 scripts/check-citations.py --selftest
+      - python3 scripts/check-citations.py
+
+  # A spike is throwaway by design (docs/development-method.md stage 3), so its
+  # artefacts need a stated heir or they are being kept by accident. On 2026-08-07 a
+  # fold-back tracked two scripts and updated spike/README.md in the same commit
+  # without adding them to its survives list.
+  spike-routing:
+    desc: Every tracked spike/ artefact has a stated destination in spike/README.md
+    cmds:
+      - python3 scripts/check-spike-routing.py --selftest
+      - python3 scripts/check-spike-routing.py
+
   word-splitting:
     desc: Find code relying on word-splitting, which zsh and bash do differently
     cmds:
@@ -316,6 +337,8 @@ tasks:
       - task: doc-claims
       - task: sigpipe
       - task: word-splitting
+      - task: citations
+      - task: spike-routing
       - task: second-copy
       - task: shellcheck
       - task: action-shell
