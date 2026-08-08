@@ -61,6 +61,29 @@ def _git(*args) -> str:
                           cwd=ROOT).stdout.strip()
 
 
+def cited_artefacts(text: str, added: set) -> set:
+    """Which of `added` the prompt refers to BY PATH.
+
+    ⚠️ A BARE MENTION IS NOT A REFERENCE, AND THIS COUNTED MENTIONS. It was
+    `text.count(basename)`, so any sentence naming `worker_freeze.py` — a code block, a
+    passing aside, this docstring — moved the loop past phase 3. It also could not tell
+    two artefacts apart when they shared a basename.
+
+    ⚠️ BUT REQUIRING `path:line` IS THE OPPOSITE ERROR, and it was tried first. A
+    fold-back cites a whole script — `Evidence: spike/worker_freeze.py` — because the
+    evidence IS the script, not one line of it. Demanding a line number reported the
+    fault-injection prompt as phase 3 when its fold-back had already landed, which is
+    the detector being wrong about a case that exists rather than about a hypothetical.
+
+    So: the artefact's PATH, as the diff names it. Stronger than a basename appearing
+    anywhere in prose, and it does not invent a line number the author had no reason to
+    write. A passing mention that spells the full path still counts, and that is the
+    accepted looseness — the observation is "has the fold-back happened", which no
+    pattern decides perfectly.
+    """
+    return {a for a in added if a in text}
+
+
 def observe(prompt_path: str) -> dict:
     """Read the tree. Every value here is what `decide` turns into a phase."""
     subj = subject(prompt_path)
@@ -72,16 +95,17 @@ def observe(prompt_path: str) -> dict:
         out = _git("rev-list", "--count", f"main..{branch}")
         commits = int(out) if out.isdigit() else 0
 
-    # Artefacts the branch added under spike/, and whether the prompt names any of them.
+    # Artefacts the branch added under spike/, and how many the prompt CITES.
     cites = 0
     if exists:
-        added = [os.path.basename(p) for p in
-                 _git("diff", "--name-only", f"main...{branch}", "--", "spike/").split()]
+        raw = subprocess.run(["git", "diff", "--name-only", "-z", f"main...{branch}",
+                              "--", "spike/"], capture_output=True, text=True,
+                             cwd=ROOT).stdout
+        added = {p for p in raw.split("\0") if p}
         if added:
             try:
                 with open(os.path.join(ROOT, prompt_path), encoding="utf-8") as fh:
-                    text = fh.read()
-                cites = sum(text.count(a) for a in set(added))
+                    cites = len(cited_artefacts(fh.read(), added))
             except OSError:
                 cites = 0
 
@@ -125,6 +149,41 @@ def selftest() -> int:
 
     check(subject("prompts/prompt-fault-injection.md") == "fault-injection",
           "the subject is the filename without `prompt-` or `.md`")
+
+    # ⚠️ `cited_artefacts` WAS THE UNTESTED HALF, and it carried the bug. `decide()` is
+    # pure and was covered from the start; the observation feeding it was not, so
+    # counting prose mentions as citations passed every case above.
+    added = {"spike/worker_freeze.py", "spike/stale_e2e.sh"}
+    #    Expected: 0 — a bare basename in prose is not a reference.
+    check(cited_artefacts("we ran worker_freeze.py and it was fine", added) == set(),
+          "a bare basename in prose is NOT counted as citing the artefact")
+    #    Expected: 1 — the path, as the diff names it.
+    check(cited_artefacts("Evidence: `spike/worker_freeze.py`.", added)
+          == {"spike/worker_freeze.py"},
+          "the artefact path IS counted")
+    #    Expected: 2 — both, once each, however many times they appear.
+    check(len(cited_artefacts("`spike/worker_freeze.py` twice: `spike/worker_freeze.py` "
+                              "and `spike/stale_e2e.sh`", added)) == 2,
+          "each artefact counts once, not once per mention")
+    #    Expected: 0 — nothing added means nothing to cite.
+    check(cited_artefacts("`spike/worker_freeze.py`", set()) == set(),
+          "an empty artefact set cites nothing (the rule is not inert in reverse)")
+
+    # observe() against the real tree: it must agree with what git says, or the phase is
+    # decided from a fiction. This asserts the wiring, not a particular phase.
+    live = observe("prompts/prompt-fault-injection.md")
+    real_branch = subprocess.run(["git", "rev-parse", "--verify", "-q",
+                                  "spike/fault-injection"],
+                                 capture_output=True, cwd=ROOT).returncode == 0
+    check(live["branch_exists"] == real_branch,
+          f"observe() agrees with git on whether spike/fault-injection exists "
+          f"({real_branch})")
+    check(isinstance(live["commits"], int) and live["commits"] >= 0,
+          "observe() returns a non-negative commit count")
+    check(live["routing_ok"] == (subprocess.run(
+              [sys.executable, "scripts/check-spike-routing.py"],
+              capture_output=True, cwd=ROOT).returncode == 0),
+          "observe() agrees with check-spike-routing.py's own exit code")
 
     print(f"\n{'FAIL' if failures else 'PASS'}  phase selftest "
           f"({len(failures)} failure(s))")

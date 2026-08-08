@@ -54,10 +54,13 @@ CITE = re.compile(
 # ⚠️ AN ENTRY HERE IS A PROMISE THAT THE PATH IS EXTERNAL, not a way to silence a dead
 # link. A repo path that stops resolving must be fixed, not listed: `spike/kv_isolation.py`
 # is exactly the shape this check exists to catch, and adding it here would have hidden it.
-UPSTREAM = {
-    "loggers.py",
-    "vllm/v1/metrics/stats.py",
-}
+# ⚠️ A BARE NAME MATCHES ONLY A BARE CITATION. `loggers.py:468` is upstream; but
+# `scripts/loggers.py:10` is a repo-relative path that does not exist, and matching it
+# by basename exempted it silently — the exact silencing this comment forbids, done by
+# the code beneath the comment. Path-shaped entries match exactly; bare names only
+# where the citation is also bare.
+UPSTREAM_BARE = {"loggers.py"}
+UPSTREAM_PATHS = {"vllm/v1/metrics/stats.py"}
 
 
 def citations(text: str) -> list:
@@ -73,7 +76,7 @@ def citations(text: str) -> list:
 
 def resolve(path: str, tracked: set, by_base: dict) -> tuple:
     """(resolved path or None, reason). Reason is '' when it resolved."""
-    if path in UPSTREAM or os.path.basename(path) in UPSTREAM:
+    if path in UPSTREAM_PATHS or ("/" not in path and path in UPSTREAM_BARE):
         return None, ""                      # external, and declared so
     if path in tracked:
         return path, ""
@@ -102,8 +105,12 @@ def offenders(files: dict, tracked: set, by_base: dict, lengths: dict) -> list:
 
 
 def _tree():
-    out = subprocess.run(["git", "ls-files"], capture_output=True, text=True,
-                         check=True, cwd=ROOT).stdout.split()
+    # ⚠️ `-z` AND NUL, NOT `.split()` — a tracked path containing a space would
+    # otherwise become two paths that do not exist, and every citation to it would
+    # report as dead.
+    raw = subprocess.run(["git", "ls-files", "-z"], capture_output=True, text=True,
+                         check=True, cwd=ROOT).stdout
+    out = [p for p in raw.split("\0") if p]
     tracked = set(out)
     by_base = defaultdict(list)
     for p in out:
@@ -135,7 +142,7 @@ def main() -> int:
           file=sys.stderr)
     print("reader somewhere that does not exist. Fix the path, or — only if the file is",
           file=sys.stderr)
-    print("genuinely in another repository — add it to UPSTREAM in this script and say so.",
+    print("genuinely in another repository — add it to UPSTREAM_BARE or UPSTREAM_PATHS and say so.",
           file=sys.stderr)
     return 1
 
@@ -180,15 +187,25 @@ def selftest() -> int:
 
     # 6. ⚠️ AMBIGUITY IS A FINDING, NOT A COIN TOSS. Two tracked `config.sh` makes every
     #    bare citation undecidable. Expected: caught.
-    amb = dict(by_base); amb["config.sh"] = ["scripts/config.sh", "other/config.sh"]
+    amb = dict(by_base)
+    amb["config.sh"] = ["scripts/config.sh", "other/config.sh"]
     got = [(a, c, d) for _f, a, c, d in
            offenders({"t.md": "`config.sh:12`"}, tracked, amb, lengths)]
     check(len(got) == 1 and "ambiguous" in got[0][2],
           "a basename matching two tracked files is reported, not guessed")
 
-    # 7. Declared upstream. Expected: [] — external, and the allowlist says so.
+    # 7. Declared upstream, bare. Expected: [] — external, and the allowlist says so.
     check(bad("upstream does it at `loggers.py:468`") == [],
+          "a declared bare UPSTREAM name is not a finding")
+    #    ...and a path-shaped upstream entry. Expected: [].
+    check(bad("`vllm/v1/metrics/stats.py:393-395`") == [],
           "a declared UPSTREAM path is not a finding")
+    # 7b. ⚠️ THE SILENCING CASE THE DOCSTRING FORBIDS AND THE CODE ALLOWED. A dead
+    #     REPO path whose basename collides with an upstream name was exempted by
+    #     basename, so it was never reported. Expected: caught.
+    got = bad("`scripts/loggers.py:10`")
+    check(len(got) == 1 and "no such tracked file" in got[0][2],
+          "a dead repo path is NOT excused by an upstream basename collision")
 
     # 8. ⚠️ THE FALSE-POSITIVE CLASSES, all of which appear in this repo's prose today.
     #    Expected: [] for every one, and none should even match the pattern.

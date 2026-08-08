@@ -6,7 +6,7 @@ disable-model-invocation: true
 allowed-tools: Read, Edit, Write, Bash, Grep, Glob
 ---
 
-Drive `$ARGUMENTS` through the loop in `docs/development-method.md`.
+Drive the single prompt file named in `$ARGUMENTS` through the loop in `docs/development-method.md`.
 
 If `$ARGUMENTS` is empty or the file does not exist, say so, list `prompts/*.md`, and
 stop. Do not guess which prompt was meant.
@@ -14,8 +14,13 @@ stop. Do not guess which prompt was meant.
 ## 1. Ask which phase you are in. Do not work it out yourself.
 
 ```
-python3 .claude/skills/spike-loop/phase.py $ARGUMENTS
+python3 .claude/skills/spike-loop/phase.py "$ARGUMENTS"
 ```
+
+⚠️ **Quoted, and it takes exactly one path.** Unquoted, a prompt filename containing a
+space becomes two arguments and the script reads the first — rule 17's word-splitting
+class, in the skill that exists to enforce the loop's discipline. If `$ARGUMENTS` holds
+more than one path, say so and stop rather than picking one.
 
 It prints the phase, why, and the four observations behind it.
 

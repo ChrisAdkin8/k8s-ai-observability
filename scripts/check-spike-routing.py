@@ -33,9 +33,13 @@ ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 SPIKE_DIR = "spike"
 README = "spike/README.md"
 
-# The heading that opens the list of what survives, and the blank-line-terminated block
-# under it. Matched loosely on purpose: the sentence has been reworded twice already and
-# keying on its exact phrasing would make this check fail for a reason nobody cares about.
+# The heading that opens the list of what survives.
+#
+# ⚠️ THIS IS AN EXACT MATCH, and an earlier comment here claimed it was loose. Reword
+# that sentence in spike/README.md and this check stops finding the list — reporting
+# "no survives list" rather than the artefacts, which is at least a loud failure and not
+# a silent one. If it needs to tolerate rewording, widen the pattern deliberately rather
+# than describing a looseness it does not have.
 SURVIVES = re.compile(r"^What survives the spike is:\s*$", re.M)
 
 # Files under spike/ that are not artefacts and need no heir.
@@ -48,11 +52,22 @@ def survives_block(readme: str) -> str:
     if not m:
         return ""
     rest = readme[m.end():]
-    # Up to the first blank line that is followed by something other than a list item,
-    # so a multi-paragraph entry does not truncate the block.
+    # The block runs to the first paragraph that is neither a list item nor an indented
+    # continuation of one.
+    #
+    # ⚠️ THE CONTINUATION TEST READS THE RAW PARAGRAPH, NOT THE STRIPPED ONE. This was
+    # `para.lstrip().startswith(("-", "*", " "))` — and `lstrip()` removes exactly the
+    # leading whitespace that the `" "` member was looking for, so that member could
+    # never match and every indented continuation ended the block. Selftest case 4
+    # claimed to cover it and passed anyway, because the artefact it looked for appeared
+    # in the entry's FIRST paragraph, before the truncation. A fixture that cannot fail
+    # is the failure iron rule 18 names.
     out = []
     for para in rest.split("\n\n"):
-        if out and not para.lstrip().startswith(("-", "*", " ")):
+        stripped = para.lstrip()
+        is_item = stripped.startswith(("-", "*"))
+        is_continuation = bool(stripped) and para[:1].isspace()
+        if out and not (is_item or is_continuation):
             break
         out.append(para)
     return "\n\n".join(out)
@@ -60,14 +75,16 @@ def survives_block(readme: str) -> str:
 
 def offenders(tracked: list, readme: str) -> list:
     """Tracked spike artefacts whose basename never appears in the survives list."""
+    artefacts = [p for p in sorted(tracked)
+                 if p.startswith(SPIKE_DIR + "/") and p not in EXEMPT]
+    if not artefacts:
+        return []          # nothing to route, so no list is required
     block = survives_block(readme)
     if not block:
         return [(f"{README}", "no `What survives the spike is:` list — nothing can be "
                               "routed against it")]
     bad = []
-    for path in sorted(tracked):
-        if not path.startswith(SPIKE_DIR + "/") or path in EXEMPT:
-            continue
+    for path in artefacts:
         if os.path.basename(path) not in block:
             bad.append((path, "no entry in the survives list — state where it goes, or "
                               "why it stays"))
@@ -75,8 +92,12 @@ def offenders(tracked: list, readme: str) -> list:
 
 
 def _tracked():
-    return subprocess.run(["git", "ls-files", SPIKE_DIR], capture_output=True, text=True,
-                          check=True, cwd=ROOT).stdout.split()
+    # ⚠️ `-z` AND NUL, NOT `.split()`. Whitespace-splitting `git ls-files` turns one path
+    # containing a space into two paths that do not exist, and `spike/` is scaffolding
+    # where a filename is whatever somebody typed.
+    out = subprocess.run(["git", "ls-files", "-z", SPIKE_DIR], capture_output=True,
+                         text=True, check=True, cwd=ROOT).stdout
+    return [p for p in out.split("\0") if p]
 
 
 def main() -> int:
@@ -139,15 +160,30 @@ def selftest() -> int:
     check(offenders(["spike/README.md", "spike/.gitignore"], good) == [],
           "the README and .gitignore need no heir")
 
-    # 4. A multi-paragraph entry must not truncate the block. `b.sh`'s reasoning runs on
-    #    past a blank line in the real file. Expected: [].
+    # 4. ⚠️ THE ARTEFACT IS NAMED ONLY IN THE CONTINUATION PARAGRAPH, AND THAT IS THE
+    #    WHOLE TEST. The previous version of this case put `b.sh` in the entry's first
+    #    paragraph, so it passed whether or not the continuation was included — which it
+    #    was not, because `lstrip()` made the continuation branch dead. The fixture could
+    #    not fail, which is the failure iron rule 18 names. Expected: [].
     wrapped = ("What survives the spike is:\n\n"
                "- `a.py` -> becomes a selftest (W3).\n"
-               "- `b.sh` -> no obvious heir. It is the only thing that answers\n\n"
-               "  the question the item exists to ask, so deleting it loses the finding.\n\n"
+               "- no obvious heir for the harness. It is the only thing that answers\n\n"
+               "  the question the item exists to ask, so `b.sh` is kept as evidence.\n\n"
                "Run everything from the repo root.\n")
     check(offenders(["spike/a.py", "spike/b.sh"], wrapped) == [],
-          "a wrapped multi-paragraph entry still counts as routed")
+          "an artefact named ONLY in an indented continuation counts as routed")
+    #    ...and the block must still END somewhere. Expected: caught — `c.sh` appears
+    #    after the list, in ordinary prose, which is not part of the survives list.
+    trailing = wrapped.replace("Run everything from the repo root.",
+                               "Run everything from the repo root, including `c.sh`.")
+    got = offenders(["spike/a.py", "spike/b.sh", "spike/c.sh"], trailing)
+    check(len(got) == 1 and got[0][0] == "spike/c.sh",
+          "...but a name in the prose AFTER the list does not count")
+
+    # 4b. Only exempt files tracked: there is nothing to route, so a README without a
+    #     survives list is not a finding. Expected: [].
+    check(offenders(["spike/README.md", "spike/.gitignore"], "no list here\n") == [],
+          "a spike/ holding only exempt files needs no survives list")
 
     # 5. No survives list at all — the whole rule is unanchored. Expected: one finding.
     got = offenders(["spike/a.py"], "just some prose\n")
