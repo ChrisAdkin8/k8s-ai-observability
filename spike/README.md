@@ -94,7 +94,10 @@ build products of `manifests/alerts/`, so they are not committed.
 - **`validate_profile` accepts unknown keys silently**, so `{"freze": true}` validates,
   applies, bumps the generation counter and injects nothing.
 - **Detection latency is the rate() window PLUS the `for:`, in series.** Measured 56s + 30s =
-  87s on a `[1m]`/`30s` twin, so the shipped `[10m]`/`5m` is about **fifteen minutes**.
+  87s on a `[1m]`/`30s` twin, so a `[10m]`/`5m` rule would take about **fifteen minutes**.
+  That is what decided the rule against a `for:` at all — the window is already the smoothing,
+  the same call `llm-prometheusrule.yaml:366-370` makes for the burn alerts — leaving
+  detection at the window alone, ~10m.
 - **`llm-driven` cannot be frozen reliably at its shipped 0.4 rps**: the population hits zero,
   the `running > 0` guard excludes it, and the drill reports a silence it manufactured. Two
   runs minutes apart held 6 requests and 0.
