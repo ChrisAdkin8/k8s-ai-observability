@@ -42,10 +42,10 @@ inputs:
     # pairing that file warns about: kind ties node images to kind RELEASES, and a
     # mismatch is a documented way to get a cluster that never becomes Ready.
     #
-    # Both callers now pass this explicitly, and check-doc-claims.py asserts that this
-    # default, ci.yml's KIND_VERSION and publish-chart.yml's all agree — so the default
-    # is a safety net rather than the operative value, and it can no longer rot in
-    # silence the way it did.
+    # Both callers now pass this explicitly, so the default is a safety net rather
+    # than the operative value. ⚠️ Nothing asserts that this default, ci.yml's
+    # KIND_VERSION and publish-chart.yml's agree (that check left with
+    # check-doc-claims.py on 2026-08-12) — move all three together.
     default: v0.32.0
   kps-chart-version:
     description: >

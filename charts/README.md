@@ -115,10 +115,10 @@ KPS_RELEASE=my-monitoring ./scripts/verify.sh local --byo
 
 `Chart.yaml` carries the chart `version`, its `appVersion`, and the two subchart pins that
 `scripts/config.sh` also holds — Helm cannot read a shell variable, so those pins genuinely
-exist twice and `chart-build.py` cross-checks them by dependency name. The chart README's
-`helm install --version` is checked against `Chart.yaml` by
-[`scripts/check-doc-claims.py`](../scripts/check-doc-claims.py), because a stale pin there
-installs an old published chart rather than failing. See
+exist twice and `chart-build.py` cross-checks them by dependency name. ⚠️ The chart README's
+`helm install --version` is no longer checked against `Chart.yaml` (that check left with
+`check-doc-claims.py` on 2026-08-12) — a stale pin there installs an old published chart
+rather than failing, so re-verify it whenever the version moves. See
 [`docs/releasing.md`](../docs/releasing.md) for the order these move in.
 
 ## Uninstalling the script path

@@ -109,6 +109,20 @@ Comparison links are at the foot of this file, one per released version.
 
 ### Removed
 
+- **The development-loop harness, moved out of this repository**: the `/spike-loop` skill
+  and its phase detector, the prompt review harness added above (`prompt-fact-checker`,
+  `/review-prompt`, `task prompt-review`), and the three tree-wide checks
+  `check-citations.py`, `check-spike-routing.py` and `check-doc-claims.py`, with their
+  preflight tasks and CI steps. The loop itself is unchanged and stays described in
+  `docs/development-method.md`; the tooling now lives in its own repository, and two
+  copies of it had already disagreed.
+
+  What the checks asserted does not stop being true by being unenforced: every site that
+  leaned on one — the kind pin's three copies, the workflow checksum sums,
+  `required-checks.txt` against `ci.yml`'s job names, the chart README's `--version`, the
+  kubectl minor window, the em-dash pages — now carries a ⚠️ saying it is re-verified by
+  hand.
+
 - **`docs/record-demo.md`, and the `docs/llm-demo.gif` it specified**, which was never
   built. Its line 8 stated the result was "embedded above the fold in `README.md`"; the
   image there is `docs/gpu-dashboard.png`. Two live files asserting an asset that never

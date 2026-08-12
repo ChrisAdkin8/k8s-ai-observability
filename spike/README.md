@@ -9,9 +9,9 @@ CI or the chart, and nothing here ships.
 
 ⚠️ **EXECUTED AND VALIDATED ARE DIFFERENT THINGS, AND ONLY THE FIRST EXCLUDES YOU.**
 Nothing here runs, but everything here is still *checked*: the repo's validators walk
-`git ls-files`, so a file added to this directory is inside `check-second-copy.py` and,
-if it is markdown, inside `check-doc-claims.py` too. Adding something here is not a way
-to stay out of CI's way — assuming otherwise is what produced the collision below.
+`git ls-files`, so a file added to this directory is inside `check-second-copy.py`.
+Adding something here is not a way to stay out of CI's way — assuming otherwise is what
+produced the collision below.
 
 ⚠️ **THIS FILE USED TO SAY IT SHOULD NOT BE ON `main`.** The heading read "NOT for main"
 and the paragraph above ended "it should not merge to `main` as-is". `0d426e5` contradicted

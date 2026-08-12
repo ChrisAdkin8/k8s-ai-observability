@@ -45,9 +45,6 @@ Prompts are written **one item ahead**, because implementing the current item is
 the next one's prompt honest.
 
 They live in `prompts/` and are **tracked**, since context worth having is context you commit.
-That also puts them inside `check-doc-claims.py`, which scans tracked markdown, so a prompt
-is now held to the same prose against code checks as the docs. Its first run on them found
-three citing a dashboard id this repo has never had.
 
 ## Stage 2: review
 
@@ -141,14 +138,14 @@ Each is a rule in `CLAUDE.md`, which owns the detail.
 
 | Stage | Mechanism |
 |---|---|
-| Every stage, one step per invocation | `/spike-loop prompts/prompt-<subject>.md`, which reads the tree to decide the phase and then does only that one. `.claude/skills/spike-loop/phase.py` owns the decision, because working it out by eye is how four confident wrong answers happened in one session |
-| The mechanical half of stage 2 | `.claude/agents/prompt-fact-checker.md`, fanned out by `/review-prompt` |
-| The cold half of stage 2 | `task prompt-review -- prompts/prompt-<subject>.md`, a separate `claude -p` |
 | Standing context | `CLAUDE.md`, loaded every session, kept short so its rules are not lost in noise |
+
+The rest of the loop's tooling (the phase-aware skill, the fact-checking subagents, the
+cold-read target) was removed from this repository on 2026-08-12; the loop is now driven
+by hand, as this page describes it.
 
 ## A note on em dashes
 
-One check keeps em dashes out of the pages a stranger reads first, listed in `EM_DASH_FREE`
-in `check-doc-claims.py`. **This is purely the repository owner's preference for conventional
-dashes**, mechanised only because it had to be applied by hand three times first, which is
-how everything here ends up in a check.
+Em dashes stay out of the pages a stranger reads first (`CLAUDE.md` rule 13 lists them).
+**This is purely the repository owner's preference for conventional dashes.** A check
+enforced it until 2026-08-12; it is now applied by reading.

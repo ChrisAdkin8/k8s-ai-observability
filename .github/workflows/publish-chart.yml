@@ -57,7 +57,8 @@ env:
   OCI_REPO: ghcr.io/${{ github.repository_owner }}/charts
   CHART_NAME: k8s-ai-observability
   HELM_VERSION: v3.21.3
-  # ⚠️ MUST MATCH ci.yml's KIND_VERSION, and check-doc-claims.py asserts it. The
+  # ⚠️ MUST MATCH ci.yml's KIND_VERSION — nothing asserts it (that check left with
+  # check-doc-claims.py on 2026-08-12), so move the two together by hand. The
   # composite action below builds a cluster from kind/gpu-sim.yaml, which pins a node
   # image kind ties to a specific kind RELEASE; the action's own default had drifted
   # two minors behind, so the release path was verifying the chart on a pairing the

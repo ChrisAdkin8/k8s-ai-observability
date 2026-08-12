@@ -10,13 +10,11 @@ browser, versioned by nothing, and it is the single control that decides whether
 pull request can merge. .github/required-checks.txt is this repository's only record
 of it, and a record that nobody compares to the thing it records is a comment.
 
-The coupling is checked in two halves, because no single check can cover it:
-
-  * check-doc-claims.py asserts every line of required-checks.txt is a name ci.yml can
-    actually produce. Offline, on every run, so a job rename fails in the pull request
-    that made it.
-  * this, weekly, with the network. It catches the other direction — someone editing
-    the ruleset in a browser — which nothing offline can see.
+This is the coupling's only check: weekly, with the network. It catches someone
+editing the ruleset in a browser, which nothing offline can see. The offline half —
+check-doc-claims.py asserting every line of required-checks.txt is a name ci.yml can
+actually produce, so a job rename fails in the pull request that made it — was
+removed on 2026-08-12, so a rename also surfaces here, a week late.
 
 ⚠️ WHY IT IS A SCRIPT AND NOT FORTY LINES OF INLINE PYTHON IN ci.yml, which is what it
 was until 2026-08-06. Three reasons, and the third is the one that matters:
