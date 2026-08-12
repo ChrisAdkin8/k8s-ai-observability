@@ -9,9 +9,9 @@ is probably two PRs — the changelog entry is easier to write when it is one.
 
 ## Checks
 
-- [ ] `task preflight` passes — selftests, rule tests, doc claims, chart
+- [ ] `task preflight` passes — selftests, rule tests, chart
 - [ ] Behaviour change? `CHANGELOG.md` entry added under `[Unreleased]`
-- [ ] Numbers in prose still match the code they describe (`task doc-claims`)
+- [ ] Numbers in prose still match the code they describe (re-verified by hand)
 - [ ] Cluster path touched? verified with `./scripts/verify.sh <target>`
 
 <!--

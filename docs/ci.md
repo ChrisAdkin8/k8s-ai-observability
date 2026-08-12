@@ -73,9 +73,8 @@ Everything else hangs off those two.
 
 The fast gate, and the one that catches most mistakes. It runs the simulator's selftest
 (histogram bucket monotonicity, `+Inf` consistency, `HELP`/`TYPE` correctness), the compose
-GPU producer against the DCGM surface contract, `promtool` tests for the alert and recording
-rules, and `scripts/check-doc-claims.py`, which compares prose in the markdown against the
-code it describes.
+GPU producer against the DCGM surface contract, and `promtool` tests for the alert and
+recording rules.
 
 It also lints the shell, in three layers, because one glob does not reach all of it:
 
@@ -101,11 +100,6 @@ everything it was asked to prove, and in this very workflow's changes filter it 
 have reported a large code change as "markdown only" and skipped the cluster jobs.
 ⚠️ Neither reproduces under `zsh`, so a laptop will not find them — test that class
 with `bash -c`.
-
-The doc-claims check exists because documentation drift here is a *known failure class*. Dashboard
-ids, "emits N metrics" claims and version numbers have all been wrong in prose while being
-right in code. The checker derives every expected value at run time and holds no copy of any
-truth, so it cannot drift itself.
 
 `task preflight` runs the same gates locally. Running it before you push is the single
 highest-value habit in this repo.
@@ -269,12 +263,16 @@ required check that never reports is not treated as passed; it sits at "waiting 
 be reported". The ruleset lives in GitHub settings, outside this repository, so nothing here
 version-controls it.
 
-That coupling *is* checked now, in two halves, because no single check could cover it:
+That coupling is checked weekly:
 
-| Half | Where | When | Catches |
+| What | Where | When | Catches |
 |--|--|--|--|
-| every recorded requirement is a name `ci.yml` can produce | `check-doc-claims.py` | every run, offline | a rename, in the pull request that made it |
 | the recorded list matches the **live** ruleset | `check-required-checks.py`, via the `branch ruleset vs required-checks.txt` job | weekly, needs network | someone editing the ruleset in a browser, and a ruleset that has stopped enforcing |
+
+⚠️ There was a second, offline half — `check-doc-claims.py` asserting every recorded
+requirement is a name `ci.yml` can produce, so a rename failed in the pull request that
+made it. It was removed on 2026-08-12 with the review tooling, so a job rename now
+surfaces in the weekly job instead: re-check `required-checks.txt` by hand when renaming.
 
 ⚠️ That second half was forty lines of inline Python in `ci.yml` until 2026-08-06, and it
 did not do what its own comment said. It claimed to find the ruleset targeting `main` and
@@ -293,11 +291,10 @@ settings. It is a *record*, not a control plane: adding a line does not make a c
 required. Change the ruleset first, then record it, or the weekly job will report that they
 disagree, which is precisely its job.
 
-A third check falls out of the same derivation: **every check name `ci.yml` produces must
-appear on this page.** Add a job without documenting it, or rename one and leave the prose
-behind, and `doc-claims` fails. That is not hypothetical politeness. The
-`branch ruleset vs required-checks.txt` row in the table above exists because adding that job
-failed this check, which is how it should work.
+⚠️ A third check used to fall out of the same derivation: **every check name `ci.yml`
+produces must appear on this page.** That left with `check-doc-claims.py` too (it was not
+hypothetical politeness: the `branch ruleset vs required-checks.txt` row above exists
+because adding that job failed it), so keep this page in step with `ci.yml` by hand.
 
 **This is also why the `stack` job is `if: ${{ !cancelled() }}`** rather than gated like its
 siblings. A *skipped* matrix job does not interpolate its name, so it would report as the
@@ -482,7 +479,7 @@ in `task preflight` executes a composite action, so the first real evidence will
 Reproduce locally with the same commands CI uses:
 
 ```sh
-task preflight        # the fast gates: selftest, compose-selftest, drift, doc-claims, rules, chart
+task preflight        # the fast gates: selftest, compose-selftest, drift, rules, chart
 task local:up         # the whole thing, exactly as the stack job runs it
 LITE=1 task local:up  # the lite leg
 ```
@@ -514,7 +511,8 @@ minor version. ⚠️ The kind pin is written in **three** places, not two — `
 `publish-chart.yml` and the `kind-version` input default in
 [`.github/actions/verify-chart`](../.github/actions/verify-chart/action.yml) — and the
 third had drifted two minors behind while both callers fell through to it.
-`check-doc-claims.py` now asserts all three agree. Helm is deliberately held on the v3
+Nothing asserts the three agree since `check-doc-claims.py` left on 2026-08-12, so move
+all three together. Helm is deliberately held on the v3
 line: v4 is a major this repo has not validated, and CI should exercise what people
 actually run.
 

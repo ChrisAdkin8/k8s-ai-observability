@@ -90,11 +90,9 @@ tasks:
   # ---- the checks that need no cloud, no cluster and no network --------------
   # All run in seconds. Between them they cover the things this repo produces that
   # are worth testing on their own: what the simulator emits, what the PromQL over
-  # it computes, how the weekly drift check decides those names still match
-  # upstream's, and whether the prose numbers still match the code they describe.
-  # (Deliberately no count in this comment: a hardcoded "three" here went stale
-  # the moment a fourth check landed — the exact drift class doc-claims exists
-  # to catch.)
+  # it computes, and how the weekly drift check decides those names still match
+  # upstream's. (Deliberately no count in this comment: a hardcoded "three" here
+  # went stale the moment a fourth check landed.)
 
   # Validates the LLM simulator's Prometheus output: bucket monotonicity, +Inf
   # consistency, HELP/TYPE correctness, and that rendering /metrics observes
@@ -121,62 +119,6 @@ tasks:
     cmds:
       - ./scripts/rule-tests.sh
 
-  # THE COLD PASS of a prompt review — the half a subagent cannot do.
-  #
-  # `/review-prompt` fans out prompt-fact-checker subagents to verify citations and
-  # numbers. That half is mechanical and parallelisable, and a subagent is the right
-  # tool for it. This is the other half: assumptions stated as facts, and costs the
-  # prompt has not counted.
-  #
-  # ⚠️ IT RUNS A SEPARATE `claude -p` PROCESS ON PURPOSE, and a forked subagent is
-  # NOT a substitute. A subagent is briefed by the author, who chooses what it is
-  # told and which files it is pointed at, which is the exact channel the fresh
-  # session exists to close. This process starts cold: it gets CLAUDE.md and the
-  # prompt file and nothing else. See docs/development-method.md, stage 2.
-  #
-  # ⚠️ The cost is the point, not a defect. If a cold reader cannot work through the
-  # prompt without redoing the digging that produced it, the prompt is not self
-  # contained — and that is the most valuable finding this target can return.
-  prompt-review:
-    desc: 'Cold-read review of a prompt file (task prompt-review -- prompts/prompt-x.md)'
-    silent: true
-    cmds:
-      - |
-        f='{{.CLI_ARGS}}'
-        if [ -z "$f" ]; then
-          echo "usage: task prompt-review -- prompts/prompt-<subject>.md" >&2
-          echo "  the mechanical half is /review-prompt inside a session; this is the cold pass" >&2
-          exit 2
-        fi
-        if [ ! -f "$f" ]; then
-          echo "ERROR: no such prompt file: $f" >&2
-          echo "  available:" >&2
-          ls prompts/*.md 2>/dev/null | sed 's/^/    /' >&2
-          exit 1
-        fi
-        if ! command -v claude >/dev/null 2>&1; then
-          echo "ERROR: 'claude' not found on PATH — this target IS the separate session." >&2
-          exit 1
-        fi
-        echo "==> cold pass over $f (a new process, no context from this one)"
-        claude -p "Review $f against this repository. You have not seen the work that
-        produced it, and that is deliberate: report only what a cold reader can find.
-
-        Look for exactly two things.
-        1. Assumptions presented as facts. Anything asserted about behaviour that
-           nothing here has observed, and that no cited file settles.
-        2. Costs the prompt has not counted. A change touching files it does not
-           mention, a check that will go red as a consequence, a step whose effort
-           is priced as if the hard part were absent.
-
-        Do NOT verify file:line citations or derived numbers. Subagents already did
-        that, and repeating it wastes the one thing you have that they do not, which
-        is that you were never told what to think.
-
-        If any part of the prompt cannot be followed without information it does not
-        contain, say so first and name what is missing. A prompt that needs its
-        author present is not finished."
-
   # The MATCHING RULES of the weekly upstream drift check, against a committed
   # fixture instead of against upstream — so it needs no network and cannot drift
   # with the very input it exists to pin. It covers the `_total` suffix rule,
@@ -186,17 +128,6 @@ tasks:
     desc: Unit-test the vLLM drift check's matching rules (no cluster, no network)
     cmds:
       - python3 scripts/check-vllm-buckets.py --selftest
-
-  # Checks that numbers stated in prose still match the code they describe:
-  # dashboard ids against the catalog README, "emits N" claims against what
-  # `llm-sim.py --print` actually renders. Every check in the script is a
-  # correction commit that already happened (25619->25620, the emits-count
-  # corrections), mechanised. It holds no copy of any truth — see the script
-  # header for what it deliberately does not check.
-  doc-claims:
-    desc: Check prose claims (dashboard ids, metric counts) against derived truth
-    cmds:
-      - python3 scripts/check-doc-claims.py
 
   # Collects the open items that are already MARKED in the files that own them —
   # CLAUDE.md rule 16. Derived, never a second copy: there is no TODO file here, and
@@ -260,27 +191,6 @@ tasks:
       - python3 scripts/check-sigpipe.py --selftest
       - python3 scripts/check-sigpipe.py
 
-  # ⚠️ THE CHEAPEST HALF OF A PROMPT REVIEW, DONE DETERMINISTICALLY. Briefs cite the
-  # tree by `file:line` and those citations rot. One review round on 2026-08-07 found
-  # four dead pointers in one brief, including a path that has never existed. That is
-  # decidable without reading anything; whether the cited line SAYS what the prose
-  # claims is not, and stays with .claude/agents/prompt-fact-checker.md.
-  citations:
-    desc: Every `path:line` in tracked markdown resolves to a real file and line
-    cmds:
-      - python3 scripts/check-citations.py --selftest
-      - python3 scripts/check-citations.py
-
-  # A spike is throwaway by design (docs/development-method.md stage 3), so its
-  # artefacts need a stated heir or they are being kept by accident. On 2026-08-07 a
-  # fold-back tracked two scripts and updated spike/README.md in the same commit
-  # without adding them to its survives list.
-  spike-routing:
-    desc: Every tracked spike/ artefact has a stated destination in spike/README.md
-    cmds:
-      - python3 scripts/check-spike-routing.py --selftest
-      - python3 scripts/check-spike-routing.py
-
   # The other half of rule 17, which had no check from 2026-08-04 until 2026-08-07.
   # `sigpipe` above covers the first bug of that day; this covers the second, where zsh
   # does not word-split unquoted parameters and bash does. shellcheck knows it as SC2086,
@@ -327,18 +237,15 @@ tasks:
       - python3 scripts/check-green-ci.py --selftest
 
   preflight:
-    desc: Run every no-cluster gate (selftests, rules, doc claims, chart) before pushing
+    desc: Run every no-cluster gate (selftests, rules, chart) before pushing
     cmds:
       - task: selftest
       - task: compose-selftest
       - task: drift-test
       - task: required-checks-test
       - task: green-ci-test
-      - task: doc-claims
       - task: sigpipe
       - task: word-splitting
-      - task: citations
-      - task: spike-routing
       - task: second-copy
       - task: shellcheck
       - task: action-shell

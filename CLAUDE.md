@@ -22,8 +22,6 @@ rig knows the right answer.
 | `scripts/check-required-checks.py` | the live `main` ruleset vs `required-checks.txt`, including whether it is still **enforcing**; `--selftest` over `tests/fixtures/rulesets.json` |
 | `scripts/check-green-ci.py` | the publish gate: polls the check runs on the commit being tagged and refuses a release unless every required check passed. stdlib only, so the release path pulls in no `gh`; `--selftest` over `tests/fixtures/check-runs.json` |
 | `tests/` | what the no-cluster gates consume: `rules/` promtool cases, `contracts/` the DCGM surface, `fixtures/` the inputs the `--selftest`s run on — including the deliberately-wrong ones that make rule 18 mechanical |
-| `scripts/check-citations.py` | every `path:line` in tracked markdown resolves to a tracked file and an in-range line — the deterministic half of a prompt review; the half that reads the cited line is `prompt-fact-checker`'s. `UPSTREAM` names the few files that live in someone else's repo |
-| `scripts/check-spike-routing.py` | every tracked `spike/` artefact has a stated heir in `spike/README.md`, because a spike is throwaway by design and one without a destination is kept by accident |
 | `scripts/check-word-splitting.py` | the other half of rule 17 — code relying on unquoted word-splitting, which zsh and bash do differently. shellcheck knows it as SC2086, suppressed by `-S warning` on purpose; `--selftest` carries the 2026-08-04 bug |
 | `scripts/check-second-copy.py` | refuses a second committed copy of a dashboard, rule file or the simulator — the rule `chart-build.py`'s whole build step exists to keep; `--selftest`. Ran only in CI until 2026-08-07, which is how it sat red on `main` for a day |
 | `scripts/registry-cache.sh` | opt-in pull-through image caches for `local`; `kind-up.sh` mirrors only the ones actually running, so the default path is unchanged |
@@ -35,7 +33,6 @@ rig knows the right answer.
 | `terraform/{eks,gke}` + `terraform/modules/contract` | clusters; `contract` holds **cross-cloud identity constants only** — sizing stays in the roots |
 | `kind/gpu-sim.yaml` | local cluster — **single node** |
 | `compose/` | the Kubernetes-free path, and the **second** simulator: `gpu-metrics-sim.py` produces the DCGM surface that `compose-selftest` grades against `tests/contracts/` |
-| `.claude/agents/` + `.claude/skills/` | the review harness. `/review-prompt` fans `prompt-fact-checker` out one per section for the facts; the judgement half runs cold, via `task prompt-review`, once per lens. Only `settings.local.json` is ignored, so this ships |
 | `Taskfile.yml` | **`task preflight`** is the gate before landing. ⚠️ The rest are deliberately NOT listed here — `task --list` is authoritative and this row was hand-synced three times on 2026-08-07 alone, which is a fork disagreeing on a schedule |
 | `taskfiles/target.yml` | every `local:` / `eks:` / `gke:` task — one file included three times with `CLOUD` set, so editing `Taskfile.yml` does not touch them |
 | `Makefile` | a second entry point over the same `scripts/`, for anyone without Task. ⚠️ **Unverified:** whether to keep both — its own header says to standardise on one and delete the other, and that has only ever been inherited |
@@ -76,12 +73,13 @@ rig knows the right answer.
     carry the reasoning — the commit log is part of the documentation.
 12. **Docs drift is a known failure class.** Counts ("emits N metrics", "N jobs") and ids
     in prose have been corrected repeatedly. Re-verify every number against the code it
-    describes; `doc-claims` mechanises the ones that recur, including this file's.
-13. **Prose style:** em dashes stay out of **the pages a stranger reads first**. Stripped by
-    hand three times; **`doc-claims` now enforces it**, so a fourth is a red `preflight`
-    rather than something a reader has to notice. `EM_DASH_FREE` in `check-doc-claims.py`
-    is the list and states that criterion beside it — extend it there, and only mention
-    here that it grew, **which it has**. Everything else under `docs/` is deliberately out:
+    describes — by hand, since the `doc-claims` check that mechanised the recurring ones
+    was removed on 2026-08-12 with the rest of the review tooling.
+13. **Prose style:** em dashes stay out of **the pages a stranger reads first**: `README.md`,
+    `ROADMAP.md`, `docs/development-method.md`, and the two grafana-com dashboard pages.
+    Stripped by hand three times; a check (`EM_DASH_FREE` in `check-doc-claims.py`) enforced
+    it until 2026-08-12, when it left with the review tooling, so a fourth is back to being
+    something a reader has to notice. Everything else under `docs/` is deliberately out:
     membership has to mean something.
 14. **Containers run `readOnlyRootFilesystem`** — hence `PYTHONDONTWRITEBYTECODE`; scripts
     stay dependency-free.
@@ -154,10 +152,8 @@ rig knows the right answer.
   **The list lives in `Taskfile.yml`, not here.** It was enumerated in both places, and this
   copy had drifted five tasks behind before anyone read the two side by side. These are the
   gates that would have caught most of the repo's correction commits. Note that a failure
-  stops the run, so the checks after it do not report at all — a red `doc-claims` can hide a
-  second one. `doc-claims` (`scripts/check-doc-claims.py`)
-  mechanises the recurring prose-drift class: dashboard ids vs the catalog README, "emits
-  N" claims vs what `--print` renders.
+  stops the run, so the checks after it do not report at all — a red check can hide a
+  second one.
 - **Releases:** `docs/releasing.md`. **Tag locally, run
   `chart-build.py --strict-version`, then push** — the check resolves the tag with `git
   describe`, so it means nothing until the tag exists, and three of four releases on
@@ -184,16 +180,14 @@ rig knows the right answer.
   skip it. Prefer landing via PR: CodeRabbit provides non-author eyes, and same-author
   re-review has demonstrated anchoring. And **reference, don't restate**: a number or fact
   stated in two places is a fork waiting to disagree — state it once in the file that owns
-  it and point there (`doc-claims` exists because prose kept forking from code).
+  it and point there (prose forking from code is this repo's most-corrected defect class).
 
 ## Prompt files
 
 `prompts/prompt-*.md` are task specifications. ⚠️ ~~Whether they should stay **gitignored**
 has never been decided, only inherited.~~ **DONE — tracked in `prompts/` on 2026-08-06.**
 The inherited answer contradicted the practice the rest of this file rests on: context worth
-having is context you commit. Tracking them also puts them inside `check-doc-claims.py`'s
-scan of tracked markdown, which found three briefs citing a dashboard id this repo has never
-had, in its first run.
+having is context you commit.
 
 House conventions: numbered W-items; a Background of
 **verified facts** with `file:line` citations and the date they were read; an effort table

@@ -39,9 +39,9 @@ ruleset edit is caught weekly rather than on someone's branch; `drift-notify` fi
 issue when either of the other two goes red, because a weekly failure nobody is told about
 is a check that never fails. [docs/ci.md](docs/ci.md) is the map.
 
-⚠️ That count is checked. `scripts/check-doc-claims.py` derives it from `ci.yml`, because
-this paragraph said *six* and named `upstream-drift` as the only job off pull requests long
-after both had stopped being true.
+⚠️ Re-verify that count against `ci.yml` when jobs change: this paragraph said *six* and
+named `upstream-drift` as the only job off pull requests long after both had stopped being
+true. A check derived it mechanically until 2026-08-12, when it left with `check-doc-claims.py`.
 
 ⚠️ **The `chart` job does more than lint and render, and that is the point.** It drives
 every one of the chart's render-time assertions to its failure and fails if a broken input

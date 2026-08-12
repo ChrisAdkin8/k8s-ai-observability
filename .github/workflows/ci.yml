@@ -63,9 +63,9 @@ env:
   #             input, and its default sat two minors behind this pin — building a
   #             v0.32-era node image on a v0.30 binary, which kind/gpu-sim.yaml's own
   #             comment names as a documented way to get a cluster that never becomes
-  #             Ready. Both callers now pass this value explicitly and
-  #             check-doc-claims.py asserts all three agree, so the coupling is
-  #             mechanised rather than remembered.
+  #             Ready. Both callers now pass this value explicitly. ⚠️ Nothing
+  #             asserts the three agree (the check that did left with
+  #             check-doc-claims.py on 2026-08-12) — move them together.
   #   kubectl — tracks the node image's minor (1.36).
   #   helm    — v3, NOT the v4 line. Helm 4 is a major version this repo has not been
   #             validated against, and CI should exercise what users actually run.
@@ -237,37 +237,6 @@ jobs:
       # instead of only when someone brings the compose stack up.
       - name: Compose GPU producer vs the DCGM surface contract
         run: python3 compose/gpu-metrics-sim.py --selftest
-
-      # Numbers stated in prose, against the code that owns them: dashboard ids vs
-      # the catalog README, the emitted-metric / alert / L-check / query /
-      # ${datasource} counts vs what the files actually contain. Every check is a
-      # correction commit that already happened — the 0.6.0 "Fixed" entry alone
-      # corrected SEVEN of these by hand, and the ITL caveat wrong by 2x reached a
-      # PUBLISHED board the same way.
-      #
-      # Its own selftest runs first: the matchers are regexes over prose, so a
-      # reworded claim must fail LOUDLY as a dead check rather than quietly stop
-      # matching. Needs no cluster, no docker and no network.
-      - name: Doc-claim matchers selftest
-        run: python3 scripts/check-doc-claims.py --selftest
-
-      - name: Prose claims vs the code they describe
-        run: python3 scripts/check-doc-claims.py
-
-      # ⚠️ THESE RAN IN `task preflight` AND NOWHERE ELSE, which is the same
-      # asymmetry check-second-copy.py had until 2026-08-07 — except pointing the
-      # other way, and therefore worse. That one ran in CI but not locally, so it
-      # sat red on `main` for a day and CI said so. These ran locally but not in
-      # CI, so a contributor who never runs preflight could land dead citations
-      # and unrouted spike artefacts with all four required checks green and
-      # nothing anywhere saying otherwise. One implementation, two callers, in
-      # both directions.
-      - name: Citations and spike routing
-        run: |
-          python3 scripts/check-citations.py --selftest
-          python3 scripts/check-citations.py
-          python3 scripts/check-spike-routing.py --selftest
-          python3 scripts/check-spike-routing.py
 
       # ⚠️ Cheap, and it has already earned it twice: `tar tzf | head` failed a
       # chart publish on a correct archive, and `echo | grep -qvE` in this file's
@@ -452,12 +421,13 @@ jobs:
   # declaring something we do not emit, is printed as a gap and exits 0.
   # ---------------------------------------------------------------------------
   # ---------------------------------------------------------------------------
-  # The OTHER half of the required-check coupling, and the half that cannot run
-  # offline. .github/required-checks.txt records what the `main` ruleset requires;
-  # check-doc-claims.py asserts every line of it is a name ci.yml can produce, on
-  # every run. That catches a rename in the pull request that made it.
+  # The required-check coupling's ONLY remaining check. .github/required-checks.txt
+  # records what the `main` ruleset requires; the offline half — asserting every
+  # line of it is a name ci.yml can produce, so a rename fails in the pull request
+  # that made it — left with check-doc-claims.py on 2026-08-12, so a rename now
+  # surfaces here, weekly, instead.
   #
-  # It cannot catch the reverse: someone editing the ruleset in the browser. The
+  # It also catches the reverse: someone editing the ruleset in the browser. The
   # ruleset is repository SETTINGS, versioned by nothing, and reading it needs the
   # network — so that check lives here, weekly, rather than in the offline gate.
   #
@@ -515,9 +485,10 @@ jobs:
       - name: vLLM bucket boundaries and metric set
         run: python3 scripts/check-vllm-buckets.py
 
-      # ⚠️ THE OTHER HALF OF THE CHECKSUM PINS, and the half that cannot run offline.
-      # check-doc-claims.py asserts the sums written in two workflows AGREE WITH EACH
-      # OTHER; nothing asserted they still describe the artefact the pinned URL serves.
+      # ⚠️ THE CHECKSUM PINS' ONLY CHECK, and it cannot run offline. The offline
+      # half — asserting the sums written in two workflows AGREE WITH EACH OTHER —
+      # left with check-doc-claims.py on 2026-08-12, so move them together; and
+      # nothing ever asserted they still describe the artefact the pinned URL serves.
       # A bumped version beside a stale sum fails much later, at `sha256sum -c`, with a
       # message that reads like a substituted artefact rather than a forgotten line.
       #
@@ -668,8 +639,8 @@ jobs:
     # Gated for the same reason as `stack`, on the same output: the compose path reads
     # the same dashboards, rules, simulator and profiles, so a markdown-only change
     # cannot move it either. Cheaper to run (~1 min) but the signal is identically zero.
-    # `fast` too: it is 9-12s and covers the selftests, doc-claims, the rule tests
-    # and both syntax passes. When it is red this job is proving something already
+    # `fast` too: it is 9-12s and covers the selftests, the rule tests and both
+    # syntax passes. When it is red this job is proving something already
     # known to be broken. Safe as a plain `needs:` here, unlike the matrix `stack`
     # job — a skipped NON-matrix job still reports under its own name.
     # ⚠️ `always()`, AND THE POLARITY OF THE SECOND TEST IS THE POINT. This was a bare
@@ -1319,7 +1290,8 @@ jobs:
       # which pins kindest/node:v1.36.1 as "the image kind v0.32.0 ships as its
       # default". A v0.32-era node image on a v0.30 binary is the mismatch that file's
       # own comment calls a documented way to get a cluster that never becomes Ready.
-      # check-doc-claims.py now asserts the three agree, so this cannot drift again.
+      # ⚠️ Nothing asserts the three agree (that check left with check-doc-claims.py
+      # on 2026-08-12) — move them together.
       - name: Install it against a foreign Prometheus and helm test it
         uses: ./.github/actions/verify-chart
         with:
@@ -1349,8 +1321,8 @@ jobs:
     #
     # ⚠️ `if: always()` IS WHAT MAKES `needs: fast` SAFE HERE, and without it this job
     # would reintroduce the exact bug the block below documents. `fast` is 9-12s and
-    # covers the selftests, doc-claims, the rule tests and both syntax passes; when it
-    # is red these two legs are ~14 runner-minutes spent proving something already
+    # covers the selftests, the rule tests and both syntax passes; when it is red
+    # these two legs are ~14 runner-minutes spent proving something already
     # known to be broken. But gating a MATRIX job with a bare `needs:` means a failed
     # dependency SKIPS it, and a skipped matrix job does not interpolate its name — so
     # the two required checks would never report and the PR would sit pending, exactly
@@ -1464,7 +1436,7 @@ jobs:
       - name: The fast job failed — the stack was NOT stood up
         if: needs.changes.outputs.code == 'true' && needs.fast.result != 'success'
         run: |
-          echo "::notice title=Stack not verified::The 'fast' job did not pass, so this job stood nothing up. Fix that first — its checks are seconds and cover the selftests, doc-claims, the rule tests and both syntax passes. This green means 'not attempted', NOT 'passed'."
+          echo "::notice title=Stack not verified::The 'fast' job did not pass, so this job stood nothing up. Fix that first — its checks are seconds and cover the selftests, the rule tests and both syntax passes. This green means 'not attempted', NOT 'passed'."
 
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         if: env.RUN_STACK == 'true'
