@@ -25,11 +25,11 @@ list, not whether the destination is sensible. Judging a destination needs a rea
 this catches is the case where nobody wrote one down at all, which is the one that
 actually happens.
 
-⚠️ `--ref` READS A BRANCH INSTEAD OF THE WORKING TREE, which is what `phase.py` needs.
-Routing is a property of the spike branch, and observing it from whatever happens to be
-checked out answers a different question: run from `main`, the check sees only main's
-already-routed artefacts, exits 0, and reports the branch as routed however many
-unrouted files it carries.
+⚠️ `--ref` READS A BRANCH INSTEAD OF THE WORKING TREE. Routing is a property of the
+spike branch, and observing it from whatever happens to be checked out answers a
+different question: run from `main`, the check sees only main's already-routed
+artefacts, exits 0, and reports the branch as routed however many unrouted files it
+carries.
 """
 import os
 import re
