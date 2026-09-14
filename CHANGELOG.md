@@ -169,6 +169,14 @@ Comparison links are at the foot of this file, one per released version.
   every real run. The committed fixtures carried a shape GitHub does not produce; they now
   mirror the API.
 
+- **The chart was never listed on Artifact Hub.** `artifacthub.io/alternativeName:
+  vllm-gpu-observability` breaks Artifact Hub's rule that an alternative name contain the
+  chart's name or be contained by it, so every version from 0.2.0 to 0.2.5 was rejected at
+  indexing. The rejection showed only in the repository's tracking errors, which nothing
+  here reads. It is now `vllm-gpu-k8s-ai-observability`, which passes and still indexes
+  "vllm" and "gpu" (measured with `to_tsvector`; the reasoning is in `Chart.yaml`). Chart
+  `0.2.6`.
+
 ## [0.10.0] — 2026-08-05
 
 **A cold `task local:up` was waiting on two things that were not work.** One was a
