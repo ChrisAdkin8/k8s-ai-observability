@@ -115,6 +115,10 @@ Comparison links are at the foot of this file, one per released version.
   the current slug, because a stale slug returns 404. The catalog shows the new titles once
   both are re-uploaded as revisions (`manifests/dashboards/README.md`).
 
+- **The README leads with the bugs the rig catches** rather than with how it is built: an
+  SLO at `le="2"` that can never fire, a prefill p95 read 3.03x high, and the panels an
+  engine upgrade blanks. The method paragraph moved to "Contributing and support".
+
 ### Removed
 
 - **The development-loop harness, moved out of this repository**: the `/spike-loop` skill

@@ -14,10 +14,22 @@
 a simulated vLLM serving stack, and Prometheus + Grafana, on kind, EKS or GKE. No
 hardware, no quota, no drivers, no model weights.
 
-Every line of it is built by one method: a written specification, an adversarial review of
-that specification, a throwaway spike that settles what reading cannot, and only then the
-implementation. [docs/development-method.md](docs/development-method.md) describes how, and
-why the checks matter more here than the code they check.
+Because the rig knows the true value behind every series, it catches the monitoring bugs
+that pass every other test. Three it finds in vLLM monitoring, each of which your real
+deployment has too, because the bucket boundaries and metric names are upstream's:
+
+- **An SLO alert that can never fire.** vLLM's time-to-first-token buckets step
+  `1.0, 2.5, 5.0`. There is no `2.0`, so an objective written as `le="2"` matches no series
+  and its burn-rate alerts stay green forever
+  ([the error budget](docs/llm-simulation.md#the-ttft-error-budget)).
+- **A prefill p95 three times too high.** The first bucket vLLM gives prefill ends at 0.3s,
+  so every sub-300 ms prefill lands in it and `histogram_quantile` interpolates from zero:
+  a 0.095s prefill reads as 0.285s
+  ([the measurement](docs/llm-simulation.md#the-phase-decomposition)).
+- **Panels that go blank after an engine upgrade.** vLLM's V1 engine renamed two metrics
+  and replaced a third with two counters. Nothing errors; the panel just empties.
+  `--vllm-surface both` shows which of your panels an upgrade breaks
+  ([which names moved](docs/llm-simulation.md#which-engines-names)).
 
 ![Four time-series panels tracking utilisation, memory, temperature and power across
 eight simulated GPUs](docs/gpu-dashboard.png)
@@ -332,6 +344,11 @@ you give up.
 - **A change.** [CONTRIBUTING.md](CONTRIBUTING.md) covers the invariants that fail *silently*
   when broken, what to re-check when bumping a pinned version, and what is deliberately out
   of scope.
+- **How it is built.** Every line of it by one method: a written specification, an
+  adversarial review of that specification, a throwaway spike that settles what reading
+  cannot, and only then the implementation.
+  [docs/development-method.md](docs/development-method.md) describes how, and why the
+  checks matter more here than the code they check.
 - **Conduct.** The [Contributor Covenant](CODE_OF_CONDUCT.md) applies to both.
 
 ## Licence
