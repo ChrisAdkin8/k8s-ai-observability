@@ -22,8 +22,8 @@ in `scripts/config.sh` at install time.
 | Helm chart version | `charts/.../Chart.yaml` (`version`) | `0.2.5` — moves independently of `appVersion`, and on **every** release, because a release publishes the chart whether or not a template changed |
 | Helm (CI) | `.github/workflows/ci.yml` (`HELM_VERSION`) | `3.21.3` — **v3, not the v4 line.** Helm 4 is a major this repo has not been validated against, and CI should exercise what users run |
 | `kubectl` image for `helm test` | `charts/.../values.yaml` (`tests.image`) | `alpine/k8s:1.36.2` — ⚠️ **was `bitnami/kubectl:1.31`, which no longer exists**: Bitnami retired much of its public Docker Hub catalogue, so the test pod sat in `ImagePullBackOff`. Needs kubectl **and** `/bin/bash`, which rules out the distroless `registry.k8s.io/kubectl`. Its minor must stay within +/-1 of `K8S_VERSION`; nothing enforces that since `check-doc-claims.py` left on 2026-08-12, so re-check it when either moves |
-| DCGM dashboard | `manifests/dashboards/gpu-sim-dcgm.json` | shipped in-repo, published as grafana.com [25618](https://grafana.com/grafana/dashboards/25618-gpu-simulation-dcgm-overview/) (board 12239 is an optional swap-in) |
-| vLLM dashboard | `manifests/dashboards/llm-sim-overview.json` | shipped in-repo, published as grafana.com [25620](https://grafana.com/grafana/dashboards/25620-llm-simulation-vllm-serving-overview/) |
+| DCGM dashboard | `manifests/dashboards/gpu-sim-dcgm.json` | shipped in-repo, published as grafana.com [25618](https://grafana.com/grafana/dashboards/25618/) (board 12239 is an optional swap-in) |
+| vLLM dashboard | `manifests/dashboards/llm-sim-overview.json` | shipped in-repo, published as grafana.com [25620](https://grafana.com/grafana/dashboards/25620/) |
 | aws provider | `terraform/eks/versions.tf` | `~> 6.55` |
 | eks module | `terraform/eks/main.tf` | `~> 21.24.0` — patch-level on purpose; the reason is in the comment above it |
 | vpc module | `terraform/eks/main.tf` | `~> 5.21.0` — patch-level on purpose, same reason |

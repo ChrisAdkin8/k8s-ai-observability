@@ -4,7 +4,7 @@
   "graphTooltip": 0,
   "schemaVersion": 39,
   "tags": ["gpu", "dcgm", "simulation"],
-  "title": "GPU Simulation — DCGM Overview",
+  "title": "NVIDIA DCGM GPU Overview (tested GPU-free)",
   "uid": "gpu-sim-dcgm",
   "time": { "from": "now-15m", "to": "now" },
   "refresh": "30s",

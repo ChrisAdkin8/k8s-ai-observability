@@ -107,6 +107,14 @@ Comparison links are at the foot of this file, one per released version.
   from. They had drifted in standing law: a wrong run id, and one total no run ever
   produced.
 
+- **The grafana.com boards are named for the hardware, not the rig**: *NVIDIA DCGM GPU
+  Overview (tested GPU-free)* and *vLLM Serving Overview (tested GPU-free)*. "Simulation" in
+  the title told someone looking for a board for their real exporter to scroll past one
+  written against the real metric surface. The uids did not move, so installed boards
+  update in place. Links to the catalog now use the bare id, which grafana.com redirects to
+  the current slug, because a stale slug returns 404. The catalog shows the new titles once
+  both are re-uploaded as revisions (`manifests/dashboards/README.md`).
+
 ### Removed
 
 - **The development-loop harness, moved out of this repository**: the `/spike-loop` skill
@@ -1432,8 +1440,8 @@ the alternative paths rotting.
   variables and stay a deliberate manual decision; the file says so and says why.
 
 - **Both dashboards are published to the grafana.com catalog**: the GPU board is
-  [25618](https://grafana.com/grafana/dashboards/25618-gpu-simulation-dcgm-overview/) and the vLLM
-  board is [25620](https://grafana.com/grafana/dashboards/25620-llm-simulation-vllm-serving-overview/).
+  [25618](https://grafana.com/grafana/dashboards/25618/) and the vLLM
+  board is [25620](https://grafana.com/grafana/dashboards/25620/).
   They can now be imported by id into any Grafana, without cloning this repo. The ids are recorded in
   three places on purpose, and all three are the ones the repo already told you to update: the table
   at the top of `manifests/dashboards/README.md`, `docs/versions.md`, and the README.

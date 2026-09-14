@@ -30,7 +30,7 @@ kubectl apply -f manifests/workloads/extras/gpu-driven.yaml
 ./scripts/drive-load.sh spikes      # baseline/spike train
 ```
 
-Watch it on the **GPU Simulation — DCGM Overview** dashboard, or in Prometheus:
+Watch it on the **NVIDIA DCGM GPU Overview (tested GPU-free)** dashboard, or in Prometheus:
 `DCGM_FI_DEV_GPU_UTIL`.
 
 ## Trigger a batch run now (instead of waiting for the schedule)

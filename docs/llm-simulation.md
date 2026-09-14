@@ -17,7 +17,7 @@ cheaply, then point them at a real vLLM deployment unchanged.
 ./scripts/grafana.sh eks        # or gke — opens the GPU and LLM boards together
 ```
 
-→ **<http://localhost:3000/d/llm-sim-overview>** — *LLM Simulation — vLLM Serving Overview*
+→ **<http://localhost:3000/d/llm-sim-overview>** — *vLLM Serving Overview (tested GPU-free)*
 
 The first panel is the whole story: two tenants, identical code, one healthy and one
 saturated, with the alert threshold drawn across them.

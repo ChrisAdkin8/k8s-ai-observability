@@ -1,4 +1,4 @@
-# LLM Simulation - vLLM Serving Overview
+# vLLM Serving Overview (tested GPU-free)
 
 Time to first token and its error budget, inter-token latency, throughput, queue depth, KV-cache usage and prefix-cache reuse for vLLM - every panel broken out `by (model_name)`, so a saturated tenant is never averaged into a healthy one.
 

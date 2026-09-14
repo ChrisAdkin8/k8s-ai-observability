@@ -2,8 +2,8 @@
 [![Release](https://img.shields.io/github/v/release/ChrisAdkin8/k8s-ai-observability?color=blue)](https://github.com/ChrisAdkin8/k8s-ai-observability/releases)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 [![Kubernetes](https://img.shields.io/badge/kubernetes-v1.36.1-326ce5.svg)](kind/gpu-sim.yaml)
-[![GPU board](https://img.shields.io/badge/grafana.com-25618-F46800.svg)](https://grafana.com/grafana/dashboards/25618-gpu-simulation-dcgm-overview/)
-[![vLLM board](https://img.shields.io/badge/grafana.com-25620-F46800.svg)](https://grafana.com/grafana/dashboards/25620-llm-simulation-vllm-serving-overview/)
+[![GPU board](https://img.shields.io/badge/grafana.com-25618-F46800.svg)](https://grafana.com/grafana/dashboards/25618/)
+[![vLLM board](https://img.shields.io/badge/grafana.com-25620-F46800.svg)](https://grafana.com/grafana/dashboards/25620/)
 [![Simulator image](https://img.shields.io/badge/ghcr.io-vllm--metrics--sim-2496ed.svg)](https://github.com/ChrisAdkin8/k8s-ai-observability/pkgs/container/vllm-metrics-sim)
 [![Helm chart](https://img.shields.io/badge/ghcr.io-helm%20chart-0f1689.svg)](https://github.com/ChrisAdkin8/k8s-ai-observability/pkgs/container/charts%2Fk8s-ai-observability)
 [![Artifact Hub](https://img.shields.io/endpoint?url=https://artifacthub.io/badge/repository/k8s-ai-observability)](https://artifacthub.io/packages/search?repo=k8s-ai-observability)
@@ -67,8 +67,8 @@ See [compose/](compose/) for what it deliberately cannot cover.
 - **Two Grafana dashboards**, one `.json` each and never clicked into place, so a
   re-install reproduces them exactly. Both are in the catalog. Import by id into a Grafana
   you already run:
-  [25618](https://grafana.com/grafana/dashboards/25618-gpu-simulation-dcgm-overview/) (GPU),
-  [25620](https://grafana.com/grafana/dashboards/25620-llm-simulation-vllm-serving-overview/) (vLLM).
+  [25618](https://grafana.com/grafana/dashboards/25618/) (GPU),
+  [25620](https://grafana.com/grafana/dashboards/25620/) (vLLM).
 - **An acceptance suite** ([`scripts/verify.sh`](scripts/verify.sh)) that asserts metrics
   are flowing, both boards render, and the alerts actually reach `firing`.
 - **A weekly check against real vLLM**, which is what makes the claim above *checked*

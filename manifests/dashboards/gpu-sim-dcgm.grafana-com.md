@@ -1,4 +1,4 @@
-# GPU Simulation - DCGM Overview
+# NVIDIA DCGM GPU Overview (tested GPU-free)
 
 Utilisation, memory, temperature and power across NVIDIA GPUs, from DCGM-format metrics.
 Four time-series panels, one series per GPU, no filtering to set up first.
