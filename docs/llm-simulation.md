@@ -183,7 +183,7 @@ affordance, not a fidelity claim. Set it per pod with `LLM_SIM_VLLM_SURFACE`.
 TTFT's entire tail above 10s (`15/20/30/45/60/90/120` became `20/40/80/160/640/2560`),
 and the saturated tenant sits at ~58s — inside it. Same simulated latency, different
 reported p95, purely from the resolution it is measured at. All three lists are now
-transcribed from `vllm/v1/metrics/loggers.py` and
+transcribed from `vllm/v1/metrics/buckets.py` (in `loggers.py` until 2026-09-11) and
 [drift-checked weekly](versions.md#keeping-them-honest):
 
 ```sh

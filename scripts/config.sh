@@ -227,8 +227,9 @@ FAKE_GPU_CHART_VERSION="0.0.59"       # verified 2026-07
 #
 # BUCKETS: V1, and verified rather than asserted. TTFT_BUCKETS/TPOT_BUCKETS/
 # E2E_BUCKETS in scripts/llm-sim.py are transcribed from vllm/v1/metrics/
-# loggers.py, and scripts/check-vllm-buckets.py diffs them against that file
-# weekly in CI — along with the metric SET, in both directions. They had ALSO
+# buckets.py (loggers.py until 2026-09-11), and scripts/check-vllm-buckets.py
+# diffs them against upstream weekly in CI — along with the metric SET, in both
+# directions. They had ALSO
 # drifted — TTFT's whole tail above 10s — which is why the check exists rather
 # than a note telling you to re-check.
 LLM_VLLM_VERSION="v1"

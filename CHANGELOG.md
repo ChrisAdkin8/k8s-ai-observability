@@ -177,6 +177,15 @@ Comparison links are at the foot of this file, one per released version.
   "vllm" and "gpu" (measured with `to_tsvector`; the reasoning is in `Chart.yaml`). Chart
   `0.2.6`.
 
+- **The weekly drift check went red on a file move, and advised the wrong fix.** On
+  2026-09-11 vLLM moved its default bucket lists from `loggers.py` into `buckets.py` without
+  changing a number (vllm-project/vllm#48866). The check read `loggers.py` alone, reported
+  all three lists as drifted, and told the reader to edit `llm-sim.py`, whose lists were
+  still right ([#49](https://github.com/ChrisAdkin8/k8s-ai-observability/issues/49)). It now
+  fetches both files, and reports "could not check" rather than drift when no upstream list
+  holds even half of any of our three, which is what a move looks like and no real change
+  has. `--selftest` pins the move, a new low-end bucket and V1's tail change.
+
 ## [0.10.0] — 2026-08-05
 
 **A cold `task local:up` was waiting on two things that were not work.** One was a

@@ -4,10 +4,10 @@
     python3 scripts/check-vllm-buckets.py            # check against upstream
     python3 scripts/check-vllm-buckets.py --selftest # unit-test the matching, no network
 
-Two checks, one fetch:
+Two checks, over the two upstream files in UPSTREAM:
 
-  1. HISTOGRAM BUCKETS. Each of our three bucket lists must still appear in
-     upstream's loggers.py verbatim.
+  1. HISTOGRAM BUCKETS. Each of our three bucket lists must still appear
+     upstream verbatim (they live in buckets.py).
   2. THE METRIC SET. Every `vllm:` name we emit must still be declared upstream,
      and every name upstream declares that we do not emit is reported as a gap.
 
@@ -40,12 +40,21 @@ docs/llm-simulation.md, and renaming it to touch five files buys a better noun
 and nothing else. This docstring is the specification; the name is a label.
 
 HOW IT CHECKS. It does not try to model upstream's file structure, which would
-itself be a thing that drifts. An ast walk pulls out every numeric list literal
-in loggers.py, and each of our three bucket lists must appear among them
-verbatim; a second walk pulls out every string literal beginning `vllm:`, from
-both files, and compares the sets. That survives variable renames and code being
-moved into or out of functions, and only fires when the NUMBERS or the NAMES
-actually change.
+itself be a thing that drifts. An ast walk pulls out every numeric list or tuple
+literal in the upstream files, and each of our three bucket lists must appear
+among them verbatim; a second walk pulls out every string literal beginning
+`vllm:`, from upstream and from llm-sim.py, and compares the sets. That survives
+variable renames and code being moved into or out of functions, and only fires
+when the NUMBERS or the NAMES actually change.
+
+⚠️ IT DOES NOT SURVIVE A LIST MOVING TO A FILE IT DOES NOT FETCH, and that has
+happened once. On 2026-09-11 upstream moved every default bucket list out of
+loggers.py into buckets.py (vllm-project/vllm d5a9d0f59, #48866); the metric
+names stayed. The next weekly run read loggers.py alone, found nothing to match,
+reported all three lists as DRIFT and advised editing llm-sim.py, whose lists
+were still exactly right. Both files are now fetched, and each is searched for
+both halves, so a move between the two is invisible. A move anywhere else is
+reported as "could not check" rather than drift: see `looks_moved()`.
 
 ⚠️ THE `_total` RULE, which is the one subtle thing here. Upstream declares
 counters WITHOUT the `_total` suffix and the Prometheus client appends it at
@@ -72,8 +81,10 @@ import sys
 import urllib.error
 import urllib.request
 
-UPSTREAM = ("https://raw.githubusercontent.com/vllm-project/vllm/main/"
-            "vllm/v1/metrics/loggers.py")
+# buckets.py holds the default bucket lists, loggers.py declares the metrics.
+# Both are searched for both, per "IT DOES NOT SURVIVE A LIST MOVING" above.
+UPSTREAM = tuple("https://raw.githubusercontent.com/vllm-project/vllm/main/"
+                 f"vllm/v1/metrics/{name}" for name in ("buckets.py", "loggers.py"))
 HERE = os.path.dirname(os.path.abspath(__file__))
 LOCAL = os.path.join(HERE, "llm-sim.py")
 FIXTURE = os.path.join(HERE, os.pardir, "tests", "fixtures",
@@ -95,6 +106,10 @@ SURFACE_TABLES = ("METRIC_SURFACES", "METRIC_RESHAPES")
 NAME_RE = re.compile(r"vllm:[A-Za-z0-9_]+")
 
 TIMEOUT = 30
+
+# Below this share of its boundaries found in any one upstream list, a drifted
+# list counts as UNANCHORED. See `looks_moved()` for why half.
+MOVED_BELOW = 0.5
 
 
 def numeric_lists(source, path):
@@ -236,6 +251,27 @@ def closest(needle, haystack):
     return best, best_len
 
 
+def overlap(needle, haystack):
+    """The largest share of `needle`'s boundaries found in any one upstream list."""
+    want = set(needle)
+    return max((len(want & set(cand)) / len(want) for cand in haystack), default=0.0)
+
+
+def looks_moved(unanchored):
+    """True when the bucket result means "not found", not "changed".
+
+    Every real change has kept most of a list: V1 replaced TTFT's tail and kept
+    17 of its 22 boundaries, and the finer low-end buckets once proposed upstream
+    would keep all of them. A list sitting in a file this check did not fetch
+    keeps none: on 2026-09-14 each of the three overlapped 0 of the only numeric
+    literals loggers.py still held, two `(0.0,)` tuples. So when EVERY list is
+    unanchored, the likelier reading is a move, and it is reported as "could not
+    check": the drift advice would send the reader to edit a simulator that may
+    well be right. It is still a red run either way; only the advice changes.
+    """
+    return unanchored == len(OURS)
+
+
 def fmt(seq):
     return "[" + ", ".join(f"{v:g}" for v in seq) + "]"
 
@@ -309,6 +345,17 @@ def selftest():
           "vllm:iteration_tokens" in blind,
           "a blanket _total strip WOULD mis-match it — the ordering is load-bearing")
 
+    # The move-versus-change call, on our real TTFT list. Each case is one the
+    # threshold has to get right, and the first is the one that happened.
+    ttft = our_buckets(parse_local())["TTFT_BUCKETS"]
+    check(overlap(ttft, [(0.0,), (0.0,)]) < MOVED_BELOW,
+          "2026-09-14, lists moved to a file not fetched: unanchored, reads as a move")
+    check(overlap(ttft, [(0.0005,) + ttft]) >= MOVED_BELOW,
+          "a new low-end boundary keeps every old one: anchored, reads as drift")
+    v06 = ttft[:16] + (15.0, 20.0, 30.0, 45.0, 60.0, 90.0, 120.0)
+    check(overlap(ttft, [v06]) >= MOVED_BELOW,
+          "V1's TTFT tail change (17 of 22 kept) stays drift, not a move")
+
     # The v0 aliases must survive being read out of llm-sim.py's surface tables,
     # or every one of them is reported as drift on the next weekly run.
     aliases = our_v0_aliases(parse_local())
@@ -324,13 +371,19 @@ def selftest():
 
 
 def check_buckets(local_tree, upstream_lists):
-    """Report bucket drift. Returns the number of lists that have moved."""
-    drift = 0
+    """Report bucket drift.
+
+    Returns (drifted, unanchored): the lists with no verbatim match upstream,
+    and how many of those no upstream list holds even MOVED_BELOW of.
+    """
+    drift = unanchored = 0
     for name, ours in our_buckets(local_tree).items():
         if ours in upstream_lists:
             print(f"  ok    {name:14} {len(ours):2d} boundaries, present upstream verbatim")
             continue
         drift += 1
+        if overlap(ours, upstream_lists) < MOVED_BELOW:
+            unanchored += 1
         cand, shared = closest(ours, upstream_lists)
         print(f"  DRIFT {name:14} no upstream list matches these {len(ours)} boundaries")
         print(f"        ours:     {fmt(ours)}")
@@ -338,7 +391,7 @@ def check_buckets(local_tree, upstream_lists):
             print(f"        nearest:  {fmt(cand)}")
             print(f"        first {shared} boundaries agree, then they diverge"
                   if shared else "        they diverge immediately")
-    return drift
+    return drift, unanchored
 
 
 def check_metric_set(local_tree, upstream_names):
@@ -384,17 +437,25 @@ def main(argv=None):
     if args.selftest:
         return selftest()
 
-    print(f"vLLM upstream drift check\n  upstream: {UPSTREAM}\n  local:    {LOCAL}\n")
-    try:
-        with urllib.request.urlopen(UPSTREAM, timeout=TIMEOUT) as resp:
-            upstream_src = resp.read().decode("utf-8")
-    except (urllib.error.URLError, TimeoutError, OSError) as exc:
-        print(f"COULD NOT CHECK: fetching upstream failed: {exc}", file=sys.stderr)
-        print("This is not a drift result — it is an absence of one.", file=sys.stderr)
-        return 2
+    print("vLLM upstream drift check")
+    for url in UPSTREAM:
+        print(f"  upstream: {url}")
+    print(f"  local:    {LOCAL}\n")
+    sources = {}
+    for url in UPSTREAM:
+        try:
+            with urllib.request.urlopen(url, timeout=TIMEOUT) as resp:
+                sources[url] = resp.read().decode("utf-8")
+        except (urllib.error.URLError, TimeoutError, OSError) as exc:
+            print(f"COULD NOT CHECK: fetching {url} failed: {exc}", file=sys.stderr)
+            print("This is not a drift result — it is an absence of one.", file=sys.stderr)
+            return 2
 
-    upstream_lists = numeric_lists(upstream_src, UPSTREAM)
-    upstream_names = metric_names(ast.parse(upstream_src))
+    upstream_lists = [lst for url, src in sources.items()
+                      for lst in numeric_lists(src, url)]
+    upstream_names = set()
+    for src in sources.values():
+        upstream_names |= metric_names(ast.parse(src))
     if not upstream_lists or not upstream_names:
         print("COULD NOT CHECK: no numeric list literals and/or no vllm: metric "
               "names found upstream. The file has probably been restructured; "
@@ -406,11 +467,19 @@ def main(argv=None):
     local_tree = parse_local()
 
     print("histogram buckets:")
-    drift = check_buckets(local_tree, upstream_lists)
+    drift, unanchored = check_buckets(local_tree, upstream_lists)
     print("\nmetric set:")
     drift += check_metric_set(local_tree, upstream_names)
 
     print()
+    if looks_moved(unanchored):
+        print("COULD NOT CHECK: no upstream list holds even half of any of our three "
+              "bucket lists. That is what a list moving to a file this check does "
+              "not fetch looks like, not what an upstream change has ever looked "
+              "like. Find where upstream declares its default buckets now and add "
+              "that file to UPSTREAM. Do NOT edit scripts/llm-sim.py to match: its "
+              "lists may still be right.", file=sys.stderr)
+        return 2
     if drift:
         print(f"{drift} bucket list(s) and/or metric name(s) have drifted from "
               f"upstream vLLM.")

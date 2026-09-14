@@ -69,7 +69,9 @@ v0.6.x while the V1 engine had moved on.
   emits the old names alongside — see
   [llm-simulation.md](llm-simulation.md#which-engines-names).
 - **Bucket boundaries — V1.** `TTFT_BUCKETS`, `TPOT_BUCKETS` and `E2E_BUCKETS` are
-  transcribed verbatim from `vllm/v1/metrics/loggers.py`.
+  transcribed verbatim from upstream's defaults, which live in
+  `vllm/v1/metrics/buckets.py` since 2026-09-11 (`d5a9d0f59`, #48866) and were in
+  `loggers.py` before. The move changed no number.
 
 The second was the more dangerous, and it is worth being precise about why. A wrong
 metric *name* fails loudly — the panel is blank and you go looking. A wrong *bucket
@@ -93,11 +95,21 @@ gained sub-second resolution (`0.3/0.5/0.8`) it previously had none of.
 
 ## Keeping them honest
 
-`scripts/check-vllm-buckets.py` fetches `loggers.py` and checks **both** halves of the
-surface: each of the three bucket lists still appears there verbatim, and every `vllm:`
-name this repo emits is still declared upstream. It runs weekly in CI beside the
+`scripts/check-vllm-buckets.py` fetches `buckets.py` and `loggers.py` and checks **both**
+halves of the surface: each of the three bucket lists still appears upstream verbatim, and
+every `vllm:` name this repo emits is still declared there. It runs weekly in CI beside the
 Helm-chart drift detection — **scheduled and dispatch only**, so an upstream release
 never reddens a contributor's pull request.
+
+⚠️ **A list moving to a file the check does not fetch looks exactly like drift.** On
+2026-09-14 the weekly run reported all three lists as drifted, and told the reader to edit
+`llm-sim.py`, three days after upstream had moved them unchanged from `loggers.py` into
+`buckets.py` ([#49](https://github.com/ChrisAdkin8/k8s-ai-observability/issues/49)).
+Following that advice would have broken lists that were still right. The check now reads
+both files. And when no upstream list holds even half of any of our three, it reports
+"could not check" rather than drift: every real change so far has kept most of a list,
+and a move keeps none. The threshold's reasoning, and the three cases its selftest pins,
+are in `looks_moved()`.
 
 It exists because nothing else could have caught this. Every other test in this repo
 reads the simulator, and the simulator was perfectly consistent with itself — it was
