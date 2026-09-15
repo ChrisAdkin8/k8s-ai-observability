@@ -2,7 +2,9 @@
 
 Time to first token and its error budget, inter-token latency, throughput, queue depth, KV-cache usage and prefix-cache reuse for vLLM - every panel broken out `by (model_name)`, so a saturated tenant is never averaged into a healthy one.
 
-Built for a **simulated** vLLM fleet - it ships with [k8s-ai-observability](https://github.com/ChrisAdkin8/k8s-ai-observability), a rig that stands up GPU and LLM observability with no GPU and no model weights - but the queries are plain vLLM PromQL against the **V1** metric surface. Build the board and its alerts here, point them at a real deployment afterwards.
+The queries are plain vLLM PromQL against the **V1** metric surface, so the board works against a **real** vLLM deployment once the recording rules below are applied. The few panels that read simulator-only metrics stay blank there; [trimming](#trimming-it-for-a-real-deployment) lists them.
+
+**Tested GPU-free** means the board, its recording rules and its alerts were built and checked without a GPU or model weights. They ship with [k8s-ai-observability](https://github.com/ChrisAdkin8/k8s-ai-observability), a rig that runs them against a simulated vLLM fleet whose values are known: `promtool` tests cover both sides of every alert threshold, and an acceptance suite checks that the metrics flow and the board loads in Grafana. Because the simulator uses vLLM's own bucket boundaries, it is also where the percentile traps described below were measured. Build the board and its alerts here, point them at a real deployment afterwards.
 
 The first panel is the whole design: two tenants either side of the 2s alert threshold, identical code, one degraded. A board that summed them would show neither.
 
