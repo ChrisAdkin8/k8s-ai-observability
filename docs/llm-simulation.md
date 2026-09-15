@@ -337,14 +337,16 @@ Three numbers interlock, and changing one means re-checking the others:
 ### Why an observed steady p95 runs higher than ~0.1s
 
 `~0.1s` is what the arithmetic above **models**: with the queue empty, TTFT is
-`base_ttft_seconds` plus jitter. A live capture routinely reads several times that — the
-screenshot in the README shows **~480 ms** — and the reason is in the same arithmetic
-rather than in a fault.
+`base_ttft_seconds` plus jitter. A live capture often reads several times that (**~440
+ms** minutes after an install on 2026-09-15, **~480 ms** in the README's 2026-08-01
+screenshot), and the reason is in the same arithmetic rather than in a fault. A window in
+which the batch never fills reads the model instead: the current README screenshot shows
+**~99 ms**, its batch peaking at 14 of 16.
 
 By Little's Law the steady tenant's mean concurrency is `arrival_rate_rps × service time`
 = `1.8 × 5.84` = **10.5, against a `max_concurrency` of 16**. That is a batch two-thirds
 full *on average*, and arrivals are Poisson (`_interarrival()` draws from
-`rng.expovariate`), so it reaches 16 regularly. Every arrival that lands while it is full
+`rng.expovariate`), so it reaches 16 often, if not in every window. Every arrival that lands while it is full
 waits, and reported TTFT is measured queue wait plus prefill.
 
 ⚠️ **The `waiting` gauge can read flat zero throughout while that happens, and the two are
@@ -356,7 +358,7 @@ histogram answers "what did requests actually experience". When they disagree, t
 histogram is the one describing your users.
 
 None of this moves the demonstration, which is the point of the two tenants rather than the
-absolute figures: ~480 ms is still more than an order of magnitude below the 2s threshold,
+absolute figures: even ~480 ms is more than an order of magnitude below the 2s threshold,
 and the saturated tenant sits two orders above it.
 
 A malformed profile is never fatal: the simulator logs the problem, keeps the last good

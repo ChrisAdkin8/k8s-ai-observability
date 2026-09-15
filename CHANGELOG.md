@@ -119,6 +119,18 @@ Comparison links are at the foot of this file, one per released version.
   SLO at `le="2"` that can never fire, a prefill p95 read 3.03x high, and the panels an
   engine upgrade blanks. The method paragraph moved to "Contributing and support".
 
+- **Both dashboard screenshots retaken, and the social card rebuilt from the new one.**
+  Their breadcrumbs showed the old titles, and the GPU one is the image on its grafana.com
+  page. Taken on kind at the originals' geometry (the same 2400x1050 and 2400x1381 after
+  `optimize-images.py`), with `verify.sh` passing first. The card's crop was re-measured,
+  as its script requires after a retake: the edges had moved by one or two pixels from the
+  old fractions, enough to shave the top panel's border.
+
+  The new LLM shot's healthy tenant reads ~99 ms, not the ~480 ms the README's note
+  explained, because its batch never filled in that window. The note and
+  `docs/llm-simulation.md` now give the range observed rather than one capture's number.
+  `demo.gif` still shows the old titles and is marked as open in `docs/record-demo.md`.
+
 ### Removed
 
 - **The development-loop harness, moved out of this repository**: the `/spike-loop` skill

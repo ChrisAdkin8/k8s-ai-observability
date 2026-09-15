@@ -46,9 +46,12 @@ RULE = (38, 42, 51)
 #
 # So: RE-CHECK THIS CROP WHENEVER llm-dashboard.png IS RETAKEN. The row boundaries
 # are measurable — scan the source for rows that are uniformly page-background and
-# take the gutters between panels. On the current capture they are 0.0565-0.2252
-# (row 1) and 0.2288-0.3968 (row 2), which is where the y values below come from.
-FRAC = (0.0908, 0.0565, 0.9792, 0.3968)     # x0, y0, x1, y1
+# take the gutters between panels. On the 2026-09-15 retake they are 0.0558-0.2238
+# (row 1) and 0.2259-0.3946 (row 2), and the board's edges 0.0900-0.9771, which is
+# where the values below come from. (The 2026-08-01 capture measured 0.0565-0.2252
+# and 0.2288-0.3968 with 0.0908-0.9792: close, and still enough to shave the top
+# panel's border had they been kept.)
+FRAC = (0.0900, 0.0558, 0.9771, 0.3946)     # x0, y0, x1, y1
 
 src = Image.open(SRC).convert("RGB")
 sw, sh = src.size

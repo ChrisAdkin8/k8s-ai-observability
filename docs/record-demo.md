@@ -19,6 +19,11 @@ screen changes, so the gaps between frame timestamps *are* the inactive stretche
 holds over 2s were capped at 1.5s. See the `[Unreleased]` entry in `CHANGELOG.md` for that
 part.
 
+⚠️ **The GIF still needs re-recording for the board titles.** It shows "GPU Simulation" and
+"LLM Simulation", which the boards stopped being called on 2026-09-15
+(`manifests/dashboards/README.md`). The two still screenshots were retaken that day; this
+is the one visual asset left with the old names, and it needs a human at a terminal.
+
 ⚠️ **Unverified:** neither source is in the repo, so this page is not runnable from a clean
 clone. That is deliberate for the master, which git would keep forever, but it means a
 rebuild depends on files only on the author's machine. Whether the 45s cut is small enough

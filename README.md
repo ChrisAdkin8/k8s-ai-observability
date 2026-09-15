@@ -109,11 +109,14 @@ simulators. `sim-llama-3-8b-steady` answers in ~120 ms; `sim-llama-3-8b-saturate
 a p95 of 78s with 16 requests running and 160 queued behind it. Every panel aggregates
 `by (model_name)`, so the overloaded tenant is never averaged into the healthy one.
 
-> **The screenshot's healthy tenant reads ~480 ms rather than ~120 ms**, with its queue flat
-> at zero throughout. Both are right: `~120 ms` is what the profile arithmetic models, while
-> a live capture catches a batch that fills often enough for some requests to wait, which a
-> 15s-sampled gauge misses and the TTFT histogram records in full. It is still an order of
-> magnitude under the 2s threshold, which is what the panel exists to show.
+> **The healthy tenant's p95 depends on the window you capture.** This screenshot reads
+> ~99 ms, close to the ~120 ms the profile arithmetic models: in these fifteen minutes its
+> batch peaked at 14 of 16 slots, so no request waited. A capture from the same cluster
+> minutes after install read ~440 ms, and the previous screenshot ~480 ms, with the queue
+> gauge flat at zero in both. All three are right. The batch is two-thirds full on average
+> and fills now and then, every request that arrives while it is full waits, and a
+> 15s-sampled gauge misses what the TTFT histogram records in full. Either way it sits an
+> order of magnitude or more under the 2s threshold, which is what the panel exists to show.
 > [The arithmetic](docs/llm-simulation.md#why-an-observed-steady-p95-runs-higher-than-01s).
 
 ## What transfers, and what doesn't
