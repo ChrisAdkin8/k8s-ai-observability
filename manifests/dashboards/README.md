@@ -114,11 +114,12 @@ datasource it expects (Prometheus). Ready to paste:
 
 **`gpu-sim-dcgm.json`** — *NVIDIA DCGM GPU Overview (tested GPU-free)*
 
-> Utilisation, memory, temperature and power across simulated NVIDIA GPUs, from
-> DCGM-format metrics. Works against a real `dcgm-exporter` unchanged. Temperature and
-> power are recording rules here rather than exporter output — import the rules from
-> https://github.com/ChrisAdkin8/k8s-ai-observability or those two panels stay blank
-> against a simulated source. Prompts for your Prometheus datasource on import.
+> Utilisation, memory, temperature and power across NVIDIA GPUs, from DCGM-format
+> metrics. Works against a real `dcgm-exporter` unchanged, and was built and tested
+> without a GPU. Against a simulated source such as fake-gpu-operator, which emits no
+> temperature or power, apply the two recording rules from
+> https://github.com/ChrisAdkin8/k8s-ai-observability or those two panels stay blank.
+> Prompts for your Prometheus datasource on import.
 
 For the catalog page's long-form description, paste
 [`gpu-sim-dcgm.grafana-com.md`](gpu-sim-dcgm.grafana-com.md) — the same board written for
