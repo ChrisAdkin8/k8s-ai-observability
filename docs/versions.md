@@ -19,11 +19,11 @@ in `scripts/config.sh` at install time.
 | LLM simulator base image (cluster) | `manifests/llm/20-simulators.yaml` | `python:3.12-slim` — the ConfigMap-mounted path, which is how the rig itself runs it |
 | LLM simulator base image (published) | `Dockerfile` | `python:3.12-slim` — the same base for `ghcr.io/<owner>/vllm-metrics-sim` |
 | Published simulator image tag | `charts/.../Chart.yaml` (`appVersion`) | the repo's release tag. The chart's `llm.image.tag` defaults to it; see below |
-| Helm chart version | `charts/.../Chart.yaml` (`version`) | `0.2.5` — moves independently of `appVersion`, and on **every** release, because a release publishes the chart whether or not a template changed |
+| Helm chart version | `charts/.../Chart.yaml` (`version`) | `0.2.6` — moves independently of `appVersion`, and on **every** release, because a release publishes the chart whether or not a template changed |
 | Helm (CI) | `.github/workflows/ci.yml` (`HELM_VERSION`) | `3.21.3` — **v3, not the v4 line.** Helm 4 is a major this repo has not been validated against, and CI should exercise what users run |
 | `kubectl` image for `helm test` | `charts/.../values.yaml` (`tests.image`) | `alpine/k8s:1.36.2` — ⚠️ **was `bitnami/kubectl:1.31`, which no longer exists**: Bitnami retired much of its public Docker Hub catalogue, so the test pod sat in `ImagePullBackOff`. Needs kubectl **and** `/bin/bash`, which rules out the distroless `registry.k8s.io/kubectl`. Its minor must stay within +/-1 of `K8S_VERSION`; nothing enforces that since `check-doc-claims.py` left on 2026-08-12, so re-check it when either moves |
-| DCGM dashboard | `manifests/dashboards/gpu-sim-dcgm.json` | shipped in-repo, published as grafana.com [25618](https://grafana.com/grafana/dashboards/25618-gpu-simulation-dcgm-overview/) (board 12239 is an optional swap-in) |
-| vLLM dashboard | `manifests/dashboards/llm-sim-overview.json` | shipped in-repo, published as grafana.com [25620](https://grafana.com/grafana/dashboards/25620-llm-simulation-vllm-serving-overview/) |
+| DCGM dashboard | `manifests/dashboards/gpu-sim-dcgm.json` | shipped in-repo, published as grafana.com [25618](https://grafana.com/grafana/dashboards/25618/) (board 12239 is an optional swap-in) |
+| vLLM dashboard | `manifests/dashboards/llm-sim-overview.json` | shipped in-repo, published as grafana.com [25620](https://grafana.com/grafana/dashboards/25620/) |
 | aws provider | `terraform/eks/versions.tf` | `~> 6.55` |
 | eks module | `terraform/eks/main.tf` | `~> 21.24.0` — patch-level on purpose; the reason is in the comment above it |
 | vpc module | `terraform/eks/main.tf` | `~> 5.21.0` — patch-level on purpose, same reason |
@@ -69,7 +69,9 @@ v0.6.x while the V1 engine had moved on.
   emits the old names alongside — see
   [llm-simulation.md](llm-simulation.md#which-engines-names).
 - **Bucket boundaries — V1.** `TTFT_BUCKETS`, `TPOT_BUCKETS` and `E2E_BUCKETS` are
-  transcribed verbatim from `vllm/v1/metrics/loggers.py`.
+  transcribed verbatim from upstream's defaults, which live in
+  `vllm/v1/metrics/buckets.py` since 2026-09-11 (`d5a9d0f59`, #48866) and were in
+  `loggers.py` before. The move changed no number.
 
 The second was the more dangerous, and it is worth being precise about why. A wrong
 metric *name* fails loudly — the panel is blank and you go looking. A wrong *bucket
@@ -93,11 +95,21 @@ gained sub-second resolution (`0.3/0.5/0.8`) it previously had none of.
 
 ## Keeping them honest
 
-`scripts/check-vllm-buckets.py` fetches `loggers.py` and checks **both** halves of the
-surface: each of the three bucket lists still appears there verbatim, and every `vllm:`
-name this repo emits is still declared upstream. It runs weekly in CI beside the
+`scripts/check-vllm-buckets.py` fetches `buckets.py` and `loggers.py` and checks **both**
+halves of the surface: each of the three bucket lists still appears upstream verbatim, and
+every `vllm:` name this repo emits is still declared there. It runs weekly in CI beside the
 Helm-chart drift detection — **scheduled and dispatch only**, so an upstream release
 never reddens a contributor's pull request.
+
+⚠️ **A list moving to a file the check does not fetch looks exactly like drift.** On
+2026-09-14 the weekly run reported all three lists as drifted, and told the reader to edit
+`llm-sim.py`, three days after upstream had moved them unchanged from `loggers.py` into
+`buckets.py` ([#49](https://github.com/ChrisAdkin8/k8s-ai-observability/issues/49)).
+Following that advice would have broken lists that were still right. The check now reads
+both files. And when no upstream list holds even half of any of our three, it reports
+"could not check" rather than drift: every real change so far has kept most of a list,
+and a move keeps none. The threshold's reasoning, and the three cases its selftest pins,
+are in `looks_moved()`.
 
 It exists because nothing else could have caught this. Every other test in this repo
 reads the simulator, and the simulator was perfectly consistent with itself — it was

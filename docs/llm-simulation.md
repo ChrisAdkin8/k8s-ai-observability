@@ -17,7 +17,7 @@ cheaply, then point them at a real vLLM deployment unchanged.
 ./scripts/grafana.sh eks        # or gke — opens the GPU and LLM boards together
 ```
 
-→ **<http://localhost:3000/d/llm-sim-overview>** — *LLM Simulation — vLLM Serving Overview*
+→ **<http://localhost:3000/d/llm-sim-overview>** — *vLLM Serving Overview (tested GPU-free)*
 
 The first panel is the whole story: two tenants, identical code, one healthy and one
 saturated, with the alert threshold drawn across them.
@@ -183,7 +183,7 @@ affordance, not a fidelity claim. Set it per pod with `LLM_SIM_VLLM_SURFACE`.
 TTFT's entire tail above 10s (`15/20/30/45/60/90/120` became `20/40/80/160/640/2560`),
 and the saturated tenant sits at ~58s — inside it. Same simulated latency, different
 reported p95, purely from the resolution it is measured at. All three lists are now
-transcribed from `vllm/v1/metrics/loggers.py` and
+transcribed from `vllm/v1/metrics/buckets.py` (in `loggers.py` until 2026-09-11) and
 [drift-checked weekly](versions.md#keeping-them-honest):
 
 ```sh
@@ -337,14 +337,16 @@ Three numbers interlock, and changing one means re-checking the others:
 ### Why an observed steady p95 runs higher than ~0.1s
 
 `~0.1s` is what the arithmetic above **models**: with the queue empty, TTFT is
-`base_ttft_seconds` plus jitter. A live capture routinely reads several times that — the
-screenshot in the README shows **~480 ms** — and the reason is in the same arithmetic
-rather than in a fault.
+`base_ttft_seconds` plus jitter. A live capture often reads several times that (**~440
+ms** minutes after an install on 2026-09-15, **~480 ms** in the README's 2026-08-01
+screenshot), and the reason is in the same arithmetic rather than in a fault. A window in
+which the batch never fills reads the model instead: the current README screenshot shows
+**~99 ms**, its batch peaking at 14 of 16.
 
 By Little's Law the steady tenant's mean concurrency is `arrival_rate_rps × service time`
 = `1.8 × 5.84` = **10.5, against a `max_concurrency` of 16**. That is a batch two-thirds
 full *on average*, and arrivals are Poisson (`_interarrival()` draws from
-`rng.expovariate`), so it reaches 16 regularly. Every arrival that lands while it is full
+`rng.expovariate`), so it reaches 16 often, if not in every window. Every arrival that lands while it is full
 waits, and reported TTFT is measured queue wait plus prefill.
 
 ⚠️ **The `waiting` gauge can read flat zero throughout while that happens, and the two are
@@ -356,7 +358,7 @@ histogram answers "what did requests actually experience". When they disagree, t
 histogram is the one describing your users.
 
 None of this moves the demonstration, which is the point of the two tenants rather than the
-absolute figures: ~480 ms is still more than an order of magnitude below the 2s threshold,
+absolute figures: even ~480 ms is more than an order of magnitude below the 2s threshold,
 and the saturated tenant sits two orders above it.
 
 A malformed profile is never fatal: the simulator logs the problem, keeps the last good

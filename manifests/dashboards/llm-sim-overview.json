@@ -10,7 +10,7 @@
     "vllm",
     "simulation"
   ],
-  "title": "LLM Simulation \u2014 vLLM Serving Overview",
+  "title": "vLLM Serving Overview (tested GPU-free)",
   "uid": "llm-sim-overview",
   "time": {
     "from": "now-15m",

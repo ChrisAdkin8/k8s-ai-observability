@@ -14,7 +14,7 @@ rules and dashboards and **leaves your monitoring stack alone**.
 
 ```sh
 helm install rig oci://ghcr.io/chrisadkin8/charts/k8s-ai-observability \
-  --version 0.2.5 \
+  --version 0.2.6 \
   --set releaseLabel=<your monitoring release>
 helm test rig --logs                              # ← do not skip this
 ```

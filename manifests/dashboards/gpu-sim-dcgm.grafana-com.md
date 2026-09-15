@@ -1,13 +1,18 @@
-# GPU Simulation - DCGM Overview
+# NVIDIA DCGM GPU Overview (tested GPU-free)
 
 Utilisation, memory, temperature and power across NVIDIA GPUs, from DCGM-format metrics.
 Four time-series panels, one series per GPU, no filtering to set up first.
 
-Built for a **simulated** GPU fleet - the board ships with
+Every query is plain DCGM PromQL, so the board works against a **real** `dcgm-exporter`
+unchanged.
+
+**Tested GPU-free** means the board and the alerts that go with it were built and checked
+without a GPU. They ship with
 [k8s-ai-observability](https://github.com/ChrisAdkin8/k8s-ai-observability), a rig that
-stands up GPU and LLM observability with no GPU - but every query is plain DCGM PromQL,
-so it works against a **real** `dcgm-exporter` unchanged. That is the point of it: build
-the board without hardware, keep it when the hardware arrives.
+runs them against a simulated GPU fleet whose values are known: `promtool` tests cover both
+sides of every alert threshold, and an acceptance suite checks that the metrics flow and
+the board loads in Grafana. Build the board without hardware, keep it when the hardware
+arrives.
 
 ![Four time-series panels tracking utilisation, memory, temperature and power across eight
 simulated GPUs](https://raw.githubusercontent.com/ChrisAdkin8/k8s-ai-observability/main/docs/gpu-dashboard.png)
@@ -145,6 +150,8 @@ Original to [k8s-ai-observability](https://github.com/ChrisAdkin8/k8s-ai-observa
 not derived from another catalog board. MIT licensed.
 
 The repo has this board wired up end to end - the exporter, the recording rules, the
-alerts and their tests, and a companion **vLLM serving** board - on kind, EKS, GKE, or
+alerts and their tests, and the companion
+[vLLM Serving Overview (tested GPU-free)](https://grafana.com/grafana/dashboards/25620/)
+board - on kind, EKS, GKE, or
 `docker compose up` with no Kubernetes at all. If the panels here are empty and you want
 to see them populated first, that takes about a minute.

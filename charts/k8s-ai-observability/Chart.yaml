@@ -49,7 +49,7 @@ type: application
 # releases of history says this is not. 0.2.0 is deliberately NOT v0.7.x, so the
 # independence above stays visible at a glance, and deliberately not 1.0.0 while
 # artifacthub.io/prerelease below is still "true".
-version: 0.2.5
+version: 0.2.6
 appVersion: "v0.10.0"
 
 home: https://github.com/ChrisAdkin8/k8s-ai-observability
@@ -102,7 +102,19 @@ annotations:
   # A second term for search ranking. The chart's own name does not contain
   # "vllm" or "gpu", which are the words someone arriving from the Grafana
   # catalog boards (25618, 25620) would actually type.
-  artifacthub.io/alternativeName: vllm-gpu-observability
+  #
+  # ⚠️ IT MUST CONTAIN THE NAME, OR BE CONTAINED BY IT. Artifact Hub rejects the
+  # whole version otherwise, and says so only in the repository's tracking
+  # errors, which nothing here reads: `vllm-gpu-observability` failed that way
+  # on every version from 0.2.0 to 0.2.5, so the chart was never listed. The
+  # rule is a plain substring test in either direction
+  # (artifacthub/hub internal/pkg/manager.go, checked 2026-09-15). A superset
+  # keeps the point of the annotation: it is indexed at the same weight as the
+  # name, and Postgres full-text search indexes each part of a hyphenated word
+  # as well as the whole, so "vllm" and "gpu" still rank. Measured with
+  # to_tsvector on Postgres 16, 2026-09-15: 'vllm' and 'gpu' are lexemes of
+  # this value, and neither is a lexeme of the bare name.
+  artifacthub.io/alternativeName: vllm-gpu-k8s-ai-observability
   # ⚠️ STAYS "true" FOR THE FIRST LISTING, and the condition for removing it is
   # written here rather than left to feel — otherwise it never comes off, or it
   # comes off the day someone thinks the chart looks finished.

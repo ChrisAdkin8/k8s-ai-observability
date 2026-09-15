@@ -107,6 +107,30 @@ Comparison links are at the foot of this file, one per released version.
   from. They had drifted in standing law: a wrong run id, and one total no run ever
   produced.
 
+- **The grafana.com boards are named for the hardware, not the rig**: *NVIDIA DCGM GPU
+  Overview (tested GPU-free)* and *vLLM Serving Overview (tested GPU-free)*. "Simulation" in
+  the title told someone looking for a board for their real exporter to scroll past one
+  written against the real metric surface. The uids did not move, so installed boards
+  update in place. Links to the catalog now use the bare id, which grafana.com redirects to
+  the current slug, because a stale slug returns 404. The catalog shows the new titles once
+  both are re-uploaded as revisions (`manifests/dashboards/README.md`).
+
+- **The README leads with the bugs the rig catches** rather than with how it is built: an
+  SLO at `le="2"` that can never fire, a prefill p95 read 3.03x high, and the panels an
+  engine upgrade blanks. The method paragraph moved to "Contributing and support".
+
+- **Both dashboard screenshots retaken, and the social card rebuilt from the new one.**
+  Their breadcrumbs showed the old titles, and the GPU one is the image on its grafana.com
+  page. Taken on kind at the originals' geometry (the same 2400x1050 and 2400x1381 after
+  `optimize-images.py`), with `verify.sh` passing first. The card's crop was re-measured,
+  as its script requires after a retake: the edges had moved by one or two pixels from the
+  old fractions, enough to shave the top panel's border.
+
+  The new LLM shot's healthy tenant reads ~99 ms, not the ~480 ms the README's note
+  explained, because its batch never filled in that window. The note and
+  `docs/llm-simulation.md` now give the range observed rather than one capture's number.
+  `demo.gif` still shows the old titles and is marked as open in `docs/record-demo.md`.
+
 ### Removed
 
 - **The development-loop harness, moved out of this repository**: the `/spike-loop` skill
@@ -168,6 +192,23 @@ Comparison links are at the foot of this file, one per released version.
   its own rule that absent conditions mean "everything" it matched every branch ruleset on
   every real run. The committed fixtures carried a shape GitHub does not produce; they now
   mirror the API.
+
+- **The chart was never listed on Artifact Hub.** `artifacthub.io/alternativeName:
+  vllm-gpu-observability` breaks Artifact Hub's rule that an alternative name contain the
+  chart's name or be contained by it, so every version from 0.2.0 to 0.2.5 was rejected at
+  indexing. The rejection showed only in the repository's tracking errors, which nothing
+  here reads. It is now `vllm-gpu-k8s-ai-observability`, which passes and still indexes
+  "vllm" and "gpu" (measured with `to_tsvector`; the reasoning is in `Chart.yaml`). Chart
+  `0.2.6`.
+
+- **The weekly drift check went red on a file move, and advised the wrong fix.** On
+  2026-09-11 vLLM moved its default bucket lists from `loggers.py` into `buckets.py` without
+  changing a number (vllm-project/vllm#48866). The check read `loggers.py` alone, reported
+  all three lists as drifted, and told the reader to edit `llm-sim.py`, whose lists were
+  still right ([#49](https://github.com/ChrisAdkin8/k8s-ai-observability/issues/49)). It now
+  fetches both files, and reports "could not check" rather than drift when no upstream list
+  holds even half of any of our three, which is what a move looks like and no real change
+  has. `--selftest` pins the move, a new low-end bucket and V1's tail change.
 
 ## [0.10.0] — 2026-08-05
 
@@ -1415,8 +1456,8 @@ the alternative paths rotting.
   variables and stay a deliberate manual decision; the file says so and says why.
 
 - **Both dashboards are published to the grafana.com catalog**: the GPU board is
-  [25618](https://grafana.com/grafana/dashboards/25618-gpu-simulation-dcgm-overview/) and the vLLM
-  board is [25620](https://grafana.com/grafana/dashboards/25620-llm-simulation-vllm-serving-overview/).
+  [25618](https://grafana.com/grafana/dashboards/25618/) and the vLLM
+  board is [25620](https://grafana.com/grafana/dashboards/25620/).
   They can now be imported by id into any Grafana, without cloning this repo. The ids are recorded in
   three places on purpose, and all three are the ones the repo already told you to update: the table
   at the top of `manifests/dashboards/README.md`, `docs/versions.md`, and the README.

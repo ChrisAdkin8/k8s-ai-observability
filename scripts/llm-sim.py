@@ -77,11 +77,12 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 # dashboard or SLO tuned against made-up buckets silently fails to transfer to a
 # real deployment — which is the whole point of this simulator.
 #
-# SOURCE OF TRUTH: vllm/v1/metrics/loggers.py on vllm-project/vllm. These are
-# transcribed from it verbatim, in order. `scripts/check-vllm-buckets.py` diffs
-# them against that file and runs weekly in CI, because these MOVE — an upstream
-# PR to add finer-grained low-end latency buckets was open when they were last
-# transcribed. Do not hand-edit one without re-running that check.
+# SOURCE OF TRUTH: vllm/v1/metrics/buckets.py on vllm-project/vllm (loggers.py
+# until 2026-09-11). These are transcribed from it verbatim, in order.
+# `scripts/check-vllm-buckets.py` diffs them against upstream weekly in CI,
+# because these MOVE — an upstream PR to add finer-grained low-end latency
+# buckets was open when they were last transcribed. Do not hand-edit one without
+# re-running that check.
 #
 # ⚠️ THESE WERE WRONG UNTIL THE V1 SYNC. Releases 0.1.0 and 0.2.0 carried the
 # v0.6.x layout, whose TTFT tail (15/20/30/45/60/90/120) V1 replaced entirely

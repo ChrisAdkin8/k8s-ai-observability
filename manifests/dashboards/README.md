@@ -15,14 +15,28 @@ into place, and no egress to grafana.com is needed at install time.
 
 | Board | File | uid | grafana.com id | Covers |
 |-------|------|-----|--|--------|
-| GPU Simulation — DCGM Overview | `gpu-sim-dcgm.json` | `gpu-sim-dcgm` | [25618](https://grafana.com/grafana/dashboards/25618-gpu-simulation-dcgm-overview/) | GPU util / memory / temp / power |
-| LLM Simulation — vLLM Serving Overview | `llm-sim-overview.json` | `llm-sim-overview` | [25620](https://grafana.com/grafana/dashboards/25620-llm-simulation-vllm-serving-overview/) | First-token latency and its error budget, throughput, queue depth, KV cache, prefix-cache reuse |
+| NVIDIA DCGM GPU Overview (tested GPU-free) | `gpu-sim-dcgm.json` | `gpu-sim-dcgm` | [25618](https://grafana.com/grafana/dashboards/25618/) | GPU util / memory / temp / power |
+| vLLM Serving Overview (tested GPU-free) | `llm-sim-overview.json` | `llm-sim-overview` | [25620](https://grafana.com/grafana/dashboards/25620/) | First-token latency and its error budget, throughput, queue depth, KV cache, prefix-cache reuse |
 
 **The filename is the uid.** `install.sh` derives the ConfigMap name from it
 (`<uid>-dashboard`), and `scripts/config.sh` builds the `/d/<uid>` deep link that
 `install.sh` and `grafana.sh` advertise. `assert_dashboard_contract` fails the install if
 a filename and the `uid` inside it ever disagree — a mismatch would otherwise produce a
 confident link to a Grafana 404. Rename the file and the uid together, or neither.
+
+**The titles name the hardware, not the rig.** Until 2026-09-15 they read "GPU Simulation"
+and "LLM Simulation", which tells someone browsing the catalog for a board to put on
+their real DCGM exporter or vLLM deployment to scroll past, when every query is written
+against the real metric surface. "Tested GPU-free" says how they were built without
+saying what they are for. The uids did not move, so an installed board updates in place.
+
+⚠️ **The catalog still needs both re-uploaded** as revisions of 25618 and 25620 (never new
+uploads: `CLAUDE.md` rule 9) before grafana.com shows the new titles. Every link to them in
+this repo uses the bare id, `grafana.com/grafana/dashboards/25618/`, which grafana.com
+redirects to the current slug. A link with the slug written out breaks if the slug stops
+matching: measured 2026-09-15, a wrong slug returns 404 and the bare id a 301. Whether a
+new title changes the slug is unverified until the first re-upload; the bare id works
+either way.
 
 ## Things about these boards that the JSON cannot tell you
 
@@ -98,20 +112,21 @@ Sign in at [grafana.com](https://grafana.com) → your org → **Dashboards** �
 credentials, so it is a manual step by nature. Each needs a name, a description and the
 datasource it expects (Prometheus). Ready to paste:
 
-**`gpu-sim-dcgm.json`** — *GPU Simulation — DCGM Overview*
+**`gpu-sim-dcgm.json`** — *NVIDIA DCGM GPU Overview (tested GPU-free)*
 
-> Utilisation, memory, temperature and power across simulated NVIDIA GPUs, from
-> DCGM-format metrics. Works against a real `dcgm-exporter` unchanged. Temperature and
-> power are recording rules here rather than exporter output — import the rules from
-> https://github.com/ChrisAdkin8/k8s-ai-observability or those two panels stay blank
-> against a simulated source. Prompts for your Prometheus datasource on import.
+> Utilisation, memory, temperature and power across NVIDIA GPUs, from DCGM-format
+> metrics. Works against a real `dcgm-exporter` unchanged, and was built and tested
+> without a GPU. Against a simulated source such as fake-gpu-operator, which emits no
+> temperature or power, apply the two recording rules from
+> https://github.com/ChrisAdkin8/k8s-ai-observability or those two panels stay blank.
+> Prompts for your Prometheus datasource on import.
 
 For the catalog page's long-form description, paste
 [`gpu-sim-dcgm.grafana-com.md`](gpu-sim-dcgm.grafana-com.md) — the same board written for
 someone arriving with their own Prometheus and no knowledge of this repo, so every link in
 it is absolute and the derived-series caveat is stated in full rather than referenced.
 
-**`llm-sim-overview.json`** — *LLM Simulation — vLLM Serving Overview*
+**`llm-sim-overview.json`** — *vLLM Serving Overview (tested GPU-free)*
 
 > Time to first token and its error budget, inter-token latency, throughput, queue depth,
 > KV-cache usage and prefix-cache reuse for vLLM, broken out `by (model_name)` so a

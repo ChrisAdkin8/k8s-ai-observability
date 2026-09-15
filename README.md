@@ -2,8 +2,8 @@
 [![Release](https://img.shields.io/github/v/release/ChrisAdkin8/k8s-ai-observability?color=blue)](https://github.com/ChrisAdkin8/k8s-ai-observability/releases)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 [![Kubernetes](https://img.shields.io/badge/kubernetes-v1.36.1-326ce5.svg)](kind/gpu-sim.yaml)
-[![GPU board](https://img.shields.io/badge/grafana.com-25618-F46800.svg)](https://grafana.com/grafana/dashboards/25618-gpu-simulation-dcgm-overview/)
-[![vLLM board](https://img.shields.io/badge/grafana.com-25620-F46800.svg)](https://grafana.com/grafana/dashboards/25620-llm-simulation-vllm-serving-overview/)
+[![GPU board](https://img.shields.io/badge/grafana.com-25618-F46800.svg)](https://grafana.com/grafana/dashboards/25618/)
+[![vLLM board](https://img.shields.io/badge/grafana.com-25620-F46800.svg)](https://grafana.com/grafana/dashboards/25620/)
 [![Simulator image](https://img.shields.io/badge/ghcr.io-vllm--metrics--sim-2496ed.svg)](https://github.com/ChrisAdkin8/k8s-ai-observability/pkgs/container/vllm-metrics-sim)
 [![Helm chart](https://img.shields.io/badge/ghcr.io-helm%20chart-0f1689.svg)](https://github.com/ChrisAdkin8/k8s-ai-observability/pkgs/container/charts%2Fk8s-ai-observability)
 [![Artifact Hub](https://img.shields.io/endpoint?url=https://artifacthub.io/badge/repository/k8s-ai-observability)](https://artifacthub.io/packages/search?repo=k8s-ai-observability)
@@ -14,10 +14,22 @@
 a simulated vLLM serving stack, and Prometheus + Grafana, on kind, EKS or GKE. No
 hardware, no quota, no drivers, no model weights.
 
-Every line of it is built by one method: a written specification, an adversarial review of
-that specification, a throwaway spike that settles what reading cannot, and only then the
-implementation. [docs/development-method.md](docs/development-method.md) describes how, and
-why the checks matter more here than the code they check.
+Because the rig knows the true value behind every series, it catches the monitoring bugs
+that pass every other test. Three it finds in vLLM monitoring, each of which your real
+deployment has too, because the bucket boundaries and metric names are upstream's:
+
+- **An SLO alert that can never fire.** vLLM's time-to-first-token buckets step
+  `1.0, 2.5, 5.0`. There is no `2.0`, so an objective written as `le="2"` matches no series
+  and its burn-rate alerts stay green forever
+  ([the error budget](docs/llm-simulation.md#the-ttft-error-budget)).
+- **A prefill p95 three times too high.** The first bucket vLLM gives prefill ends at 0.3s,
+  so every sub-300 ms prefill lands in it and `histogram_quantile` interpolates from zero:
+  a 0.095s prefill reads as 0.285s
+  ([the measurement](docs/llm-simulation.md#the-phase-decomposition)).
+- **Panels that go blank after an engine upgrade.** vLLM's V1 engine renamed two metrics
+  and replaced a third with two counters. Nothing errors; the panel just empties.
+  `--vllm-surface both` shows which of your panels an upgrade breaks
+  ([which names moved](docs/llm-simulation.md#which-engines-names)).
 
 ![Four time-series panels tracking utilisation, memory, temperature and power across
 eight simulated GPUs](docs/gpu-dashboard.png)
@@ -67,8 +79,8 @@ See [compose/](compose/) for what it deliberately cannot cover.
 - **Two Grafana dashboards**, one `.json` each and never clicked into place, so a
   re-install reproduces them exactly. Both are in the catalog. Import by id into a Grafana
   you already run:
-  [25618](https://grafana.com/grafana/dashboards/25618-gpu-simulation-dcgm-overview/) (GPU),
-  [25620](https://grafana.com/grafana/dashboards/25620-llm-simulation-vllm-serving-overview/) (vLLM).
+  [25618](https://grafana.com/grafana/dashboards/25618/) (GPU),
+  [25620](https://grafana.com/grafana/dashboards/25620/) (vLLM).
 - **An acceptance suite** ([`scripts/verify.sh`](scripts/verify.sh)) that asserts metrics
   are flowing, both boards render, and the alerts actually reach `firing`.
 - **A weekly check against real vLLM**, which is what makes the claim above *checked*
@@ -97,11 +109,14 @@ simulators. `sim-llama-3-8b-steady` answers in ~120 ms; `sim-llama-3-8b-saturate
 a p95 of 78s with 16 requests running and 160 queued behind it. Every panel aggregates
 `by (model_name)`, so the overloaded tenant is never averaged into the healthy one.
 
-> **The screenshot's healthy tenant reads ~480 ms rather than ~120 ms**, with its queue flat
-> at zero throughout. Both are right: `~120 ms` is what the profile arithmetic models, while
-> a live capture catches a batch that fills often enough for some requests to wait, which a
-> 15s-sampled gauge misses and the TTFT histogram records in full. It is still an order of
-> magnitude under the 2s threshold, which is what the panel exists to show.
+> **The healthy tenant's p95 depends on the window you capture.** This screenshot reads
+> ~99 ms, close to the ~120 ms the profile arithmetic models: in these fifteen minutes its
+> batch peaked at 14 of 16 slots, so no request waited. A capture from the same cluster
+> minutes after install read ~440 ms, and the previous screenshot ~480 ms, with the queue
+> gauge flat at zero in both. All three are right. The batch is two-thirds full on average
+> and fills now and then, every request that arrives while it is full waits, and a
+> 15s-sampled gauge misses what the TTFT histogram records in full. Either way it sits an
+> order of magnitude or more under the 2s threshold, which is what the panel exists to show.
 > [The arithmetic](docs/llm-simulation.md#why-an-observed-steady-p95-runs-higher-than-01s).
 
 ## What transfers, and what doesn't
@@ -332,6 +347,11 @@ you give up.
 - **A change.** [CONTRIBUTING.md](CONTRIBUTING.md) covers the invariants that fail *silently*
   when broken, what to re-check when bumping a pinned version, and what is deliberately out
   of scope.
+- **How it is built.** Every line of it by one method: a written specification, an
+  adversarial review of that specification, a throwaway spike that settles what reading
+  cannot, and only then the implementation.
+  [docs/development-method.md](docs/development-method.md) describes how, and why the
+  checks matter more here than the code they check.
 - **Conduct.** The [Contributor Covenant](CODE_OF_CONDUCT.md) applies to both.
 
 ## Licence
