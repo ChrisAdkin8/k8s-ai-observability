@@ -355,6 +355,10 @@ def selftest():
     v06 = ttft[:16] + (15.0, 20.0, 30.0, 45.0, 60.0, 90.0, 120.0)
     check(overlap(ttft, [v06]) >= MOVED_BELOW,
           "V1's TTFT tail change (17 of 22 kept) stays drift, not a move")
+    # And the verdict itself: a move only when EVERY list is unanchored. One
+    # anchored list means upstream still has our layout somewhere we fetch.
+    check(looks_moved(len(OURS)) and not looks_moved(len(OURS) - 1),
+          "looks_moved() fires only when all three lists are unanchored")
 
     # The v0 aliases must survive being read out of llm-sim.py's surface tables,
     # or every one of them is reported as drift on the next weekly run.
