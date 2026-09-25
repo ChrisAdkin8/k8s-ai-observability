@@ -1,5 +1,14 @@
 # Prompt: Fault injection — fire the alert set against real broken states
 
+> ## ⚠️ STALE since `ce788f4` (2026-08-12): kept as written, not updated
+>
+> Its Background was read on 2026-08-06 and hasn't been re-checked since. `ce788f4` removed
+> `scripts/check-doc-claims.py` and its `doc-claims` preflight task, which this brief cites and
+> relies on in several places (the alert-count check, the cardinality knob, the em-dash rule);
+> that commit also decided the `prompts/` briefs are history and left them as written, so this
+> one is kept unedited apart from this note. Before building from it, write a fresh spec from
+> `ROADMAP.md` against the current tree.
+
 ## Role & Objective
 
 You are a Kubernetes platform engineer working in the `k8s-ai-observability` repo,
