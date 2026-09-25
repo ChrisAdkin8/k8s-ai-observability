@@ -1,5 +1,12 @@
 # Prompt: What an eviction does to an in-flight generation
 
+> ## ⚠️ STALE since `ce788f4` (2026-08-12): kept as written, not updated
+>
+> Its Background was read on 2026-08-03 and hasn't been re-checked since. It cites none of the
+> checks `ce788f4` removed, but that commit also decided the `prompts/` briefs are history and
+> left them as written, so this one is kept unedited apart from this note. Before building from
+> it, write a fresh spec from `ROADMAP.md` against the current tree.
+
 ## Role & Objective
 
 You are a Kubernetes platform engineer working in the `k8s-ai-observability` repo. Four
