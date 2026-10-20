@@ -306,7 +306,7 @@ runs:
     # and a second copy of that six-term expression is a fork waiting to disagree.
     - name: Upload chart diagnostics
       if: always() && steps.diag.outcome != 'skipped'
-      uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+      uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
       with:
         name: chart-diagnostics-${{ github.job }}-${{ github.run_id }}-${{ github.run_attempt }}
         path: /tmp/chart-diag
