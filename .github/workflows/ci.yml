@@ -674,7 +674,7 @@ jobs:
       # ungated login fails every external contribution.
       - name: Log in to Docker Hub (skipped without secrets)
         if: env.HAVE_DOCKERHUB == 'true'
-        uses: docker/login-action@dbcb813823bdd20940b903addbd779551569679f # v4.6.0
+        uses: docker/login-action@8aa5831fb8d48d8f76594c7ddde61ae58019f550 # v4.8.0
         with:
           username: ${{ secrets.DOCKERHUB_USERNAME }}
           password: ${{ secrets.DOCKERHUB_TOKEN }}
@@ -1082,7 +1082,7 @@ jobs:
       # receive them, and an ungated login fails every external contribution.
       - name: Log in to Docker Hub (skipped without secrets)
         if: env.HAVE_DOCKERHUB == 'true'
-        uses: docker/login-action@dbcb813823bdd20940b903addbd779551569679f # v4.6.0
+        uses: docker/login-action@8aa5831fb8d48d8f76594c7ddde61ae58019f550 # v4.8.0
         with:
           username: ${{ secrets.DOCKERHUB_USERNAME }}
           password: ${{ secrets.DOCKERHUB_TOKEN }}
@@ -1253,7 +1253,7 @@ jobs:
       # Gated on the secrets existing, so a fork PR still runs.
       - name: Log in to Docker Hub (skipped without secrets)
         if: env.HAVE_DOCKERHUB == 'true'
-        uses: docker/login-action@dbcb813823bdd20940b903addbd779551569679f # v4.6.0
+        uses: docker/login-action@8aa5831fb8d48d8f76594c7ddde61ae58019f550 # v4.8.0
         with:
           username: ${{ secrets.DOCKERHUB_USERNAME }}
           password: ${{ secrets.DOCKERHUB_TOKEN }}
@@ -1445,7 +1445,7 @@ jobs:
       # path: flakier, but it runs.
       - name: Log in to Docker Hub (skipped without secrets)
         if: env.RUN_STACK == 'true' && env.HAVE_DOCKERHUB == 'true'
-        uses: docker/login-action@dbcb813823bdd20940b903addbd779551569679f # v4.6.0
+        uses: docker/login-action@8aa5831fb8d48d8f76594c7ddde61ae58019f550 # v4.8.0
         with:
           username: ${{ secrets.DOCKERHUB_USERNAME }}
           password: ${{ secrets.DOCKERHUB_TOKEN }}
